@@ -492,6 +492,9 @@ mod tests {
         state.handle(
             MjaiEvent::Ryukyoku {
                 deltas: Some(vec![0, 0, 0, 0]),
+                tehais: None,
+                scores: None,
+                reason: None,
             },
             &store,
             &history_tx,

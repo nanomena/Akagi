@@ -24,6 +24,12 @@ authoritative post-settlement point totals, one per player. Multi-ron events
 share the same score vector. Absent provider data stays absent. The frontend
 mirror declares these fields in `frontend/src/types.ts`.
 
+`ryukyoku.tehais` optionally carries one closed-hand list or `null` per absolute
+seat. `null` explicitly means that seat's hand was not disclosed. Its optional
+`scores` are post-payment totals; `reason` names `exhaustive`, `nagashi`,
+`kyuushu`, `four_winds`, `four_kans`, `four_riichis` or `three_rons` when confirmed.
+Draw hands retain red identity and contain no extra winning tile.
+
 ## Adding a new schema
 
 1. Create `src/schema/<name>/mod.rs` (or `src/schema/<name>.rs`) with your

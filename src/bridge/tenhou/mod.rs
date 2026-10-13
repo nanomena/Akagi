@@ -974,6 +974,9 @@ impl TenhouBridge {
         let mut events = vec![
             MjaiEvent::Ryukyoku {
                 deltas: Some(deltas_abs),
+                tehais: None,
+                scores: None,
+                reason: None,
             },
             MjaiEvent::EndKyoku,
         ];
@@ -1822,7 +1825,7 @@ mod tests {
         );
         assert_eq!(events.len(), 2);
         match &events[0] {
-            MjaiEvent::Ryukyoku { deltas } => {
+            MjaiEvent::Ryukyoku { deltas, .. } => {
                 let d = deltas.as_ref().unwrap();
                 assert_eq!(d.len(), 4);
                 assert_eq!(d[0], 1500);

@@ -5,7 +5,7 @@ every frame, and currently emits the first mjai event — `start_game` with
 the bot's own seat (`id`). Remaining mjai state-machine phases (kyoku, draws,
 discards, calls, agari/ryukyoku) are still TODO.
 
-## Public winning-hand input
+## Public hand-end input
 
 `ActionHule.hules[].hand` becomes optional `hora.tehai`, and `hu_tile` becomes
 `hora.pai`, using the same `ms_to_mjai` mapping as ordinary tiles. Red fives
@@ -13,6 +13,21 @@ remain `5mr/5pr/5sr`. The hand excludes the winning tile for both ron and tsumo;
 public melds continue to arrive through their own events. `ActionHule.scores`
 becomes the shared post-settlement `hora.scores`, including for multi-ron and
 the final hand. Malformed tile data or score-vector shapes reject the frame.
+
+`ActionNoTile.players[].hand` supplies `ryukyoku.tehais`, with `null` for
+unrevealed/noten seats. This preserves all-tenpai versus no-tenpai even when
+payments are zero. The explicit `old_scores` plus summed native-length
+`delta_scores` supplies post-payment `ryukyoku.scores`; malformed vectors,
+contradictory supplied baselines and integer overflow are errors.
+`liujumanguan` distinguishes nagashi from an ordinary exhaustive draw.
+
+Abortive kinds are confirmed against the [official client 0.11.252.w](https://game.maj-soul.com/1/v0.11.252.w/code.js)
+(`mjcore.E_LiuJu`, `view.ActionLiuJu.play`): 1 nine terminals, 2 four winds,
+3 four kans, 4 four riichi, 5 triple ron. Nine terminals forwards only the
+declarer's `tiles`. Four riichi forwards pipe-delimited `allplayertiles` for
+all seats; triple ron excludes the named discarder, even if its hand is
+present in the payload. Four winds/kans disclose no hands. No live account
+data or client source is committed to this repository.
 
 Native consumers can now populate their existing hand-end reveal fields and
 commit the final observation before `end_game`. Providers that omit these

@@ -166,6 +166,12 @@ pub enum MjaiEvent {
     },
     Ryukyoku {
         deltas: Option<Vec<i32>>,
+        /// Public closed hands by absolute seat; null means no hand disclosed.
+        tehais: Option<Vec<Option<Vec<Tile>>>>,
+        /// Authoritative post-settlement point totals.
+        scores: Option<Vec<i32>>,
+        /// Confirmed draw kind, when the producer can name it.
+        reason: Option<String>,
     },
 
     /// 3-player only — 北抜き (BaBei / nukidora). Player sets aside a North
@@ -249,6 +255,7 @@ mod tests {
             r#"{"type":"hora","actor":2,"target":3}"#,
             r#"{"type":"hora","actor":2,"target":2,"pai":"5pr","tehai":["5p"],"scores":[24000,24000,28000,24000]}"#,
             r#"{"type":"ryukyoku","deltas":[0,1500,0,-1500]}"#,
+            r#"{"type":"ryukyoku","deltas":[0,0,0,0],"tehais":[["5pr"],null,null,null],"scores":[25000,25000,25000,25000],"reason":"exhaustive"}"#,
             r#"{"type":"ryukyoku"}"#,
             r#"{"type":"kita","actor":1,"pai":"N"}"#,
             r#"{"type":"kita","actor":2}"#,

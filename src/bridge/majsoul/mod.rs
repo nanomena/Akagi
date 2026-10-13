@@ -928,7 +928,45 @@ impl MajsoulBridge {
     /// in the same frame); the bridge sums them per seat.
     fn build_no_tile(&mut self, data: &JsonValue) -> Result<Vec<MjaiEvent>> {
         let deltas = sum_delta_scores(data, self.num_players)?;
-        Ok(vec![MjaiEvent::Ryukyoku { deltas }, MjaiEvent::EndKyoku])
+        let tehais = data
+            .get("players")
+            .map(|value| {
+                let players = value.as_array().context("players is not an array")?;
+                // An absent/empty array does not describe any public hand.
+                if players.is_empty() {
+                    return Ok(None);
+                }
+                if players.len() != usize::from(self.num_players) {
+                    bail!("public draw player count differs from num_players");
+                }
+                players
+                    .iter()
+                    .map(|player| {
+                        if player.get("tingpai").and_then(JsonValue::as_bool) == Some(false) {
+                            return Ok(None);
+                        }
+                        let hand = public_tiles(player.get("hand"))?;
+                        Ok(hand.filter(|tiles| !tiles.is_empty()))
+                    })
+                    .collect::<Result<Vec<_>>>()
+                    .map(Some)
+            })
+            .transpose()?
+            .flatten();
+        let scores = draw_settlement_scores(data, self.num_players, deltas.as_deref())?;
+        let nagashi = data
+            .get("liujumanguan")
+            .and_then(JsonValue::as_bool)
+            .unwrap_or(false);
+        Ok(vec![
+            MjaiEvent::Ryukyoku {
+                deltas,
+                tehais,
+                scores,
+                reason: Some(if nagashi { "nagashi" } else { "exhaustive" }.into()),
+            },
+            MjaiEvent::EndKyoku,
+        ])
     }
 
     /// `ActionHule` (胡牌) → one `hora` per entry in `data.hules[]`,
@@ -1055,14 +1093,80 @@ impl MajsoulBridge {
     /// 三家和了 (4p) and 九種九牌 / 四開槓 (3p — sufuurenta and suucha
     /// riichi need 4 players and don't apply to sanma).
     ///
-    /// The proto carries `ActionLiuJu.type: uint32` for the abortive cause
-    /// but no enum exists in `liqi.proto`. Both Akagi-Python and AkagiNG
-    /// ignore the field entirely and emit a generic ryukyoku. We follow
-    /// suit until real captures of each type value arrive — at that point
-    /// we can surface a `reason` field on `MjaiEvent::Ryukyoku`.
-    fn build_liu_ju(&mut self, _data: &JsonValue) -> Result<Vec<MjaiEvent>> {
+    /// Official client 0.11.252.w confirms E_LiuJu 1..5 and pipe-delimited
+    /// `allplayertiles`. Four riichi shows all seats; triple ron excludes
+    /// its named discarder. Nine terminals reveals the declarer's tiles.
+    fn build_liu_ju(&mut self, data: &JsonValue) -> Result<Vec<MjaiEvent>> {
+        let kind = data.get("type").and_then(JsonValue::as_u64);
+        let reason = match kind {
+            Some(1) => Some("kyuushu"),
+            Some(2) => Some("four_winds"),
+            Some(3) => Some("four_kans"),
+            Some(4) => Some("four_riichis"),
+            Some(5) => Some("three_rons"),
+            _ => None,
+        };
+        let tehais = if kind == Some(1) {
+            let hand = public_tiles(data.get("tiles"))?.filter(|tiles| !tiles.is_empty());
+            hand.map(|hand| {
+                let actor = data.get("seat").and_then(JsonValue::as_u64).unwrap_or(0) as usize;
+                if actor >= usize::from(self.num_players) {
+                    bail!("public abortive draw seat out of range");
+                }
+                let mut hands = vec![None; usize::from(self.num_players)];
+                hands[actor] = Some(hand);
+                Ok(hands)
+            })
+            .transpose()?
+        } else if matches!(kind, Some(4 | 5)) {
+            data.get("allplayertiles")
+                .map(|value| {
+                    let rows = value.as_array().context("allplayertiles is not an array")?;
+                    if rows.is_empty() {
+                        return Ok(None);
+                    }
+                    if rows.len() != usize::from(self.num_players) {
+                        bail!("public abortive hand count differs from num_players");
+                    }
+                    let discarder =
+                        data.get("seat").and_then(JsonValue::as_u64).unwrap_or(0) as usize;
+                    if discarder >= usize::from(self.num_players) {
+                        bail!("public abortive draw seat out of range");
+                    }
+                    rows.iter()
+                        .enumerate()
+                        .map(|(seat, row)| {
+                            if kind == Some(5) && seat == discarder {
+                                return Ok(None);
+                            }
+                            let row = row
+                                .as_str()
+                                .context("public abortive hand is not a string")?;
+                            if row.is_empty() {
+                                return Ok(None);
+                            }
+                            row.split('|')
+                                .map(|tile| ms_to_mjai(tile).map(str::to_owned))
+                                .collect::<Result<Vec<_>>>()
+                                .map(Some)
+                        })
+                        .collect::<Result<Vec<_>>>()
+                        .map(Some)
+                })
+                .transpose()?
+                .flatten()
+        } else if matches!(kind, Some(2 | 3)) {
+            Some(vec![None; usize::from(self.num_players)])
+        } else {
+            None
+        };
         Ok(vec![
-            MjaiEvent::Ryukyoku { deltas: None },
+            MjaiEvent::Ryukyoku {
+                deltas: None,
+                tehais,
+                scores: None,
+                reason: reason.map(str::to_owned),
+            },
             MjaiEvent::EndKyoku,
         ])
     }
@@ -1404,31 +1508,93 @@ fn parse_deltas(arr: &[JsonValue]) -> Result<Vec<i32>> {
         .collect()
 }
 
+fn public_tiles(value: Option<&JsonValue>) -> Result<Option<Vec<String>>> {
+    value
+        .map(|value| {
+            value
+                .as_array()
+                .context("public hand is not an array")?
+                .iter()
+                .map(|tile| {
+                    ms_to_mjai(tile.as_str().context("public hand tile is not a string")?)
+                        .map(str::to_owned)
+                })
+                .collect()
+        })
+        .transpose()
+}
+
+/// All entries settle against the same explicitly supplied pre-payment scores.
+fn draw_settlement_scores(
+    data: &JsonValue,
+    num_players: u8,
+    deltas: Option<&[i32]>,
+) -> Result<Option<Vec<i32>>> {
+    let Some(entries) = data.get("scores").and_then(JsonValue::as_array) else {
+        return Ok(None);
+    };
+    let mut old: Option<Vec<i32>> = None;
+    for entry in entries {
+        let Some(value) = entry.get("old_scores") else {
+            continue;
+        };
+        let scores = parse_deltas(value.as_array().context("old_scores is not an array")?)?;
+        if scores.is_empty() {
+            continue;
+        }
+        if scores.len() != usize::from(num_players) {
+            bail!("old_scores count differs from num_players");
+        }
+        if old.as_ref().is_some_and(|old| *old != scores) {
+            bail!("draw entries name different old_scores");
+        }
+        old = Some(scores);
+    }
+    old.map(|scores| {
+        scores
+            .into_iter()
+            .enumerate()
+            .map(|(seat, score)| {
+                score
+                    .checked_add(deltas.map_or(0, |deltas| deltas[seat]))
+                    .context("draw settlement score overflow")
+            })
+            .collect()
+    })
+    .transpose()
+}
+
 /// Sum every `delta_scores` array under `data.scores[]` into a single
 /// `Vec<i32>` sized to `num_players`. Returns `None` when no entries are
 /// present (no point change — kept distinguishable from an explicit all-zero
-/// delta). Each entry's length is expected to match `num_players`; entries
-/// shorter than that are zero-extended (defensive — Majsoul should always
-/// emit the right length).
+/// delta). Malformed native-length vectors and integer overflow are errors.
 fn sum_delta_scores(data: &JsonValue, num_players: u8) -> Result<Option<Vec<i32>>> {
-    let arr = match data.get("scores").and_then(JsonValue::as_array) {
-        Some(a) if !a.is_empty() => a,
+    let arr = match data.get("scores") {
+        Some(value) => value.as_array().context("draw scores is not an array")?,
         _ => return Ok(None),
     };
+    if arr.is_empty() {
+        return Ok(None);
+    }
     let n = num_players as usize;
     let mut total = vec![0i32; n];
     for entry in arr {
-        let deltas = match entry.get("delta_scores").and_then(JsonValue::as_array) {
-            Some(d) => d,
+        let deltas = match entry.get("delta_scores") {
+            Some(value) => value.as_array().context("delta_scores is not an array")?,
             None => continue,
         };
-        for (i, v) in deltas.iter().take(n).enumerate() {
+        if deltas.len() != n {
+            bail!("delta_scores count differs from num_players");
+        }
+        for (i, v) in deltas.iter().enumerate() {
             let val: i32 = v
                 .as_i64()
                 .context("non-integer delta_scores entry")?
                 .try_into()
                 .context("delta_scores out of i32 range")?;
-            total[i] = total[i].saturating_add(val);
+            total[i] = total[i]
+                .checked_add(val)
+                .context("draw delta_scores overflow")?;
         }
     }
     Ok(Some(total))
@@ -3570,6 +3736,142 @@ mod tests {
         assert!(bridge.pending_reach_accepted.is_none());
     }
 
+    #[test]
+    fn public_draw_hands_red_fives_and_settlement_are_forwarded() {
+        let mut bridge = MajsoulBridge::new(None, None);
+        let events = bridge.build_no_tile(&json!({
+            "players": [
+                { "tingpai": false, "hand": [] },
+                { "tingpai": true, "hand": ["0p", "6p", "8p", "8p"] },
+                { "tingpai": true, "hand": ["1m", "2m", "3m", "3m", "4m", "5m", "6m", "6m", "7m", "8m", "6s", "7s", "8s"] },
+                { "tingpai": false, "hand": [] }
+            ],
+            "scores": [{ "old_scores": [27200,22600,41300,7900], "delta_scores": [-1500,1500,1500,-1500] }]
+        })).unwrap();
+        match &events[0] {
+            MjaiEvent::Ryukyoku {
+                tehais,
+                scores,
+                reason,
+                ..
+            } => {
+                let hands = tehais.as_ref().unwrap();
+                assert!(hands[0].is_none() && hands[3].is_none());
+                assert_eq!(hands[1].as_ref().unwrap(), &["5pr", "6p", "8p", "8p"]);
+                assert_eq!(*scores, Some(vec![25700, 24100, 42800, 6400]));
+                assert_eq!(reason.as_deref(), Some("exhaustive"));
+            }
+            other => panic!("expected public draw, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn all_and_no_tenpai_reveals_do_not_depend_on_zero_payments() {
+        let mut bridge = MajsoulBridge::new(None, None);
+        for hand in [json!([]), json!(["0m"])] {
+            let events = bridge
+                .build_no_tile(&json!({
+                    "players": [{"hand": hand}, {"hand": hand}, {"hand": hand}, {"hand": hand}],
+                    "scores": [{"old_scores": [25000,25000,25000,25000], "delta_scores": [0,0,0,0]}]
+                }))
+                .unwrap();
+            let MjaiEvent::Ryukyoku {
+                tehais: Some(hands),
+                ..
+            } = &events[0]
+            else {
+                panic!();
+            };
+            assert!(hands
+                .iter()
+                .all(|tiles| tiles.is_some() == !hand.as_array().unwrap().is_empty()));
+        }
+    }
+
+    #[test]
+    fn nine_terminals_forwards_only_the_declarers_public_hand() {
+        let mut bridge = MajsoulBridge::new(None, None);
+        let events = bridge
+            .build_liu_ju(&json!({ "type": 1, "seat": 3, "tiles": [
+            "2m","5m","1p","6p","7p","9p","2s","9s","2z","3z","5z","6z","7z","1s"
+        ] }))
+            .unwrap();
+        let MjaiEvent::Ryukyoku {
+            tehais: Some(hands),
+            reason,
+            ..
+        } = &events[0]
+        else {
+            panic!();
+        };
+        assert_eq!(reason.as_deref(), Some("kyuushu"));
+        assert!(hands[..3].iter().all(Option::is_none));
+        assert_eq!(hands[3].as_ref().unwrap().len(), 14);
+    }
+
+    #[test]
+    fn malformed_public_draw_metadata_is_an_error() {
+        let mut bridge = MajsoulBridge::new(None, None);
+        for data in [
+            json!({"players": [{"hand": []}]}),
+            json!({"players": [{"hand": "0m"}, {}, {}, {}]}),
+            json!({"players": [{"hand": ["bad"]}, {}, {}, {}]}),
+            json!({"scores": [{"delta_scores": [0]}]}),
+            json!({"scores": [{"old_scores": [25000], "delta_scores": [0,0,0,0]}]}),
+            json!({"scores": [{"old_scores": [25000,25000,25000,25000]}, {"old_scores": [24000,25000,25000,25000]}]}),
+        ] {
+            assert!(bridge.build_no_tile(&data).is_err());
+        }
+    }
+
+    #[test]
+    fn abortive_draws_follow_the_official_clients_public_reveals() {
+        let mut bridge = MajsoulBridge::new(None, None);
+        for (kind, reason) in [
+            (2, "four_winds"),
+            (3, "four_kans"),
+            (4, "four_riichis"),
+            (5, "three_rons"),
+        ] {
+            let events = bridge.build_liu_ju(&json!({"type": kind, "seat": 2,
+                "allplayertiles": ["0m|1m", "0p|1p", "bad hidden data", "0s|1s"]
+            }));
+            if kind == 4 {
+                assert!(events.is_err());
+                continue;
+            }
+            let events = events.unwrap();
+            let MjaiEvent::Ryukyoku {
+                tehais: Some(hands),
+                reason: Some(actual),
+                ..
+            } = &events[0]
+            else {
+                panic!();
+            };
+            assert_eq!(actual, reason);
+            if kind == 5 {
+                assert!(hands[2].is_none());
+                assert_eq!(hands[0].as_ref().unwrap()[0], "5mr");
+                assert_eq!(hands[1].as_ref().unwrap()[0], "5pr");
+                assert_eq!(hands[3].as_ref().unwrap()[0], "5sr");
+            } else {
+                assert!(hands.iter().all(Option::is_none));
+            }
+        }
+        let events = bridge
+            .build_liu_ju(&json!({"type": 4, "allplayertiles": ["0m", "0p", "0s", "1z"]}))
+            .unwrap();
+        let MjaiEvent::Ryukyoku {
+            tehais: Some(hands),
+            ..
+        } = &events[0]
+        else {
+            panic!();
+        };
+        assert!(hands.iter().all(Option::is_some));
+    }
+
     /// Real ActionNoTile sample (1 human in tenpai, 3 noten) →
     /// `[ryukyoku{deltas:[3000,-1000,-1000,-1000]}, end_kyoku]`.
     #[test]
@@ -3591,7 +3893,7 @@ mod tests {
         ));
         assert_eq!(events.len(), 2);
         match &events[0] {
-            MjaiEvent::Ryukyoku { deltas } => {
+            MjaiEvent::Ryukyoku { deltas, .. } => {
                 assert_eq!(*deltas, Some(vec![3000, -1000, -1000, -1000]));
             }
             other => panic!("expected Ryukyoku first, got {other:?}"),
@@ -3615,7 +3917,7 @@ mod tests {
             }),
         ));
         match &events[0] {
-            MjaiEvent::Ryukyoku { deltas } => {
+            MjaiEvent::Ryukyoku { deltas, .. } => {
                 assert_eq!(*deltas, Some(vec![1500, 1000, -1000, -1500]));
             }
             other => panic!("expected Ryukyoku, got {other:?}"),
@@ -3659,7 +3961,7 @@ mod tests {
         ));
         assert_eq!(events.len(), 2);
         match &events[0] {
-            MjaiEvent::Ryukyoku { deltas } => {
+            MjaiEvent::Ryukyoku { deltas, .. } => {
                 assert_eq!(*deltas, Some(vec![2000, -1000, -1000]));
             }
             other => panic!("expected Ryukyoku, got {other:?}"),
@@ -3681,7 +3983,7 @@ mod tests {
             }),
         ));
         match &events[0] {
-            MjaiEvent::Ryukyoku { deltas } => {
+            MjaiEvent::Ryukyoku { deltas, .. } => {
                 assert_eq!(*deltas, Some(vec![2000, -1000, -1000]));
             }
             other => panic!("expected Ryukyoku, got {other:?}"),
@@ -3695,7 +3997,7 @@ mod tests {
         bridge.seat = Some(0);
         let events = bridge.dispatch(&action_msg(ACTION_NO_TILE, json!({})));
         match &events[0] {
-            MjaiEvent::Ryukyoku { deltas } => assert!(deltas.is_none()),
+            MjaiEvent::Ryukyoku { deltas, .. } => assert!(deltas.is_none()),
             other => panic!("expected Ryukyoku, got {other:?}"),
         }
         assert!(matches!(events[1], MjaiEvent::EndKyoku));
@@ -3710,7 +4012,7 @@ mod tests {
         let events = bridge.dispatch(&action_msg(ACTION_LIU_JU, json!({ "type": 1, "seat": 0 })));
         assert_eq!(events.len(), 2);
         match &events[0] {
-            MjaiEvent::Ryukyoku { deltas } => assert!(deltas.is_none()),
+            MjaiEvent::Ryukyoku { deltas, .. } => assert!(deltas.is_none()),
             other => panic!("expected Ryukyoku, got {other:?}"),
         }
         assert!(matches!(events[1], MjaiEvent::EndKyoku));

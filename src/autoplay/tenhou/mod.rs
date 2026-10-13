@@ -1015,7 +1015,15 @@ mod tests {
                 },
                 "c22-2",
             ),
-            (MjaiEvent::Ryukyoku { deltas: None }, "c22-3"),
+            (
+                MjaiEvent::Ryukyoku {
+                    deltas: None,
+                    tehais: None,
+                    scores: None,
+                    reason: None,
+                },
+                "c22-3",
+            ),
             (MjaiEvent::None, "c22-4"),
             (
                 MjaiEvent::Daiminkan {

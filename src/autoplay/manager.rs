@@ -1015,7 +1015,7 @@ fn future_window_grace(action: &MjaiEvent) -> Duration {
     match action {
         MjaiEvent::Dahai { .. }
         | MjaiEvent::Reach { .. }
-        | MjaiEvent::Ryukyoku { deltas: None } => Duration::from_secs(15),
+        | MjaiEvent::Ryukyoku { deltas: None, .. } => Duration::from_secs(15),
         _ => Duration::from_secs(3),
     }
 }
@@ -1393,7 +1393,12 @@ mod tests {
         // Kyuushu rides our own first-turn draw, so it gets the own-turn
         // grace — not the claim-tight one.
         assert_eq!(
-            future_window_grace(&MjaiEvent::Ryukyoku { deltas: None }),
+            future_window_grace(&MjaiEvent::Ryukyoku {
+                deltas: None,
+                tehais: None,
+                scores: None,
+                reason: None
+            }),
             Duration::from_secs(15)
         );
     }

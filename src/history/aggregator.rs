@@ -248,7 +248,7 @@ pub fn aggregate(input: AggregateInput<'_>) -> Option<GameRecord> {
                 }
             }
 
-            MjaiEvent::Ryukyoku { deltas } => {
+            MjaiEvent::Ryukyoku { deltas, .. } => {
                 let Some(deltas) = deltas else {
                     continue;
                 };
@@ -769,6 +769,9 @@ mod tests {
             MjaiEvent::ReachAccepted { actor: 0 }, // -1000 to seat 0
             MjaiEvent::Ryukyoku {
                 deltas: Some(vec![1500, -1500, 0, 0]),
+                tehais: None,
+                scores: None,
+                reason: None,
             },
             MjaiEvent::end_game(),
         ];
