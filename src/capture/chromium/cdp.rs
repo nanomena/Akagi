@@ -177,6 +177,7 @@ fn is_autoplay_target_url(ws_url: &str) -> bool {
 /// feature is wired (`AppState.autoplay_context`). On Majsoul WS open
 /// we publish the page handle into it; autoplay reads it back to dispatch
 /// `Input.dispatchMouseEvent`. Passing `None` makes the loop bridge-only.
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     endpoint: &str,
     bridges: Arc<FlowBridges<FlowKey>>,
