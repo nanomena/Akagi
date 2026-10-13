@@ -145,21 +145,6 @@ pub fn forward<R: Runtime>(app: AppHandle<R>, monitor: MonitorHandle) {
     });
 }
 
-/// The name the window goes by: the active bot's display name, as its
-/// manifest gives it, or Akagi's own when no bot is selected.
-pub fn brand(config: &crate::config::AppConfig) -> String {
-    let root = crate::util::resolve_dir(std::path::Path::new(&config.bot.dir));
-    crate::bot::BotRegistry::scan(&root)
-        .ok()
-        .and_then(|registry| registry.find(config.bot.active_for(4)).cloned())
-        .map(|bot| {
-            bot.manifest
-                .and_then(|manifest| manifest.bot.display)
-                .unwrap_or(bot.name)
-        })
-        .unwrap_or_else(|| "Akagi".into())
-}
-
 /// Open the window, or bring the open one in line with `config`.
 pub fn reconcile<R: Runtime>(app: &AppHandle<R>, config: &MonitorConfig) {
     let app = app.clone();
@@ -252,25 +237,6 @@ fn local_view(webview: &Webview) -> Result<(), String> {
     }
 }
 
-/// Change the configuration and write it back to the file it was loaded from,
-/// leaving everything else in that file as it is.
-async fn save(
-    state: &AppState,
-    change: impl FnOnce(&mut crate::config::AppConfig),
-) -> Result<crate::config::AppConfig, String> {
-    let mut config = state.config.write().await;
-    let mut next = config.clone();
-    change(&mut next);
-    let saved = crate::config::merge_into(
-        &next,
-        &std::fs::read_to_string(&*state.config_path).unwrap_or_default(),
-    )
-    .map_err(|e| e.to_string())?;
-    std::fs::write(&*state.config_path, saved).map_err(|e| e.to_string())?;
-    *config = next.clone();
-    Ok(next)
-}
-
 /// Keep the window above the others, or let it go; the choice is saved.
 #[tauri::command]
 pub async fn set_monitor_pinned(
@@ -280,7 +246,9 @@ pub async fn set_monitor_pinned(
     pinned: bool,
 ) -> Result<MonitorConfig, String> {
     local_view(&webview)?;
-    let config = save(&state, |c| c.monitor.always_on_top = pinned).await?;
+    let config = state
+        .save_config(|c| c.monitor.always_on_top = pinned)
+        .await?;
     reconcile(&app, &config.monitor);
     Ok(config.monitor)
 }
@@ -297,7 +265,7 @@ pub async fn set_monitor_autoplay(
     enabled: bool,
 ) -> Result<(), String> {
     local_view(&webview)?;
-    save(&state, |c| c.autoplay.enabled = enabled).await?;
+    state.save_config(|c| c.autoplay.enabled = enabled).await?;
     state.monitor.set_autoplay(enabled);
     super::commands::start_autoplay_manager(enabled, &state);
     Ok(())
@@ -383,20 +351,7 @@ pub async fn open_monitor_game(
         {
             return Err("内置雀魂需要 Chromium 采集模式和雀魂平台。".into());
         }
-        let url: tauri::Url = config
-            .capture
-            .chromium
-            .start_url
-            .parse()
-            .map_err(|e| format!("Invalid game URL: {e}"))?;
-        let host = url.host_str().unwrap_or("");
-        if url.scheme() != "https"
-            || !["mahjongsoul.com", "maj-soul.com", "majsoul.com"]
-                .iter()
-                .any(|suffix| host == *suffix || host.ends_with(&format!(".{suffix}")))
-        {
-            return Err("内置游戏地址必须是雀魂的 HTTPS 网站。".into());
-        }
+        let url = crate::capture::embedded::game_url(&config.capture.chromium.start_url)?;
         super::capture_supervisor::stop_and_wait(&state, std::time::Duration::from_secs(6)).await;
         if matches!(
             state.capture_control.lock().await.status,
@@ -450,7 +405,14 @@ pub async fn open_monitor_game(
                 return Err(format!("{e:#}"));
             }
         };
-        *state.embedded_game.lock().await = Some((endpoint, url.to_string()));
+        *state.embedded_game.lock().await = Some(crate::capture::embedded::EmbeddedBackend {
+            endpoint,
+            // This view's endpoint serves the game alone.
+            page: crate::capture::chromium::cdp::EmbeddedPage {
+                url: url.to_string(),
+                target: None,
+            },
+        });
         super::capture_supervisor::spawn_capture_supervisor((*state).clone())
             .await
             .map_err(|e| e.to_string())

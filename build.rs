@@ -22,5 +22,6 @@ fn main() {
     let target = env::var("TARGET").expect("TARGET not set by cargo");
     println!("cargo:rustc-env=TARGET_TRIPLE={target}");
 
+    #[cfg(feature = "app")]
     tauri_build::build();
 }

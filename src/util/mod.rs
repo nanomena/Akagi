@@ -1,4 +1,17 @@
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+
+/// The folder every relative directory lives in, when the process was given
+/// one — see [`set_home`].
+static HOME: OnceLock<PathBuf> = OnceLock::new();
+
+/// Keep everything this process reads and writes by a relative path — bots,
+/// logs, history — under `dir`, wherever the executable is. A desktop shell
+/// says this (`headless`): its package is read-only, so nothing can live
+/// beside the executable. Takes effect once; later calls are ignored.
+pub fn set_home(dir: PathBuf) {
+    let _ = HOME.set(dir);
+}
 
 /// True when running inside an AppImage runtime (read-only squashfs mount).
 /// AppImage sets `$APPIMAGE` to the .AppImage path before exec.
@@ -26,7 +39,9 @@ pub fn user_subdir(name: &str) -> Option<PathBuf> {
     user_config_root().map(|r| r.join(name))
 }
 
-/// Resolve a configured directory path with the standard fallback chain:
+/// Resolve a configured directory path. A process that was given a home
+/// ([`set_home`]) keeps every relative path under it; otherwise the standard
+/// fallback chain applies:
 ///
 /// 1. Absolute path → used as-is
 /// 2. `<exe_dir>/<configured>` if it exists
@@ -36,7 +51,19 @@ pub fn user_subdir(name: &str) -> Option<PathBuf> {
 ///    `<cwd>/<configured>` if the executable path is unavailable. The caller
 ///    is responsible for creating the directory.
 pub fn resolve_dir(configured: &Path) -> PathBuf {
-    resolve_dir_inner(configured, is_appimage(), user_config_root())
+    match HOME.get() {
+        Some(home) => under(home, configured),
+        None => resolve_dir_inner(configured, is_appimage(), user_config_root()),
+    }
+}
+
+/// `configured` as a place under `home`, unless it names its own place.
+fn under(home: &Path, configured: &Path) -> PathBuf {
+    if configured.is_absolute() {
+        configured.to_path_buf()
+    } else {
+        home.join(strip_leading_dot(configured))
+    }
 }
 
 fn resolve_dir_inner(configured: &Path, appimage: bool, user_root: Option<PathBuf>) -> PathBuf {
@@ -100,6 +127,15 @@ mod tests {
         assert_eq!(strip_leading_dot(Path::new("./logs")), Path::new("logs"));
         assert_eq!(strip_leading_dot(Path::new("logs")), Path::new("logs"));
         assert_eq!(strip_leading_dot(Path::new("./a/b")), Path::new("a/b"));
+    }
+
+    #[test]
+    fn a_home_holds_every_relative_directory() {
+        let home = Path::new("/data/akagi");
+        assert_eq!(under(home, Path::new("./logs")), home.join("logs"));
+        assert_eq!(under(home, Path::new("mjai_bot")), home.join("mjai_bot"));
+        let elsewhere = std::env::temp_dir().join("elsewhere");
+        assert_eq!(under(home, &elsewhere), elsewhere);
     }
 
     #[test]

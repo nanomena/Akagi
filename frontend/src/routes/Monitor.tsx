@@ -16,9 +16,10 @@ import './Monitor.css'
 
 // The application is this one window, and the window is a fixed canvas: drawn
 // at the size below and scaled as one piece to whatever size the window is.
-// The native side keeps the window at the canvas's aspect ratio
-// (`ipc::monitor`), so in practice the canvas always fills it; if something
-// else resizes the window, the canvas is centred and nothing is cut off.
+// The host keeps the window at the canvas's aspect ratio (`ipc::monitor` in
+// the Tauri application, `desktop/` in the shell), so in practice the canvas
+// always fills it; if something else resizes the window, the canvas is centred
+// and nothing is cut off.
 //
 //   1280 × 960 (4:3) — the game on a 16:9 stage, and a 1280 × 240 dock under it
 const STAGE = { w: 1280, h: 720 }
@@ -27,8 +28,8 @@ const DOCK = { w: 1280, h: 240 }
 type Tab = 'decision' | 'table' | 'result' | 'events' | 'link'
 const TABS: Array<[Tab, string]> = [['decision', '决策'], ['table', '牌桌'], ['result', '结果'], ['events', '事件'], ['link', '连接']]
 
-/** What `capture.descriptor` carries while the WebView2 game child is the source — the label of `capture::embedded`. */
-const EMBEDDED = 'embedded WebView2'
+/** What `capture.descriptor` is while the game in this window is the source — `capture::embedded`'s label, as the supervisor words it. */
+const EMBEDDED = 'chromium (embedded)'
 /** The stage the game is shown in may not be smaller than this; `resize_monitor_game` rejects less than 100. */
 const STAGE_MIN = 160
 
@@ -164,7 +165,7 @@ export function Monitor() {
 
   const k = useFit(STAGE.w, STAGE.h + DOCK.h)
   // The game child outlives a reload of this page; the capture it feeds says so.
-  const embedded = opened || (s != null && 'descriptor' in s.capture && !!s.capture.descriptor?.includes(EMBEDDED))
+  const embedded = opened || (s != null && 'descriptor' in s.capture && s.capture.descriptor === EMBEDDED)
 
   // The game is a native child view, not DOM: it goes exactly where the stage
   // element is, and has to be told every time that moves or goes away.

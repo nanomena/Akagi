@@ -182,7 +182,7 @@ describe('monitor user states', () => {
   })
 
   it('puts the game exactly where the stage is once it is open in this window', async () => {
-    fixture.snapshot!.capture = { state: 'running', kind: 'chromium', descriptor: 'chromium (embedded WebView2)' }
+    fixture.snapshot!.capture = { state: 'running', kind: 'chromium', descriptor: 'chromium (embedded)' }
     const stage = { x: 0, y: 0, width: 960, height: 540 }
     const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       return (this.className === 'mon-stage' ? { ...stage, top: 0, left: 0, right: 960, bottom: 540, toJSON: () => stage } : { x: 0, y: 0, width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0, toJSON: () => ({}) }) as DOMRect
