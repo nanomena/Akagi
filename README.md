@@ -65,12 +65,38 @@ The dock knows the game and the mjai actions, and nothing about any bot: the
 numbers and words a bot wants shown arrive in its replies and are shown as
 written.
 
-## Following the game's protocol
+## Versions and upstream
 
-Mahjong Soul's protocol definitions (`src/bridge/majsoul/proto/liqi.proto`,
-`liqi.json`) are rebuilt from the live client by
-[`scripts/extract_liqi.py`](./scripts/extract_liqi.py); the `Auto Liqi`
-workflow runs it daily and opens a pull request when they move.
+This tree has a version line of its own, starting at 0.1.0. Akagi is something
+it carries, the way a distribution carries a kernel: the two are versioned
+apart, and what ties them together is written down rather than read off a
+number.
+
+- **`main`** is this tree.
+- **`upstream`** mirrors Akagi's `v3` as it is. It only ever fast-forwards;
+  nothing is committed to it.
+- **`[package.metadata.upstream]`** in `Cargo.toml` records the Akagi version
+  and commit this tree has been followed to.
+
+Upstream is followed for what it knows about the games — the bridges under
+`src/bridge/` and the autoplay beside them — and is backported from, not
+rebased onto:
+
+```sh
+git fetch upstream && git push origin upstream/v3:upstream    # move the mirror
+git diff <recorded commit> upstream -- src/bridge src/autoplay  # what changed there since
+```
+
+Bring over what applies on a branch off `main`, then move the recorded commit
+forward in the same change.
+
+Mahjong Soul's protocol *definitions* need none of that
+(`src/bridge/majsoul/proto/liqi.proto`, `liqi.json`): they are rebuilt from the
+live client by [`scripts/extract_liqi.py`](./scripts/extract_liqi.py), which the
+`Auto Liqi` workflow runs daily, opening a pull request when they move.
+
+The bridges for Tenhou and Riichi City are carried as well. The application
+opens only Mahjong Soul today; they are kept for when it opens the others.
 
 ## Layout
 

@@ -2,7 +2,7 @@
   "name": "akagi-desktop",
   "productName": "Akagi",
   "private": true,
-  "version": "3.7.1",
+  "version": "0.1.0",
   "description": "The window Akagi runs in: the game and the monitor's dock, on one Chromium.",
   "license": "Apache-2.0",
   "type": "module",
