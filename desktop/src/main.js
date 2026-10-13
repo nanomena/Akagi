@@ -55,6 +55,8 @@ let dock = null
 let game = null
 /** @type {Core | null} */
 let core = null
+/** The window's options as the core last saved them. */
+let options = { always_on_top: false }
 let cdpPort = 0
 let quitting = false
 
@@ -142,6 +144,7 @@ function holdRatio(frame) {
 
 /** @param {import('./core.js').Ready} ready */
 function openWindow(ready) {
+  options = ready.monitor
   const saved = restoredBounds(readJson(WINDOW_STATE), screen.getAllDisplays().map(display => display.workArea))
   const size = saved ?? openingSize(screen.getPrimaryDisplay().workAreaSize)
   const frame = window = new BaseWindow({
@@ -245,12 +248,12 @@ function running() {
  */
 const commands = {
   get_monitor: () => running().call('get_monitor'),
-  get_config: () => running().call('get_config'),
+  get_monitor_options: async () => options,
   set_monitor_autoplay: ({ enabled }) => running().call('set_monitor_autoplay', { enabled: enabled === true }),
   async set_monitor_pinned({ pinned }) {
-    const saved = /** @type {{ always_on_top: boolean }} */ (await running().call('set_monitor_pinned', { pinned: pinned === true }))
-    window?.setAlwaysOnTop(saved.always_on_top)
-    return saved
+    options = /** @type {{ always_on_top: boolean }} */ (await running().call('set_monitor_pinned', { pinned: pinned === true }))
+    window?.setAlwaysOnTop(options.always_on_top)
+    return options
   },
   async resize_monitor_game({ bounds }) {
     placeGame(bounds)
