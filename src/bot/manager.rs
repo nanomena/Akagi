@@ -51,6 +51,7 @@ use tokio::sync::{broadcast, Mutex, RwLock};
 use tracing::{debug, error, info, warn};
 
 pub struct BotManager {
+    monitor: Option<crate::monitor::MonitorHandle>,
     /// Python runtime for `mjai_bot/*` subprocess bots. `None` when no
     /// python3+uv runtime was found — the built-in native bot still works;
     /// only Python subprocess bots require it (enforced per-spawn).
@@ -117,6 +118,7 @@ impl BotManager {
         syncs_in_flight: Arc<Mutex<HashSet<String>>>,
     ) -> Self {
         Self {
+            monitor: None,
             runtime,
             bot_dir,
             config,
@@ -136,6 +138,11 @@ impl BotManager {
 
     pub fn out_tx(&self) -> &BotResponseBus {
         &self.out_tx
+    }
+
+    pub fn with_monitor(mut self, monitor: Option<crate::monitor::MonitorHandle>) -> Self {
+        self.monitor = monitor;
+        self
     }
 
     /// Block on the post-tracker receiver, dispatching every event through
@@ -166,6 +173,11 @@ impl BotManager {
                 }
                 Err(broadcast::error::RecvError::Lagged(n)) => {
                     warn!("bot manager lagged behind the post-tracker bus by {n} events");
+                    if let Some(monitor) = &self.monitor {
+                        monitor.gap(format!(
+                            "Bot missed {n} tracked events; waiting for the next hand."
+                        ));
+                    }
                 }
                 Err(broadcast::error::RecvError::Closed) => {
                     info!("post-tracker bus closed; bot manager exiting");
@@ -183,13 +195,18 @@ impl BotManager {
         self.handle_tracked(TrackedEvent {
             event,
             can_act: None,
+            context: None,
         })
         .await
     }
 
     /// Drive one tracked event through the manager.
     pub async fn handle_tracked(&mut self, tracked: TrackedEvent) -> Result<()> {
-        let TrackedEvent { event, can_act } = tracked;
+        let TrackedEvent {
+            event,
+            can_act,
+            context,
+        } = tracked;
         // Kyoku/game boundaries clear the one-shot reach-echo drop: a lost
         // declaration never produces the echo it was waiting for, so the flag
         // must not survive into the next hand and eat a real reach there.
@@ -279,10 +296,17 @@ impl BotManager {
             .expect("runner is Some — checked above");
         let batch = std::mem::take(&mut self.pending);
         let started = Instant::now();
+        let decision_id = self
+            .monitor
+            .as_ref()
+            .and_then(|m| context.and_then(|c| m.begin(c, &self.active_name, &event)));
         let mut resp = match runner.react(&batch).await {
             Ok(r) => r,
             Err(e) => {
                 let err_str = format!("{e:#}");
+                if let (Some(m), Some(id)) = (&self.monitor, decision_id) {
+                    m.fail(id, err_str.clone());
+                }
                 let bot = self.active_name.clone();
                 self.emit_status(BotStatus::Error {
                     bot: bot.clone(),
@@ -292,7 +316,6 @@ impl BotManager {
                 return Err(e).context("bot react failed");
             }
         };
-        let reaction_ms = started.elapsed().as_millis() as u64;
 
         // Autoplay reach follow-up (#257). A bot that declares riichi as
         // plain mjai — `reach` with no `pai` — leaves the declaring discard
@@ -346,6 +369,10 @@ impl BotManager {
             self.drop_next_own_reach = true;
         }
 
+        let reaction_ms = started.elapsed().as_millis() as u64;
+        if let (Some(m), Some(id)) = (&self.monitor, decision_id) {
+            m.complete(id, &resp, reaction_ms);
+        }
         debug!(action = ?resp.action, meta = ?resp.meta, reaction_ms, "bot reacted");
         // Inspector record: pair the trigger event (the last item in the
         // batch is the one that crossed the decision-point threshold)
@@ -643,6 +670,9 @@ impl BotManager {
     }
 
     fn emit_status(&self, s: BotStatus) {
+        if let Some(monitor) = &self.monitor {
+            monitor.set_bot(s.clone());
+        }
         let _ = self.status_tx.send(s);
     }
 
@@ -914,7 +944,11 @@ mod tests {
     }
 
     fn tracked(event: MjaiEvent, can_act: Option<bool>) -> TrackedEvent {
-        TrackedEvent { event, can_act }
+        TrackedEvent {
+            event,
+            can_act,
+            context: None,
+        }
     }
 
     /// Regression (Hora answered with a pass press): an opponent's discard we

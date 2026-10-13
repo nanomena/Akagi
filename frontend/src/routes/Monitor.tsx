@@ -1,0 +1,281 @@
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { Gamepad2, LoaderCircle, Pin, PinOff, X } from 'lucide-react'
+import { CandidateList, DecisionCard } from '@/components/monitor/Decision'
+import { Board, BoardLegend, HandStrip, ResultCard, ScoreStrip, SeatColumns } from '@/components/monitor/Table'
+import { Diagnostics, EventList, FaultCard } from '@/components/monitor/Details'
+import { Faces } from '@/components/monitor/Tiles'
+import { useMonitor } from '@/hooks/useMonitor'
+import { pickShow } from '@/lib/botShow'
+import {
+  MONITOR_DEFAULTS, alertsOf, candidatesOf, decisionView, healthOf, roundLabel, seatWind, tableOf,
+  type Alert, type Candidate, type DecisionView, type Health, type MonitorConfig, type MonitorSnapshot,
+} from '@/lib/monitor'
+import { invoke, listen } from '@/lib/tauri'
+import type { AppConfig } from '@/types'
+import './Monitor.css'
+
+// The application is this one window, and the window is a fixed canvas: drawn
+// at the size below and scaled as one piece to whatever size the window is.
+// The native side keeps the window at the canvas's aspect ratio
+// (`ipc::monitor`), so in practice the canvas always fills it; if something
+// else resizes the window, the canvas is centred and nothing is cut off.
+//
+//   1280 × 960 (4:3) — the game on a 16:9 stage, and a 1280 × 240 dock under it
+const STAGE = { w: 1280, h: 720 }
+const DOCK = { w: 1280, h: 240 }
+
+type Tab = 'decision' | 'table' | 'result' | 'events' | 'link'
+const TABS: Array<[Tab, string]> = [['decision', '决策'], ['table', '牌桌'], ['result', '结果'], ['events', '事件'], ['link', '连接']]
+
+/** What `capture.descriptor` carries while the WebView2 game child is the source — the label of `capture::embedded`. */
+const EMBEDDED = 'embedded WebView2'
+/** The stage the game is shown in may not be smaller than this; `resize_monitor_game` rejects less than 100. */
+const STAGE_MIN = 160
+
+function useNow(running: boolean, every: number): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!running) return
+    const timer = setInterval(() => setNow(Date.now()), every)
+    return () => clearInterval(timer)
+  }, [running, every])
+  return now
+}
+
+/** How much the `w × h` canvas has to be scaled to fit the window. */
+function useFit(w: number, h: number): number {
+  const fit = useCallback(() => Math.min(window.innerWidth / w, window.innerHeight / h) || 1, [w, h])
+  const [k, setK] = useState(fit)
+  useEffect(() => {
+    const apply = () => setK(fit())
+    apply()
+    window.addEventListener('resize', apply)
+    return () => window.removeEventListener('resize', apply)
+  }, [fit])
+  return k
+}
+
+/** Everything the dock draws from, worked out once. */
+type Model = {
+  s: MonitorSnapshot | null
+  view: DecisionView
+  rows: Candidate[]
+  listState: 'live' | 'done' | 'void'
+  noRows: string
+  /** Faults that leave no valid suggestion; they take the candidates' place. */
+  faults: Alert[]
+  health: Health[]
+  elapsed: number
+  now: number
+}
+
+/** Four chips, each in a place of its own: a link that needs a word gets it without moving its neighbours. */
+function StatusChips({ health }: { health: Health[] }) {
+  return <>{health.map(h => <span key={h.key} className="mchip" data-tone={h.tone} title={`${h.name}：${h.state}`}><i className="mdot" data-tone={h.tone} />{h.name}<b>{h.tone !== 'ok' && h.state}</b></span>)}</>
+}
+
+function Round({ s }: { s: MonitorSnapshot | null }) {
+  const game = s?.game
+  return <div className="mround">
+    {game ? <>
+      <strong>{roundLabel(game)}</strong>
+      <span className="mround-seat">{game.our_seat != null && <em>{seatWind(game.our_seat, game)}家{game.our_seat === game.oya ? ' · 庄' : ''}</em>}</span>
+      <span className="mround-count">{game.honba} 本场 · 供托 {game.kyotaku}</span>
+    </> : <span className="mround-idle"><strong>{s?.brand ?? ''}</strong><span>{s?.game_ended === false ? '等待牌局数据' : '等待对局'}</span></span>}
+  </div>
+}
+
+/** The candidates' slot: candidates, or the reason there are none. */
+function Slot({ m, onDetails }: { m: Model; onDetails: () => void }) {
+  if (m.faults.length > 0 && m.rows.length === 0) return <FaultCard alerts={m.faults} onDetails={onDetails} />
+  // What the numbers are is the bot's to say; its card carries the words.
+  const card = pickShow(m.s?.decision?.response?.meta)
+  return <CandidateList rows={m.rows} state={m.listState} empty={m.noRows} loading={m.view.phase === 'thinking'} caption={card?.caption} hint={card?.hint} />
+}
+
+/** 1280 × 240, under the game. The decision never leaves its place on the
+ *  left; the tabs change what stands to the right of it. */
+function Dock({ m, tab, setTab, tools, onAutoplay }: { m: Model; tab: Tab; setTab: (tab: Tab) => void; tools: React.ReactNode; onAutoplay: ((enabled: boolean) => void) | null }) {
+  const { s, view } = m
+  const game = s?.game ?? null
+  const faulty = m.health.some(h => h.tone === 'bad')
+  const last = s?.result ?? s?.previous_result ?? null
+  return <aside className="md">
+    <header className="md-bar">
+      <Round s={s} />
+      {/* Room for five indicators, the most a hand can turn over. */}
+      <span className="mdora" title="宝牌指示牌">{game && game.dora_markers.length > 0 && <>宝牌<Faces faces={game.dora_markers.map(tile => ({ tile }))} /></>}</span>
+      <nav className="md-tabs" role="tablist" aria-label="监视内容">
+        {TABS.map(([key, label]) => <button key={key} role="tab" aria-selected={tab === key} onClick={() => setTab(key)}>
+          {label}{key === 'link' && faulty && <i className="mdot md-tab-flag" data-tone="bad" />}
+        </button>)}
+      </nav>
+      <button className="md-health" onClick={() => setTab('link')} title="查看连接详情" aria-label="连接状态"><StatusChips health={m.health} /></button>
+      {/* The switch is the setting, and says so: whether the model's actions may be carried out — not that one has been. */}
+      <button className="mswitch" role="switch" aria-checked={!!s?.autoplay_enabled} disabled={!s || !onAutoplay} onClick={() => onAutoplay?.(!s?.autoplay_enabled)}
+        title={s?.autoplay_enabled ? '已允许自动执行模型的动作。点击后停止自动执行，只显示建议。' : '只显示建议。点击后允许自动执行模型的动作。'}>
+        自动操作<i aria-hidden /><b>{s?.autoplay_enabled ? '开' : '关'}</b>
+      </button>
+      <span className="md-model">{s?.server.state === 'ready' ? s.server.label ?? '' : ''}</span>
+      <div className="mtools">{tools}</div>
+    </header>
+
+    <div className="md-body" role="tabpanel" data-tab={tab}>
+      <DecisionCard view={view} decision={s?.decision ?? null} elapsed={m.elapsed} past={!!s?.round_ended} />
+      {/* At the end of a round its result stands where the candidates and the hand were. */}
+      {tab === 'decision' && (s?.result ? <ResultCard result={s.result} snapshot={s} />
+        : <>
+          <Slot m={m} onDetails={() => setTab('link')} />
+          {game ? <div className="md-side"><HandStrip game={game} suggestion={view.live ? s?.decision?.response ?? null : null} /><ScoreStrip game={game} /></div>
+            : <p className="mslot-empty">对局开始后，这里显示手牌和四家点数</p>}
+        </>)}
+      {tab === 'table' && (s?.game ? <SeatColumns snapshot={s} /> : <p className="mslot-empty md-wide">对局开始后，这里显示公开的牌河、副露和点数</p>)}
+      {tab === 'result' && (s && last ? <ResultCard result={last} snapshot={s} previous={!s.result} /> : <p className="mslot-empty md-wide">一局结束后，这里保留它公开的结果，直到下一局结束</p>)}
+      {tab === 'events' && (s ? <EventList snapshot={s} /> : <p className="mslot-empty md-wide">正在连接监视数据</p>)}
+      {tab === 'link' && <Diagnostics snapshot={s} health={m.health} now={m.now} />}
+    </div>
+  </aside>
+}
+
+export function Monitor() {
+  const { snapshot: s, error: bridgeError } = useMonitor()
+  const [options, setOptions] = useState(MONITOR_DEFAULTS)
+  const [ready, setReady] = useState(false)
+  const [tab, setTab] = useState<Tab>('decision')
+  const [busy, setBusy] = useState(false)
+  const [opened, setOpened] = useState(false)
+  const [uiError, setUiError] = useState<string | null>(null)
+  const stage = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    let stop: (() => void) | undefined
+    void (async () => {
+      const unlisten = await listen<MonitorConfig>('monitor-config', c => { if (!cancelled) setOptions(c) })
+      if (cancelled) { unlisten(); return }
+      stop = unlisten
+      try {
+        const cfg = await invoke<AppConfig>('get_config')
+        if (!cancelled) { setOptions(cfg.monitor); setReady(true) }
+      } catch (e) { if (!cancelled) setUiError(String(e)) }
+    })()
+    return () => { cancelled = true; stop?.() }
+  }, [])
+
+  const k = useFit(STAGE.w, STAGE.h + DOCK.h)
+  // The game child outlives a reload of this page; the capture it feeds says so.
+  const embedded = opened || (s != null && 'descriptor' in s.capture && !!s.capture.descriptor?.includes(EMBEDDED))
+
+  // The game is a native child view, not DOM: it goes exactly where the stage
+  // element is, and has to be told every time that moves or goes away.
+  const place = useCallback(() => {
+    const r = stage.current?.getBoundingClientRect()
+    const bounds = r && r.width >= STAGE_MIN && r.height >= STAGE_MIN
+      ? { x: Math.max(0, r.x), y: Math.max(0, r.y), width: r.width, height: r.height, visible: true }
+      : { x: 0, y: 0, width: STAGE_MIN, height: STAGE_MIN, visible: false }
+    void invoke('resize_monitor_game', { bounds }).catch(e => setUiError(String(e)))
+  }, [])
+  useEffect(() => {
+    if (!embedded) return
+    place()
+    const el = stage.current
+    if (!el) return
+    const observer = new ResizeObserver(place)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [embedded, place])
+
+  const pin = async (pinned: boolean) => {
+    setBusy(true); setUiError(null)
+    try { setOptions(await invoke<MonitorConfig>('set_monitor_pinned', { pinned })) }
+    catch (e) { setUiError(String(e)) }
+    finally { setBusy(false) }
+  }
+  const openGame = useCallback(async () => {
+    const r = stage.current?.getBoundingClientRect()
+    if (!r) return
+    setBusy(true); setUiError(null)
+    try {
+      await invoke('open_monitor_game', { bounds: { x: Math.max(0, r.x), y: Math.max(0, r.y), width: Math.max(100, r.width), height: Math.max(100, r.height), visible: true } })
+      setOpened(true)
+    } catch (e) { setUiError(String(e)) }
+    finally { setBusy(false) }
+  }, [])
+  // The window is the game: it is opened without being asked, once, as soon as
+  // there is a stage to put it on and no game is being played anywhere else.
+  // If that fails the stage keeps its button, and the reason is shown.
+  const idle = s?.game_ended
+  const asked = useRef(false)
+  useEffect(() => {
+    if (asked.current || !ready || embedded || !idle) return
+    asked.current = true
+    void openGame()
+  }, [ready, embedded, idle, openGame])
+  const setAutoplay = (enabled: boolean) => {
+    setUiError(null)
+    void invoke('set_monitor_autoplay', { enabled }).catch(e => setUiError(String(e)))
+  }
+
+  const table = tableOf(s?.game)
+  const d = s?.decision ?? null
+  const view = decisionView(s)
+  const thinking = view.phase === 'thinking'
+  const now = useNow(thinking || tab === 'link', thinking ? 100 : 1000)
+  const alerts = alertsOf(s, { ui: uiError, bridge: bridgeError })
+  const local = alerts.filter(a => a.key === 'ui' || a.key === 'bridge')
+  const faults = alerts.filter(a => a.key !== 'ui' && a.key !== 'bridge')
+
+  // Candidates stand only while their decision does. Once the game has
+  // answered with a different move they stay as a record of what was weighed,
+  // marked void; a fault or the end of the round drops them altogether.
+  const sound = !!s && !s.round_ended && !s.sync_error && s.service !== 'error'
+  const listState = view.phase === 'mismatch' ? 'void' : view.phase === 'confirmed' ? 'done' : 'live'
+  const rows = sound && (view.live || view.phase === 'confirmed' || view.phase === 'mismatch') ? candidatesOf(d, table, view.instead) : []
+  const noRows = !s ? '正在连接监视数据'
+    : view.phase === 'idle' ? '轮到自己时，这里列出模型的候选动作'
+    : view.phase === 'failed' || view.phase === 'unavailable' ? '这一步没有候选'
+    : sound && (view.live || view.phase === 'confirmed') ? '模型这一步没有给出候选'
+    : s.round_ended ? '本局已结束，候选不再有效'
+    : '建议已失效，候选不再显示'
+  const m: Model = { s, view, rows, listState, noRows, faults, health: healthOf(s), elapsed: d ? Math.max(0, now - d.started_ms) : 0, now }
+
+  const tools = <button className="mtool" aria-label="置顶" title={options.always_on_top ? '取消置顶' : '窗口置顶'} aria-pressed={options.always_on_top} disabled={!ready || busy}
+    onClick={() => void pin(!options.always_on_top)}>{options.always_on_top ? <Pin size={15} /> : <PinOff size={15} />}</button>
+
+  return <main className="mon" style={{ '--k': k } as CSSProperties}>
+    <div className="mon-fit">
+      <div className="mon-stage" ref={stage}>
+        <div className="mon-canvas mon-canvas--stage">
+          {embedded ? <div className="mon-stage-idle">
+            <LoaderCircle size={22} className="mspin" />
+            <p>雀魂视图在这里显示</p>
+            <button className="mbtn" onClick={place}>重新对齐游戏视图</button>
+          </div>
+            : s && !s.game_ended && s.game ? <div className="mon-stage-board">
+              <p className="mon-stage-note"><Gamepad2 size={16} />正在采集窗外的对局。这一局打完后，可以改为在本窗内打开雀魂。</p>
+              <Board snapshot={s} size="stage" />
+              <BoardLegend />
+            </div>
+            : <div className="mon-stage-start">
+              <h2>{s?.brand ? `${s.brand} · 雀魂` : '雀魂'}</h2>
+              <p>上面登录雀魂并对局，下面核对模型建议和雀魂的实际动作。</p>
+              <div className="mon-start-card">
+                <p>{s && !s.game_ended ? '当前对局结束后才能切换游戏窗口。' : '游戏使用独立的登录资料。打开后，本实例改为采集这个窗口里的游戏。'}</p>
+                <button className="mbtn mbtn--primary" disabled={!ready || busy || (s != null && !s.game_ended)} onClick={() => void openGame()}>
+                  {busy ? <><LoaderCircle size={16} className="mspin" />正在连接游戏视图…</> : '打开雀魂'}
+                </button>
+              </div>
+            </div>}
+        </div>
+      </div>
+
+      <div className="mon-canvas mon-canvas--dock">
+        <Dock m={m} tab={tab} setTab={setTab} tools={tools} onAutoplay={ready ? setAutoplay : null} />
+        {local.length > 0 && <div className="mtoast" role="alert">
+          <div><strong>{local[0].title}</strong><p>{local[0].message}</p></div>
+          {uiError && <button aria-label="知道了" onClick={() => setUiError(null)}><X size={13} /></button>}
+        </div>}
+      </div>
+    </div>
+  </main>
+}

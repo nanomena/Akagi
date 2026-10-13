@@ -63,6 +63,9 @@ impl Default for CaptureControl {
 
 #[derive(Clone)]
 pub struct AppState {
+    pub monitor: crate::monitor::MonitorHandle,
+    /// An opt-in WebView2 CDP endpoint plus initial Mahjong Soul URL.
+    pub embedded_game: Arc<Mutex<Option<(String, String)>>>,
     pub config: Arc<RwLock<AppConfig>>,
     pub config_path: Arc<PathBuf>,
     pub log_session: Arc<Session>,
@@ -165,6 +168,8 @@ impl AppState {
             notify_bus,
             analysis_bus,
             history_bus,
+            monitor: crate::monitor::MonitorHandle::default(),
+            embedded_game: Arc::new(Mutex::new(None)),
             bot_status: Arc::new(RwLock::new(BotStatus::Idle)),
             capture_control: Arc::new(Mutex::new(CaptureControl::default())),
             game_tracker,

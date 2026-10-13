@@ -4,6 +4,7 @@ mod capture;
 mod general;
 mod logging;
 mod merge;
+mod monitor;
 mod network;
 mod overlay;
 mod platform;
@@ -17,6 +18,7 @@ pub use capture::{CaptureConfig, CaptureMode, ChromiumConfig, HttpCaptureConfig}
 pub use general::GeneralConfig;
 pub use logging::LoggingConfig;
 pub use merge::merge_into;
+pub use monitor::MonitorConfig;
 pub use network::{GithubMirrorMode, NetworkConfig};
 pub use overlay::{OverlayConfig, TOP_N_MAX, TOP_N_MIN};
 pub use platform::{Platform, PlatformConfig};
@@ -36,6 +38,7 @@ pub struct AppConfig {
     pub capture: CaptureConfig,
     pub autoplay: AutoplayConfig,
     pub overlay: OverlayConfig,
+    pub monitor: MonitorConfig,
     pub network: NetworkConfig,
 }
 

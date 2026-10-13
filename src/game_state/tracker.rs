@@ -437,13 +437,23 @@ pub async fn drive_loop(
     rx: broadcast::Receiver<AkagiEvent>,
     post: Option<broadcast::Sender<TrackedEvent>>,
 ) {
-    run(tracker, rx, post).await
+    run(tracker, rx, post, None).await
+}
+
+pub async fn drive_loop_with_monitor(
+    tracker: Arc<Mutex<GameTracker>>,
+    rx: broadcast::Receiver<AkagiEvent>,
+    post: Option<broadcast::Sender<TrackedEvent>>,
+    monitor: Option<crate::monitor::MonitorHandle>,
+) {
+    run(tracker, rx, post, monitor).await
 }
 
 async fn run(
     tracker: Arc<Mutex<GameTracker>>,
     mut rx: broadcast::Receiver<AkagiEvent>,
     post: Option<broadcast::Sender<TrackedEvent>>,
+    monitor: Option<crate::monitor::MonitorHandle>,
 ) {
     info!("game tracker subscribed to MJAI bus");
     loop {
@@ -454,20 +464,31 @@ async fn run(
                 // later one. A burst of events from one frame is applied in
                 // microseconds; anything that asks afterwards has already
                 // missed the state it meant to ask about.
-                let can_act = {
+                let (can_act, context) = {
                     let mut t = tracker.lock().await;
-                    if let Err(e) = t.handle(&ev) {
-                        warn!("game tracker: handle error: {e:#}");
+                    let error = t.handle(&ev).err().map(|e| format!("{e:#}"));
+                    if let Some(error) = &error {
+                        warn!("game tracker: handle error: {error}");
                     }
-                    t.our_seat_can_act()
+                    let context = monitor
+                        .as_ref()
+                        .map(|m| m.game_event(&ev, t.snapshot(), error));
+                    (t.our_seat_can_act(), context)
                 };
                 if let Some(p) = &post {
                     // Receiver may have lagged or no-one subscribed yet — ignore.
-                    let _ = p.send(TrackedEvent { event: ev, can_act });
+                    let _ = p.send(TrackedEvent {
+                        event: ev,
+                        can_act,
+                        context,
+                    });
                 }
             }
             Err(broadcast::error::RecvError::Lagged(n)) => {
                 warn!("game tracker lagged behind MJAI bus by {n} events");
+                if let Some(m) = &monitor {
+                    m.gap(format!("Tracker missed {n} events."));
+                }
             }
             Err(broadcast::error::RecvError::Closed) => {
                 info!("MJAI bus closed; game tracker exiting");

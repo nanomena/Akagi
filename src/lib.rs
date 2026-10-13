@@ -12,6 +12,7 @@ pub mod history;
 pub mod inspector;
 pub mod ipc;
 pub mod logger;
+pub mod monitor;
 pub mod platform;
 pub mod proxy;
 pub mod schema;
@@ -109,9 +110,16 @@ pub fn run() {
     info!("History store at {}", history_root.display());
 
     let bot_enabled = cfg.bot.enabled;
-    let proxy_enabled = cfg.proxy.enabled;
+    // For Mahjong Soul over Chromium the window opens the game inside itself and
+    // starts capture on that view (`ipc::monitor::open_monitor_game`). Launching
+    // a controlled Chromium here as well would put a second window on screen.
+    let game_in_window = cfg.capture.mode == config::CaptureMode::Chromium
+        && cfg.platform.kind == config::Platform::Majsoul;
+    let proxy_enabled = cfg.proxy.enabled && !game_in_window;
     let autoplay_enabled = cfg.autoplay.enabled;
-    let overlay_cfg = cfg.overlay.clone();
+    let first_run_completed = cfg.general.first_run_completed;
+    let monitor_cfg = cfg.monitor.clone();
+    let brand = ipc::monitor::brand(&cfg);
 
     // Game-state tracker handle is built up front so AppState can carry
     // the Arc, but the consumer task is spawned inside `.setup()` once
@@ -139,6 +147,15 @@ pub fn run() {
                 // which would put decorations back on a deliberately frameless
                 // window. `ipc::overlay::open` restores position+size itself.
                 .skip_initial_state(ipc::overlay::LABEL)
+                // The monitor window restores its own place and keeps its own
+                // aspect ratio; see `ipc::monitor::reconcile`.
+                .skip_initial_state(ipc::monitor::LABEL)
+                // Nothing is shown because it was showing last time: the main
+                // window stays hidden, whatever an older saved state says.
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::all()
+                        - tauri_plugin_window_state::StateFlags::VISIBLE,
+                )
                 .build(),
         )
         .invoke_handler(crate::ipc_handlers!())
@@ -186,10 +203,19 @@ pub fn run() {
 
                 ipc::install(app.handle(), state.clone())?;
 
-                // Reopen the suggestion overlay if it was left enabled. Safe
-                // before any game data exists — it renders its empty state and
-                // fills in on the first `bot-response`.
-                ipc::overlay::reconcile(app.handle(), &overlay_cfg);
+                // The application is one window: the game with the monitor's
+                // dock under it. The main window stays hidden and no overlay is
+                // reopened at startup, whatever `overlay.enabled` was left at.
+                state.monitor.set_brand(brand);
+                ipc::monitor::reconcile(app.handle(), &monitor_cfg);
+                // The one exception is a first run: the setup wizard lives in
+                // the main window and nothing works until it has been through.
+                if !first_run_completed {
+                    if let Some(main) = app.get_webview_window("main") {
+                        let _ = main.show();
+                    }
+                }
+                state.monitor.set_autoplay(autoplay_enabled);
 
                 // The overlay is an accessory window, not a co-equal one. Tauri
                 // exits when *all* windows close, and the overlay counts — so
@@ -209,6 +235,7 @@ pub fn run() {
                     let handle = app.handle().clone();
                     main.on_window_event(move |event| {
                         if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                            ipc::monitor::destroy(&handle);
                             if let Err(e) = ipc::overlay::close(&handle) {
                                 warn!("overlay: could not close with the main window: {e}");
                             }
@@ -218,10 +245,11 @@ pub fn run() {
 
                 // Spawn tracker + analysis loops inside the Tauri Tokio
                 // runtime — `lib::run` itself is sync.
-                tauri::async_runtime::spawn(game_state::tracker::drive_loop(
+                tauri::async_runtime::spawn(game_state::tracker::drive_loop_with_monitor(
                     state.game_tracker.clone(),
                     tracker_rx,
                     Some(tracker_post),
+                    Some(state.monitor.clone()),
                 ));
                 tauri::async_runtime::spawn(analysis::runner::drive_loop(
                     analysis_rx,
@@ -251,6 +279,7 @@ pub fn run() {
                     let inspector = state.log_session.inspector();
                     let rt = runtime.clone();
                     let syncs = state.syncs_in_flight.clone();
+                    let monitor = state.monitor.clone();
                     state
                         .bot_manager_started
                         .store(true, std::sync::atomic::Ordering::SeqCst);
@@ -264,12 +293,21 @@ pub fn run() {
                             inspector,
                             rt,
                             syncs,
+                            Some(monitor),
                         )
                         .await
                         {
                             error!("Bot manager failed: {e:#}");
                         }
                     });
+                    // The process the active bot needs across games lives and
+                    // dies with the app.
+                    tauri::async_runtime::spawn(bot::service::run(
+                        state.config.clone(),
+                        runtime.clone(),
+                        state.syncs_in_flight.clone(),
+                        state.monitor.clone(),
+                    ));
                 }
 
                 if autoplay_enabled {
