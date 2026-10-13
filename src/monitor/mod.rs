@@ -9,6 +9,21 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use tokio::sync::watch;
 
+/// The name the window goes by: the active bot's display name, as its
+/// manifest gives it, or Akagi's own when no bot is selected.
+pub fn brand(config: &crate::config::AppConfig) -> String {
+    let root = crate::util::resolve_dir(std::path::Path::new(&config.bot.dir));
+    crate::bot::BotRegistry::scan(&root)
+        .ok()
+        .and_then(|registry| registry.find(config.bot.active_for(4)).cloned())
+        .map(|bot| {
+            bot.manifest
+                .and_then(|manifest| manifest.bot.display)
+                .unwrap_or(bot.name)
+        })
+        .unwrap_or_else(|| "Akagi".into())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DecisionContext {
     pub game: u64,
