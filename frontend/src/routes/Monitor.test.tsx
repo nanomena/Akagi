@@ -30,7 +30,7 @@ function state(): MonitorSnapshot {
     bot: { state: 'ready', bot: 'demo', actor_id: 0 }, service: 'connected', service_error: null, server: { state: 'none' }, sync_error: null,
     brand: 'Demo', facts: [], autoplay_enabled: true,
     previous_decision: null, result: null, previous_result: null, events: [], last_event_ms: null,
-    decision: { id: 1, context, started_ms: Date.now(), completed_ms: Date.now(),
+    decision: { id: 41, number: 1, context, started_ms: Date.now(), completed_ms: Date.now(),
       reaction_ms: 120, bot: 'demo', trigger: { type: 'tsumo', actor: 0, pai: '9m' }, state: 'awaiting', error: null, confirmed_seq: null,
       response: { type: 'dahai', actor: 0, pai: '9m', tsumogiri: true, meta: { show: { items: [
         { label: 'Discard', pais: ['9m'], value: '60.0%' }, { label: 'Discard', pais: ['5pr'], value: '25.0%' },
@@ -52,6 +52,18 @@ describe('monitor user states', () => {
     // Values as reported: two rows of five are not rescaled to 100%.
     expect(candidates().map(li => li.textContent)).toEqual(['1打模型选择60.0%', '2打25.0%'])
     expect(within(candidates()[1]).getByRole('img', { name: '赤5筒' })).toBeTruthy()
+  })
+
+  it('numbers a decision by its place in the game, or by the place its bot gives it', () => {
+    const { unmount } = render(<Monitor />)
+    // Its number in the game, not the id that runs for the life of the process (41).
+    expect(within(decision()).getByText('#1')).toBeTruthy()
+    unmount()
+    const show = fixture.snapshot!.decision!.response!.meta!.show as Record<string, unknown>
+    show.position = 'step 187'
+    render(<Monitor />)
+    expect(within(decision()).getByText('step 187')).toBeTruthy()
+    expect(within(decision()).queryByText('#1')).toBeNull()
   })
 
   it('does not mistake a ready Bot process for a connected model service', () => {

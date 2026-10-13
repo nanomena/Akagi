@@ -6,7 +6,8 @@ export type MonitorConfig = { always_on_top: boolean }
 export const MONITOR_DEFAULTS: MonitorConfig = { always_on_top: false }
 export type DecisionContext = { game: number; round: number; event_seq: number }
 export type MonitorDecision = {
-  id: number; context: DecisionContext; started_ms: number; completed_ms: number | null
+  /** Which decision this is, for the life of the process; `number` is its place among its game's. */
+  id: number; number: number; context: DecisionContext; started_ms: number; completed_ms: number | null
   reaction_ms: number | null; bot: string; trigger: MjaiEvent
   state: 'thinking' | 'awaiting' | 'confirmed' | 'expired' | 'failed' | 'unavailable' | 'declined'
   response: BotResponse | null; error: string | null; confirmed_seq: number | null
@@ -253,6 +254,24 @@ function staleReason(s: MonitorSnapshot): string {
   if (s.bot.state !== 'ready') return 'Bot 未就绪，已作废'
   if (s.round_ended) return '本局已结束，不再有效'
   return '牌局已推进，不再有效'
+}
+
+/** The longest position a bot can give and still have it shown: the heading keeps a place of one size for it. */
+const POSITION_ROOM = 10
+
+/**
+ * What a decision goes by in its heading. A bot can say where the decision
+ * falls in the game by its own count (`meta.show.position`) — a step of its
+ * model, say — and that is the better number: it is the bot's own, and it shows
+ * when the bot has lost its place. Failing that, the monitor's count of the
+ * game's decisions. While the answer is still out there is nothing to show:
+ * only the answer says which of the two it will be.
+ */
+export function decisionMark(d: MonitorDecision): string {
+  if (d.state === 'thinking') return ''
+  const said = (d.response?.meta?.show as { position?: unknown } | undefined)?.position
+  const position = typeof said === 'string' ? said.trim() : ''
+  return position && position.length <= POSITION_ROOM ? position : `#${d.number}`
 }
 
 export function decisionView(s: MonitorSnapshot | null): DecisionView {
