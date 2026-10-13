@@ -1,7 +1,16 @@
 [package]
 name = "akagi"
-version = "3.7.1"
+version = "0.1.0"
 edition = "2021"
+
+# What this tree carries of Akagi: the version and commit of the upstream
+# branch it has been followed to. This tree's own version, above, says
+# nothing about that. See "Versions and upstream" in README.md.
+[package.metadata.upstream]
+repository = "https://github.com/shinkuan/Akagi"
+branch = "v3"
+version = "3.7.1"
+commit = "cd68865f9e93eddcda6451cd18874a6f68c5fb49"
 
 [lib]
 name = "akagi"
