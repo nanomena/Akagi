@@ -10,9 +10,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [v3]
+    branches: [main]
   push:
-    branches: [v3]
+    branches: [main]
 
 # A newer push to the same ref cancels the in-flight run.
 concurrency:
