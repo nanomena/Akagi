@@ -46,6 +46,10 @@ pub struct Manifest {
     pub bot: ManifestBot,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<BotSource>,
+    /// A process the bot needs for as long as it is the active one; see
+    /// [`crate::bot::service`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service: Option<ServiceSpec>,
     pub settings: BTreeMap<String, FieldSpec>,
 }
 
@@ -55,6 +59,7 @@ impl Default for Manifest {
             manifest_version: 1,
             bot: ManifestBot::default(),
             source: None,
+            service: None,
             settings: BTreeMap::new(),
         }
     }
@@ -91,6 +96,15 @@ impl Default for ManifestBot {
             supported_modes: vec!["4p".to_string()],
         }
     }
+}
+
+/// The `[service]` table: a script Akagi keeps running while the bot is the
+/// active one, where the bot's own `bot.py` runs once per game.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ServiceSpec {
+    /// The script, relative to the bot directory. Its directory holds the
+    /// service's own `pyproject.toml`, so its environment is not the bot's.
+    pub entry: String,
 }
 
 /// Optional source pointer for Phase 3 (GitHub install). Tagged on `type`.

@@ -20,6 +20,7 @@
       {
         "label": "main",
         "title": "Akagi",
+        "visible": false,
         "width": 1560,
         "height": 980,
         "minWidth": 800,

@@ -30,7 +30,7 @@ bridge to them.
   syncs against the same venv can't trample each other.
 - `runner` — `BotRunner` async trait + `SubprocessBot` impl. Talks JSONL
   over stdin/stdout, pumps stderr into `tracing` (`bot=<name>` field),
-  enforces a 5 s default react timeout, and `kill_on_drop(true)` so a
+  enforces a 60 s default react timeout, and `kill_on_drop(true)` so a
   dropped runner can't leak children. `reset()` writes `[{"end_game"}]`,
   waits 500 ms, then SIGKILL's and respawns. The stderr pump doubles as a
   bot→frontend notification channel: a line prefixed with `NOTIFY_PREFIX`
@@ -105,6 +105,9 @@ bridge to them.
   id crosses the wire, and no client secret is embedded in the binary.
   Stateless like `api`; the polling state machine lives in the frontend's
   purchase store, driven through the `native_api_*` IPC commands.
+- `service` — `service::run`: the resident process a bot may declare in its
+  manifest (`[service]`), run for as long as the app is open. See
+  [A bot's service](#a-bots-service).
 - `supervisor` — `run_bot_manager`: constructs the `BotManager` and drives
   its run loop off the `PostTrackerBus`. Tolerates a missing Python runtime
   — the built-in `native` bots need none.
@@ -292,6 +295,66 @@ OS keychain integration is on the roadmap; until then, treat
 Updating settings does **not** restart the running bot subprocess. The
 new values take effect on the next `start_game` event. The frontend
 should warn the user accordingly.
+
+## A bot's service
+
+`bot.py` lives for one game. A bot that needs something to outlive its games
+— a model server that takes seconds to load, or that follows a whole game —
+declares it:
+
+```toml
+[service]
+entry = "service/service.py"
+```
+
+```
+mjai_bot/<name>/
+├── bot.py
+└── service/
+    ├── service.py        # the entry
+    └── pyproject.toml    # its own environment, not the bot's
+```
+
+While the bot is the active one (four-player first, else three-player),
+Akagi installs the environment the entry's directory declares, runs the entry
+there with `AKAGI_BOT_CONFIG` pointing at the bot's resolved settings, and
+starts it again when it exits: after 2 s, doubling up to 60 s for each start
+that never became ready. The entry's side of the contract:
+
+- **stdout** — one JSON line `{"type":"ready"}` once it can serve. A `label`
+  string and a `facts` list on it are shown to the user as they are (see
+  [What a bot says about itself](#what-a-bot-says-about-itself)).
+- **stderr** — its log; every line is copied into Akagi's with `service=<bot>`.
+- **stdin** — never written. Akagi holds it open; the entry exits when it
+  closes. That is how the service is stopped, and why it cannot outlive the
+  app however the app ends. On Windows a read left pending on the pipe stalls
+  other threads of the interpreter, so poll it (`PeekNamedPipe`) instead.
+
+The state — none, installing, starting, ready, failed — is `server` on the
+monitor snapshot, separate from `service`, which is whether the bot has
+reached its server.
+
+## What a bot says about itself
+
+The monitor window knows the game and the mjai actions; it knows nothing about
+any bot. What a bot wants the user to see about itself, it says in its own
+words, and the window shows the words as written:
+
+- **`meta.facts`** on a reply — `[{"name": "...", "value": "...", "note": "..."}]`,
+  `note` optional. Shown in the window's list of facts, the note on demand.
+  The latest reply that carries the key replaces what stood before; a reply
+  without it changes nothing. A service's `ready` line may carry `facts` too,
+  for what does not change while it runs.
+- **`label`** on a service's `ready` line — the name the service goes by.
+- **`caption`** and **`hint`** on the `meta.show` card — what the rows' values
+  are, in a word or two, and a sentence about them. Without a caption the
+  values stand unexplained.
+- The window is named after the active bot's `display` in its manifest.
+
+Card rows are read by their `label`: `Discard`, `Riichi`, `Chi`, `Pon`, `Kan`,
+`Ankan`, `Kakan`, `Hora`, `Ron`, `Tsumo`, `Ryukyoku`, `Kita` and `Pass` are
+matched against the action the bot chose and the action the game then took;
+any other label is shown as text.
 
 ## Installing from GitHub
 

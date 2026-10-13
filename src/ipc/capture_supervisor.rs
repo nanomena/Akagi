@@ -33,7 +33,7 @@ fn schema_kind(k: RtCaptureKind) -> CaptureKind {
 /// Stop the running backend (if any) and wait briefly for the
 /// supervisor task to flip status to `Stopped` before returning. Used by
 /// `restart_capture` so the spawn that follows starts on a clean slate.
-async fn stop_and_wait(state: &AppState, max_wait: Duration) {
+pub(super) async fn stop_and_wait(state: &AppState, max_wait: Duration) {
     // Subscribe *before* signalling shutdown so we can't lose the
     // resulting status emission to a race.
     let mut rx = state.capture_status_bus.subscribe();
@@ -115,7 +115,13 @@ pub async fn spawn_capture_supervisor(state: AppState) -> Result<()> {
                 force_close,
             ))
         }
-        CaptureMode::Chromium => Box::new(ChromiumBackend::new(chromium_cfg)),
+        CaptureMode::Chromium => match state.embedded_game.lock().await.clone() {
+            Some((endpoint, initial_url)) => Box::new(crate::capture::embedded::EmbeddedBackend {
+                endpoint,
+                initial_url,
+            }),
+            None => Box::new(ChromiumBackend::new(chromium_cfg)),
+        },
     };
     let descriptor = backend.descriptor();
     let kind = schema_kind(descriptor.kind);
@@ -169,7 +175,13 @@ pub async fn spawn_capture_supervisor(state: AppState) -> Result<()> {
         label
     );
     tokio::spawn(async move {
+        let autoplay = ctx.autoplay.clone();
         let result = backend.run(ctx, shutdown_token).await;
+        if let Some(context) = autoplay {
+            // A capture switch must never leave input pointed at the old page.
+            *context.page.write().await = None;
+            *context.canvas_rect.write().await = None;
+        }
         let next = match &result {
             Ok(()) => {
                 info!("capture supervisor: stopped cleanly");

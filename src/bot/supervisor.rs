@@ -38,6 +38,7 @@ pub async fn run_bot_manager(
     inspector: InspectorWriter,
     runtime: Option<PythonRuntime>,
     syncs_in_flight: Arc<Mutex<HashSet<String>>>,
+    monitor: Option<crate::monitor::MonitorHandle>,
 ) -> Result<()> {
     let bot_dir = {
         let cfg = config.read().await;
@@ -85,7 +86,8 @@ pub async fn run_bot_manager(
         notify_bus,
         inspector,
         syncs_in_flight,
-    );
+    )
+    .with_monitor(monitor);
     let rx = events.subscribe();
     manager.run(rx).await
 }

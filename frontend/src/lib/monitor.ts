@@ -1,0 +1,456 @@
+import { relativeKind, type RelativeKind } from '@/lib/format'
+import { pickShow, visibleItems } from '@/lib/botShow'
+import type { BotResponse, BotStatus, CaptureStatus, GameStateSnapshot, MahgenView, MeldSnapshot, MjaiEvent, ShowItem } from '@/types'
+
+export type MonitorConfig = { always_on_top: boolean }
+export const MONITOR_DEFAULTS: MonitorConfig = { always_on_top: false }
+export type DecisionContext = { game: number; round: number; event_seq: number }
+export type MonitorDecision = {
+  id: number; context: DecisionContext; started_ms: number; completed_ms: number | null
+  reaction_ms: number | null; bot: string; trigger: MjaiEvent
+  state: 'thinking' | 'awaiting' | 'confirmed' | 'expired' | 'failed' | 'unavailable' | 'declined'
+  response: BotResponse | null; error: string | null; confirmed_seq: number | null
+}
+export type PublicHand = { seat: number; tiles: string[]; winning_tile: string | null; target: number | null; ura_markers: string[] }
+export type RoundResult = { kind: string; hands: PublicHand[]; scores: number[] | null; deltas: number[] | null }
+export type MonitorEvent = { seq: number; ts_ms: number; event: MjaiEvent }
+/** One thing a bot or its service says about itself. Shown as written: this
+ *  window does not know what any of it means. */
+export type Fact = { name: string; value: string; note?: string }
+/** The bot's service as a process the app runs: whether it is up. `service` on
+ *  the snapshot is a different fact — whether the bot has reached it. */
+export type ServerStatus =
+  | { state: 'none' }
+  | { state: 'installing'; bot: string }
+  | { state: 'starting'; bot: string; since_ms: number }
+  | { state: 'ready'; bot: string; label: string | null; facts: Fact[]; since_ms: number; startup_ms: number }
+  | { state: 'failed'; bot: string; error: string; retry_at_ms: number }
+export type MonitorSnapshot = {
+  revision: number; context: DecisionContext; names: string[]; red_fives: boolean | null
+  game: GameStateSnapshot | null; view: MahgenView | null; round_ended: boolean; game_ended: boolean
+  capture: CaptureStatus; bot: BotStatus; service: string; service_error: string | null; server: ServerStatus
+  sync_error: string | null
+  brand: string; facts: Fact[]; autoplay_enabled: boolean
+  decision: MonitorDecision | null; previous_decision: MonitorDecision | null
+  result: RoundResult | null; previous_result: RoundResult | null
+  events: MonitorEvent[]; last_event_ms: number | null
+}
+
+export function newestSnapshot(current: MonitorSnapshot | null, incoming: MonitorSnapshot): MonitorSnapshot {
+  return current && current.revision > incoming.revision ? current : incoming
+}
+
+// ---------------------------------------------------------------- tiles ----
+
+/** One drawn tile. `side` lays it down (called tile, riichi declaration);
+ *  `back` hides the face (concealed kan, hidden hands). */
+export type Face = { tile: string; side?: boolean; back?: boolean; dim?: boolean }
+
+const HONOR: Record<string, string> = { E: '东', S: '南', W: '西', N: '北', P: '白', F: '发', C: '中' }
+const SUIT: Record<string, string> = { m: '万', p: '筒', s: '索' }
+export const WIND: Record<string, string> = { E: '东', S: '南', W: '西', N: '北' }
+
+export function tileLabel(tile: string): string {
+  if (!tile || tile === '?') return '未公开'
+  if (HONOR[tile]) return HONOR[tile]
+  return `${tile.endsWith('r') ? '赤' : ''}${tile[0]}${SUIT[tile[1]] ?? ''}`
+}
+/** A tile lying on its side, in upright-tile widths. */
+export const SIDE = 92 / 70
+/** A pon or chi, and an open kan (the widest meld there is), in tile-widths. */
+const PON = 2 + SIDE
+const KAN = 3 + SIDE
+/** The room a hand is given, in tile-widths: thirteen tiles and the draw
+ *  standing a little apart, with four sets called away — three pons and a kan.
+ *  Every hand that comes up in play fits it, so its tiles are one size. */
+export const HAND_ROOM = 13 + 1.3 - 4 * 3 + 3 * (PON + 0.3) + (KAN + 0.3)
+/** The room `n` melds in a row are given: pons, one of them a kan. */
+export const meldsRoom = (n: number) => n * (PON + 0.3) - 0.3 + (KAN - PON)
+
+/** Red fives are a distinct identity everywhere except "is this the same kind of tile". */
+const plain = (tile: string) => tile.replace(/r$/, '')
+const rank = (tile: string) => (HONOR[tile] ? 40 + 'ESWNPFC'.indexOf(tile) : 'mps'.indexOf(tile[1]) * 10 + Number(tile[0])) + (tile.endsWith('r') ? 0.5 : 0)
+const sorted = (tiles: string[]) => [...tiles].sort((a, b) => rank(a) - rank(b))
+
+// ---------------------------------------------------------------- seats ----
+
+export const REL_LABEL: Record<RelativeKind, string> = { self: '自己', shimocha: '下家', toimen: '对家', kamicha: '上家' }
+export const REL_SHORT: Record<RelativeKind, string> = { self: '自', shimocha: '下', toimen: '对', kamicha: '上' }
+export type Table = { self: number | null; players: number }
+export const tableOf = (game: GameStateSnapshot | null | undefined): Table => ({ self: game?.our_seat ?? null, players: game?.num_players ?? 4 })
+export const relOf = (seat: number, t: Table): RelativeKind | null => (t.self == null ? null : relativeKind(seat, t.self, t.players))
+export function seatLabel(seat: number, t: Table): string {
+  const rel = relOf(seat, t)
+  return rel ? REL_LABEL[rel] : `座位 ${seat + 1}`
+}
+export function seatWind(seat: number, game: GameStateSnapshot): string {
+  return WIND['ESWN'[(seat - game.oya + game.num_players) % game.num_players]]
+}
+export function roundLabel(game: GameStateSnapshot): string {
+  return `${WIND[game.bakaze] ?? game.bakaze}${game.kyoku}局`
+}
+
+// -------------------------------------------------------------- actions ----
+
+export type ActionTone = 'discard' | 'riichi' | 'call' | 'kan' | 'win' | 'pass' | 'draw'
+export type ActionView = {
+  tone: ActionTone
+  /** 打 / 立直 / 吃 / 碰 / 明杠 / 暗杠 / 加杠 / 自摸 / 荣和 / 过 */
+  verb: string
+  /** What the verb applies to, in words: "9索". Empty when the verb says it all. */
+  object: string
+  faces: Face[]
+  /** 摸切 / 手切 — only known for a discard the model or the game actually named. */
+  note?: string
+}
+
+/** A called tile lies sideways on the side it came from: 上家 left, 对家 middle, 下家 right. */
+function meldFaces(called: string, own: string[], from: number | null, actor: number, t: Table): Face[] {
+  const rel = from == null ? null : relativeKind(from, actor, t.players)
+  const faces: Face[] = sorted(own).map(tile => ({ tile }))
+  const at = rel === 'shimocha' ? faces.length : rel === 'toimen' ? 1 : 0
+  faces.splice(at, 0, { tile: called, side: true })
+  return faces
+}
+function concealedKan(tiles: string[]): Face[] {
+  // Keep a red five among the two faces that stay visible.
+  const four = [...tiles].sort((a, b) => Number(b.endsWith('r')) - Number(a.endsWith('r')))
+  return [{ tile: four[2] ?? '?', back: true }, { tile: four[0] ?? '?' }, { tile: four[1] ?? '?' }, { tile: four[3] ?? '?', back: true }]
+}
+
+export function describeAction(action: MjaiEvent | null | undefined, t: Table): ActionView | null {
+  if (!action) return null
+  switch (action.type) {
+    case 'dahai': return { tone: 'discard', verb: '打', object: tileLabel(action.pai), faces: [{ tile: action.pai }], note: action.tsumogiri ? '摸切' : '手切' }
+    case 'reach': return { tone: 'riichi', verb: '立直', object: action.pai ? `打 ${tileLabel(action.pai)}` : '', faces: action.pai ? [{ tile: action.pai }] : [] }
+    case 'chi': return { tone: 'call', verb: '吃', object: tileLabel(action.pai), faces: meldFaces(action.pai, action.consumed, action.target, action.actor, t) }
+    case 'pon': return { tone: 'call', verb: '碰', object: tileLabel(action.pai), faces: meldFaces(action.pai, action.consumed, action.target, action.actor, t) }
+    case 'daiminkan': return { tone: 'kan', verb: '明杠', object: tileLabel(action.pai), faces: meldFaces(action.pai, action.consumed, action.target, action.actor, t) }
+    case 'ankan': return { tone: 'kan', verb: '暗杠', object: tileLabel(plain(action.consumed[0] ?? '?')), faces: concealedKan(action.consumed) }
+    case 'kakan': return { tone: 'kan', verb: '加杠', object: tileLabel(action.pai), faces: [{ tile: action.pai }] }
+    case 'kita': return { tone: 'call', verb: '拔北', object: '', faces: [{ tile: action.pai ?? 'N' }] }
+    case 'hora': return { tone: 'win', verb: action.actor === action.target ? '自摸' : '荣和', object: action.pai ? tileLabel(action.pai) : '', faces: action.pai ? [{ tile: action.pai }] : [] }
+    case 'ryukyoku': return { tone: 'draw', verb: '九种九牌', object: '宣告流局', faces: [] }
+    case 'none': return { tone: 'pass', verb: '过', object: '', faces: [] }
+    default: return null
+  }
+}
+export function actionLabel(action: MjaiEvent | null | undefined, t: Table = { self: null, players: 4 }): string {
+  const view = describeAction(action, t)
+  if (!view) return action ? action.type : '等待建议'
+  return view.object ? `${view.verb} ${view.object}` : view.verb
+}
+
+/** The moves that commit a seat. A riichi declaration alone commits nothing. */
+const COMMITS = new Set(['dahai', 'chi', 'pon', 'daiminkan', 'ankan', 'kakan', 'kita', 'hora'])
+const actorOf = (e: MjaiEvent): number | null => ('actor' in e && typeof e.actor === 'number' ? e.actor : null)
+
+// ------------------------------------------------------------ candidates ----
+
+export type Candidate = {
+  tone: ActionTone; verb: string; faces: Face[]
+  /** The row's value as a share, 0..1, when it is a percentage; null otherwise. */
+  share: number | null
+  value: string
+  /** This row is the action the model actually answered with. */
+  chosen: boolean
+  /** This row is what Mahjong Soul did instead — only set once the two are known to differ. */
+  taken: boolean
+}
+
+const sameTiles = (a: string[], b: string[]) => a.length === b.length && sorted(a).join() === sorted(b).join()
+
+function candidateOf(item: ShowItem, d: MonitorDecision, t: Table): Omit<Candidate, 'share' | 'value' | 'chosen' | 'taken'> & { matches: (r: MjaiEvent) => boolean } {
+  const pais = item.pais ?? []
+  const from = actorOf(d.trigger)
+  const self = t.self ?? actorOf(d.response ?? { type: 'none' }) ?? 0
+  // Calls list the tiles taken from the hand first and the claimed tile last.
+  const called = pais[pais.length - 1] ?? '?'
+  const own = pais.slice(0, -1)
+  const claims = (kind: string) => (r: MjaiEvent) => r.type === kind && 'consumed' in r && 'pai' in r && r.pai === called && sameTiles(r.consumed, own)
+  switch (item.label) {
+    case 'Discard': return { tone: 'discard', verb: '打', faces: pais.map(tile => ({ tile })), matches: r => r.type === 'dahai' && r.pai === pais[0] }
+    case 'Riichi': return { tone: 'riichi', verb: '立直', faces: [], matches: r => r.type === 'reach' }
+    case 'Chi': return { tone: 'call', verb: '吃', faces: meldFaces(called, own, from, self, t), matches: claims('chi') }
+    case 'Pon': return { tone: 'call', verb: '碰', faces: meldFaces(called, own, from, self, t), matches: claims('pon') }
+    case 'Kan':
+      // Only an open kan answers someone else's discard; the rest are the seat's own turn.
+      if (d.trigger.type === 'dahai') return { tone: 'kan', verb: '明杠', faces: meldFaces(called, own, from, self, t), matches: claims('daiminkan') }
+      if (pais.length === 4) return { tone: 'kan', verb: '暗杠', faces: concealedKan(pais), matches: r => r.type === 'ankan' && sameTiles(r.consumed, pais) }
+      return { tone: 'kan', verb: '加杠', faces: pais.slice(0, 1).map(tile => ({ tile: plain(tile) })), matches: r => r.type === 'kakan' && plain(r.pai) === plain(pais[0] ?? '') }
+    case 'Ankan': return { tone: 'kan', verb: '暗杠', faces: concealedKan(pais), matches: r => r.type === 'ankan' && sameTiles(r.consumed, pais) }
+    case 'Kakan': return { tone: 'kan', verb: '加杠', faces: pais.slice(0, 1).map(tile => ({ tile: plain(tile) })), matches: r => r.type === 'kakan' && plain(r.pai) === plain(pais[0] ?? '') }
+    case 'Ron': return { tone: 'win', verb: '荣和', faces: pais.map(tile => ({ tile })), matches: r => r.type === 'hora' && r.actor !== r.target }
+    case 'Tsumo': return { tone: 'win', verb: '自摸', faces: pais.map(tile => ({ tile })), matches: r => r.type === 'hora' && r.actor === r.target }
+    case 'Hora': return { tone: 'win', verb: '和牌', faces: pais.map(tile => ({ tile })), matches: r => r.type === 'hora' }
+    case 'Pass': return { tone: 'pass', verb: '过', faces: [], matches: r => r.type === 'none' }
+    case 'Ryukyoku': case 'Nine terminals': return { tone: 'draw', verb: '九种九牌', faces: [], matches: r => r.type === 'ryukyoku' }
+    case 'Kita': return { tone: 'call', verb: '拔北', faces: [{ tile: 'N' }], matches: r => r.type === 'kita' }
+    default: return { tone: 'pass', verb: item.label ?? '—', faces: pais.map(tile => ({ tile })), matches: () => false }
+  }
+}
+
+/** The model's ranked candidates. Percentages are shown exactly as reported:
+ *  cutting the list to `limit` rows never renormalises them. `instead` is the
+ *  move the game made when it contradicted the suggestion. */
+export function candidatesOf(d: MonitorDecision | null, t: Table, instead: MjaiEvent | null = null, limit = 5): Candidate[] {
+  if (!d?.response) return []
+  const response = d.response
+  let chosen = false, taken = false
+  return visibleItems(pickShow(response.meta), limit).map(item => {
+    const { matches, ...row } = candidateOf(item, d, t)
+    const percent = /^\s*(\d+(?:\.\d+)?)\s*%\s*$/.exec(item.value ?? '')
+    // Two rows can show the same tile (hand discard and tsumogiri); the higher one is the answer.
+    const isChosen = !chosen && matches(response)
+    const isTaken = !taken && !isChosen && !!instead && matches(instead)
+    chosen ||= isChosen
+    taken ||= isTaken
+    return { ...row, share: percent ? Math.min(1, Number(percent[1]) / 100) : null, value: item.value ?? '', chosen: isChosen, taken: isTaken }
+  })
+}
+
+// -------------------------------------------------------------- decision ----
+
+export type Phase = 'idle' | 'thinking' | 'awaiting' | 'confirmed' | 'mismatch' | 'expired' | 'failed' | 'unavailable' | 'declined'
+export type Tone = 'ok' | 'wait' | 'busy' | 'bad' | 'idle'
+export type StepState = 'done' | 'active' | 'todo' | 'bad' | 'void'
+export type DecisionView = {
+  phase: Phase; tone: Tone
+  /** Short state word for the badge. */
+  status: string
+  /** One sentence saying what that state means right now. */
+  message: string
+  /** The suggestion is still the valid, current one. */
+  live: boolean
+  /** What the model answered. Kept after it stops being live, as history. */
+  action: ActionView | null
+  /** What Mahjong Soul actually did in answer to this decision, once known. */
+  actual: ActionView | null
+  /** The game's own event behind `actual`, when it contradicted the suggestion. */
+  instead: MjaiEvent | null
+  /** What the model was reacting to: "摸 2索", "下家 打 3筒". */
+  trigger: string
+  /** Request sent → suggestion returned → confirmed by the game. */
+  steps: [StepState, StepState, StepState]
+}
+
+function triggerLabel(e: MjaiEvent, t: Table): string {
+  const who = actorOf(e)
+  const seat = who == null || who === t.self ? '' : `${seatLabel(who, t)} `
+  if (e.type === 'tsumo') return e.pai === '?' ? '摸牌' : `摸 ${tileLabel(e.pai)}`
+  if (e.type === 'dahai') return `${seat}打 ${tileLabel(e.pai)}`
+  if (e.type === 'start_kyoku') return '开局'
+  if (e.type === 'reach') return `${seat}立直`
+  if (e.type === 'none') return ''
+  return `${seat}${actionLabel(e, t)}`
+}
+
+/** Why a suggestion that never met a contradicting move is no longer current. */
+function staleReason(s: MonitorSnapshot): string {
+  if (s.sync_error) return '牌局同步异常，已作废'
+  if (s.service === 'error') return '模型服务异常，已作废'
+  if (s.capture.state !== 'running') return '采集未运行，已作废'
+  if (s.bot.state !== 'ready') return 'Bot 未就绪，已作废'
+  if (s.round_ended) return '本局已结束，不再有效'
+  return '牌局已推进，不再有效'
+}
+
+export function decisionView(s: MonitorSnapshot | null): DecisionView {
+  const t = tableOf(s?.game)
+  const d = s?.decision ?? null
+  if (!s || !d) {
+    const message = !s ? '正在连接监视数据' : s.game_ended ? '等待对局开始' : s.round_ended ? '等待下一局开始' : '轮到自己时显示模型建议'
+    return { phase: 'idle', tone: 'idle', status: '待机', message, live: false, action: null, actual: null, instead: null, trigger: '', steps: ['todo', 'todo', 'todo'] }
+  }
+  const action = describeAction(d.response, t)
+  const after = s.events.filter(e => e.seq > d.context.event_seq)
+  const own = d.response ? actorOf(d.response) ?? t.self : t.self
+  const move = d.confirmed_seq != null
+    ? s.events.find(e => e.seq === d.confirmed_seq)
+    : after.find(e => COMMITS.has(e.event.type) && actorOf(e.event) === own)
+  const base = { action, actual: null, instead: null, trigger: triggerLabel(d.trigger, t), live: false }
+  switch (d.state) {
+    case 'thinking':
+      return { ...base, phase: 'thinking', tone: 'busy', status: '推理中', message: '已向模型发出请求', action: null, steps: ['active', 'todo', 'todo'] }
+    case 'awaiting': {
+      const live = !s.round_ended && !s.sync_error && s.service !== 'error'
+      return { ...base, phase: 'awaiting', tone: 'wait', status: '待确认', message: '等待雀魂的实际动作', live, steps: ['done', 'done', 'active'] }
+    }
+    case 'confirmed':
+      return { ...base, phase: 'confirmed', tone: 'ok', status: '已确认', message: '雀魂动作与建议一致', actual: describeAction(move?.event, t), steps: ['done', 'done', 'done'] }
+    case 'declined': {
+      const live = !s.round_ended && !s.sync_error && s.service !== 'error'
+      return { ...base, phase: 'declined', tone: 'idle', status: '不操作', message: '建议过牌，无需确认', live, steps: ['done', 'done', 'void'] }
+    }
+    case 'unavailable':
+      return { ...base, phase: 'unavailable', tone: 'idle', status: '无建议', message: '模型没有返回建议', action: null, steps: ['done', 'bad', 'void'] }
+    case 'failed':
+      return { ...base, phase: 'failed', tone: 'bad', status: '失败', message: d.error || '模型请求失败', action: null, steps: ['done', 'bad', 'void'] }
+    case 'expired':
+      // The backend only attaches an error to an expiry when the game answered
+      // this very decision with a different move.
+      if (d.error && d.response) {
+        return { ...base, phase: 'mismatch', tone: 'bad', status: '不一致', message: '雀魂动作与建议不同', actual: describeAction(move?.event, t), instead: move?.event ?? null, steps: ['done', 'done', 'bad'] }
+      }
+      return { ...base, phase: 'expired', tone: 'idle', status: '已失效', message: staleReason(s), steps: ['done', d.response ? 'done' : 'void', 'void'] }
+  }
+}
+
+// ---------------------------------------------------------------- health ----
+
+export type Health = { key: 'capture' | 'bot' | 'service' | 'sync'; name: string; tone: Tone; state: string; detail: string | null }
+
+export function healthOf(s: MonitorSnapshot | null): Health[] {
+  const capture: CaptureStatus = s?.capture ?? { state: 'stopped' }
+  const bot: BotStatus = s?.bot ?? { state: 'idle' }
+  const service = s?.service ?? 'unknown'
+  const server: ServerStatus = s?.server ?? { state: 'none' }
+  return [
+    { key: 'capture', name: '采集', detail: capture.state === 'error' ? capture.error : null,
+      ...({ running: { tone: 'ok', state: '运行中' }, starting: { tone: 'busy', state: '启动中' }, stopped: { tone: 'idle', state: '未运行' }, error: { tone: 'bad', state: '异常' } } as const)[capture.state] },
+    { key: 'bot', name: 'Bot', detail: bot.state === 'error' ? bot.error : null,
+      ...({ ready: { tone: 'ok', state: '就绪' }, loading: { tone: 'busy', state: '加载中' }, idle: { tone: 'idle', state: '未启动' }, stopped: { tone: 'idle', state: '已停止' }, error: { tone: 'bad', state: '异常' } } as const)[bot.state] },
+    // A ready Bot process says nothing about the model behind it. The server
+    // not being up comes first; once it is, what the bot reports decides.
+    { key: 'service', name: '模型', detail: server.state === 'failed' ? server.error : service === 'error' ? s?.service_error ?? null : null,
+      ...(server.state === 'failed' ? { tone: 'bad', state: '未运行' } as const
+        : server.state === 'installing' ? { tone: 'busy', state: '安装中' } as const
+        : server.state === 'starting' ? { tone: 'busy', state: '加载中' } as const
+        : service === 'connected' ? { tone: 'ok', state: '已连接' } as const
+        : service === 'error' ? { tone: 'bad', state: '断开' } as const
+        : server.state === 'ready' ? { tone: 'ok', state: '就绪' } as const
+        : { tone: 'idle', state: '待确认' } as const) },
+    // Whether the tracked table still matches the game: a gap or a desync voids every suggestion.
+    { key: 'sync', name: '同步', detail: s?.sync_error ?? null,
+      ...(s?.sync_error ? { tone: 'bad', state: '异常' } as const : s?.game && !s.game_ended ? { tone: 'ok', state: '正常' } as const : { tone: 'idle', state: '无对局' } as const) },
+  ]
+}
+
+export type Alert = { key: string; title: string; message: string; hint?: string }
+
+export function alertsOf(s: MonitorSnapshot | null, local: { ui: string | null; bridge: string | null }): Alert[] {
+  const out: Alert[] = []
+  if (local.bridge) out.push({ key: 'bridge', title: '监视数据通道异常', message: local.bridge })
+  if (local.ui) out.push({ key: 'ui', title: '窗口操作失败', message: local.ui })
+  if (!s) return out
+  if (s.capture.state === 'error') out.push({ key: 'capture', title: '采集异常', message: s.capture.error })
+  if (s.bot.state === 'error') out.push({ key: 'bot', title: 'Bot 进程异常', message: s.bot.error })
+  if (s.server.state === 'failed') out.push({ key: 'server', title: '模型服务未运行', message: s.server.error, hint: '应用会自动重新启动它。' })
+  else if (s.service === 'error') out.push({ key: 'service', title: '模型服务断开', message: s.service_error ?? '模型服务没有应答。' })
+  if (s.sync_error) out.push({ key: 'sync', title: '牌局同步异常', message: s.sync_error, hint: '当前建议已作废，下一局开始后恢复。' })
+  return out
+}
+
+/** The bot's service in a sentence: what it is doing as a process the app
+ *  runs, under the name it gave itself. */
+export function serverLine(s: MonitorSnapshot | null, now: number): string {
+  const server: ServerStatus = s?.server ?? { state: 'none' }
+  const seconds = (ms: number) => `${Math.max(0, Math.round(ms / 1000))} 秒`
+  switch (server.state) {
+    case 'installing': return '正在安装运行环境，首次需要下载依赖'
+    case 'starting': return `已启动 ${seconds(now - server.since_ms)}，正在加载`
+    case 'failed': return `${seconds(server.retry_at_ms - now)}后重新启动`
+    case 'ready': return `${server.label ?? server.bot} · 应用托管 · 启动 ${seconds(server.startup_ms)}`
+    case 'none': return '收到第一份候选后确认，与 Bot 进程状态无关'
+  }
+}
+
+/** What the bot and its service say about themselves, the bot's latest reply
+ *  first. There is room for `limit` of them. */
+export function factsOf(s: MonitorSnapshot | null, limit = 3): Fact[] {
+  const server: ServerStatus = s?.server ?? { state: 'none' }
+  return [...(s?.facts ?? []), ...(server.state === 'ready' ? server.facts : [])].slice(0, limit)
+}
+
+// --------------------------------------------------------------- results ----
+
+const DRAWS: Record<string, string> = {
+  exhaustive: '荒牌流局', nagashi: '流局满贯', kyuushu: '九种九牌', four_winds: '四风连打',
+  four_kans: '四杠散了', four_riichis: '四家立直', draw: '流局',
+}
+export function resultTitle(r: RoundResult): string {
+  return r.kind === 'hora' ? '和牌' : DRAWS[r.kind] ?? '流局'
+}
+/** How a publicly revealed hand ended the round. A revealed hand at a draw is
+ *  only that — a reveal; an unrevealed seat is not thereby "noten". */
+export function handOutcome(h: PublicHand, t: Table): string {
+  if (h.target == null) return '公开手牌'
+  return h.target === h.seat ? '自摸' : `荣和 · ${seatLabel(h.target, t)}放铳`
+}
+export function signed(n: number): string {
+  return `${n > 0 ? '+' : n < 0 ? '−' : '±'}${new Intl.NumberFormat('en-US').format(Math.abs(n))}`
+}
+
+// ---------------------------------------------------------------- events ----
+
+export type EventLine = { seat: number | null; text: string; faces: Face[]; quiet: boolean }
+
+export function eventLine(e: MjaiEvent, t: Table): EventLine {
+  const seat = actorOf(e)
+  switch (e.type) {
+    case 'start_game': return { seat: null, text: '对局开始', faces: [], quiet: false }
+    case 'start_kyoku': return { seat: null, text: `${WIND[e.bakaze] ?? e.bakaze}${e.kyoku}局 开始 · ${e.honba} 本场`, faces: [], quiet: false }
+    case 'end_kyoku': return { seat: null, text: '本局结束', faces: [], quiet: false }
+    case 'end_game': return { seat: null, text: '对局结束', faces: [], quiet: false }
+    case 'tsumo': return { seat, text: '摸牌', faces: e.pai === '?' ? [] : [{ tile: e.pai }], quiet: true }
+    case 'dahai': return { seat, text: e.tsumogiri ? '摸切' : '手切', faces: [{ tile: e.pai }], quiet: false }
+    case 'reach': return { seat, text: '宣告立直', faces: [], quiet: false }
+    case 'reach_accepted': return { seat, text: '立直成立', faces: [], quiet: true }
+    case 'dora': return { seat: null, text: '新宝牌指示', faces: [{ tile: e.dora_marker }], quiet: false }
+    case 'ryukyoku': return { seat: null, text: DRAWS[e.reason ?? 'draw'] ?? '流局', faces: [], quiet: false }
+    case 'none': return { seat: null, text: '过', faces: [], quiet: true }
+    default: {
+      const view = describeAction(e, t)
+      return { seat, text: view?.verb ?? e.type, faces: view?.faces ?? [], quiet: false }
+    }
+  }
+}
+
+// ----------------------------------------------------------------- table ----
+
+/** Own concealed hand, sorted, with the fresh draw pulled out to stand apart. */
+export function ownHand(game: GameStateSnapshot): { tiles: string[]; drawn: string | null } {
+  const me = game.our_seat == null ? null : game.players[game.our_seat]
+  if (!me) return { tiles: [], drawn: null }
+  const tiles = sorted(me.tehai.filter(tile => tile && tile !== '?'))
+  const drawn = me.drawn_tile ?? null
+  const at = drawn ? tiles.lastIndexOf(drawn) : -1
+  if (at < 0) return { tiles, drawn: null }
+  tiles.splice(at, 1)
+  return { tiles, drawn }
+}
+
+/** Which tiles of the hand a live suggestion would take out of it. */
+export function handMarks(hand: { tiles: string[]; drawn: string | null }, response: MjaiEvent | null): { tiles: Set<number>; drawn: boolean } {
+  const marks = { tiles: new Set<number>(), drawn: false }
+  if (!response) return marks
+  const take = (tile: string, preferDrawn = false) => {
+    if (preferDrawn && hand.drawn === tile) { marks.drawn = true; return }
+    const at = hand.tiles.findIndex((own, i) => own === tile && !marks.tiles.has(i))
+    if (at >= 0) marks.tiles.add(at)
+    else if (hand.drawn === tile) marks.drawn = true
+  }
+  if (response.type === 'dahai') take(response.pai, response.tsumogiri)
+  else if (response.type === 'reach' && response.pai) take(response.pai)
+  else if (response.type === 'kakan') take(response.pai, true)
+  else if ('consumed' in response) response.consumed.forEach(tile => take(tile))
+  return marks
+}
+
+/** A meld drawn from the tracker's own record, so a red five keeps its place. */
+export function meldView(m: MeldSnapshot, seat: number, t: Table): Face[] {
+  if (m.kind === 'ankan') return concealedKan(m.tiles)
+  const called = m.called_tile ?? m.tiles[0] ?? '?'
+  const own = [...m.tiles]
+  const at = own.indexOf(called)
+  if (at >= 0) own.splice(at, 1)
+  if (m.kind !== 'kakan') return meldFaces(called, own, m.from_who, seat, t)
+  // The added tile joins the claimed one, both lying down. Which of the three
+  // remaining tiles was added is not recorded; a red five is kept upright so it
+  // stays readable.
+  const added = own.findIndex(tile => !tile.endsWith('r'))
+  const [extra] = own.splice(added < 0 ? 0 : added, 1)
+  const faces = meldFaces(called, own, m.from_who, seat, t)
+  faces.splice(faces.findIndex(f => f.side) + 1, 0, { tile: extra ?? called, side: true })
+  return faces
+}

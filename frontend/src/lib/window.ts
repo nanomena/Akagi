@@ -3,6 +3,7 @@ import { HAS_TAURI } from '@/lib/tauri'
 
 /** Label of the always-on-top suggestion overlay. Mirrors `ipc::overlay::LABEL`. */
 export const OVERLAY_LABEL = 'overlay'
+export const MONITOR_LABEL = 'monitor'
 
 /**
  * Which window is this document running in?

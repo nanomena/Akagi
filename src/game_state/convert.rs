@@ -2,7 +2,7 @@
 //!
 //! Both enums are `serde(tag = "type")` with the mjai protocol's
 //! snake-case discriminants, so a JSON round-trip handles 14 of the 15
-//! variants directly. Two cases need care:
+//! variants directly. Three cases need care:
 //!
 //! - **`StartGame.id`** — Akagi types it as `Option<u8>` (seat number);
 //!   riichienv types it as `Option<String>`. We patch the JSON before
@@ -10,6 +10,9 @@
 //! - **`MjaiEvent::None`** — Akagi-only sentinel for a bot's "no action"
 //!   reply. Not a protocol event; we return `Ok(None)` so the tracker
 //!   skips it without producing an error.
+//! - **`Ryukyoku.tehais`** — public reveals may contain null seats. The
+//!   engine only needs the round-end and settlement fields; the monitor
+//!   receives the original nullable reveals directly from the event bus.
 //!
 //! Choosing JSON-roundtrip over a hand-written `From` keeps this file
 //! ~30 lines. Cost is one `serde_json::to_value` + one
@@ -26,6 +29,20 @@ use serde_json::Value;
 pub fn to_riichienv(ev: &AkagiEvent) -> Result<Option<RiEvent>> {
     if matches!(ev, AkagiEvent::None) {
         return Ok(None);
+    }
+    if let AkagiEvent::Ryukyoku {
+        reason,
+        deltas,
+        scores,
+        ..
+    } = ev
+    {
+        return Ok(Some(RiEvent::Ryukyoku {
+            reason: reason.clone(),
+            tehais: None,
+            delta: deltas.clone(),
+            scores: scores.clone(),
+        }));
     }
 
     let mut v = serde_json::to_value(ev).context("serialize akagi mjai event")?;
@@ -58,6 +75,27 @@ mod tests {
     #[test]
     fn none_returns_none() {
         assert!(to_riichienv(&AkagiEvent::None).unwrap().is_none());
+    }
+
+    #[test]
+    fn partial_draw_reveals_preserve_original_event_and_finish_the_engine() {
+        let event: AkagiEvent = serde_json::from_str(r#"{"type":"ryukyoku","reason":"exhaustive","tehais":[null,["5pr","P"],null,[]],"scores":[24000,28000,24000,24000],"deltas":[-1000,3000,-1000,-1000]}"#).unwrap();
+        let original = serde_json::to_value(&event).unwrap();
+        match to_riichienv(&event).unwrap().unwrap() {
+            RiEvent::Ryukyoku {
+                reason,
+                scores,
+                delta,
+                tehais,
+            } => {
+                assert_eq!(reason.as_deref(), Some("exhaustive"));
+                assert_eq!(scores.unwrap(), vec![24000, 28000, 24000, 24000]);
+                assert_eq!(delta.unwrap(), vec![-1000, 3000, -1000, -1000]);
+                assert!(tehais.is_none());
+            }
+            other => panic!("expected Ryukyoku, got {other:?}"),
+        }
+        assert_eq!(serde_json::to_value(event).unwrap(), original);
     }
 
     #[test]

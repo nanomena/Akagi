@@ -47,10 +47,11 @@ fn parse_notify_line(line: &str) -> Result<Option<Notification>, serde_json::Err
     }
 }
 
-/// Default per-call timeout. Mahjong turn budget is several seconds; 5 s
-/// is well above legitimate NN inference cost (Mortal ≈ 100 ms) and below
-/// any user-perceptible hang.
-const DEFAULT_REACT_TIMEOUT_MS: u64 = 5_000;
+/// Default per-call timeout. A reaction is worth having for as long as the
+/// game still waits for the move, and a model that shares its GPU can take
+/// seconds over one, so this only stops a bot that will never answer. A bot
+/// gives up on a slow answer of its own sooner and replies `none`.
+const DEFAULT_REACT_TIMEOUT_MS: u64 = 60_000;
 
 /// Grace period for graceful shutdown on `reset()`. End_game is written,
 /// child usually exits within a few hundred ms; we wait this long before
@@ -162,7 +163,7 @@ impl SubprocessBot {
         self.actor_id
     }
 
-    /// Override the default 5 s react timeout. Mostly for tests.
+    /// Override the default react timeout. Mostly for tests.
     pub fn set_react_timeout(&mut self, t: std::time::Duration) {
         self.react_timeout = t;
     }
