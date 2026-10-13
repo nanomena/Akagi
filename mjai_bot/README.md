@@ -89,8 +89,9 @@ Rules:
   stays current; it just declines to act.
 - **Shut down on `end_game`.** When a batch contains `{"type":"end_game"}`,
   reply once (`{"type":"none"}` is fine) and exit cleanly.
-- **React budget ≈ 5 s.** Akagi aborts the bot if a reaction takes longer than
-  the default timeout, so keep inference within a few seconds.
+- **React budget: 60 s.** Akagi stops the bot for the rest of the game if a
+  reaction takes longer. A late reaction is still played while the game waits
+  for the move, so reply `none` only once an answer is no longer worth having.
 
 A minimal loop:
 
