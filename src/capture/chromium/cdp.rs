@@ -33,6 +33,7 @@ use crate::schema::{
 };
 use anyhow::{anyhow, Context, Result};
 use base64::Engine;
+use chromiumoxide::handler::HandlerConfig;
 use chromiumoxide::page::Page;
 use chromiumoxide::{
     cdp::browser_protocol::network::{
@@ -191,7 +192,14 @@ pub async fn run(
         None => (None, None),
     };
     info!("CDP connecting to {endpoint}");
-    let (browser_owned, mut handler) = Browser::connect(endpoint)
+    // Left to its default, chromiumoxide tells every page it attaches to
+    // ignore certificate errors. These are pages a player is signed in on: a
+    // certificate that does not verify has to stay an error.
+    let config = HandlerConfig {
+        ignore_https_errors: false,
+        ..Default::default()
+    };
+    let (browser_owned, mut handler) = Browser::connect_with_config(endpoint, config)
         .await
         .with_context(|| format!("CDP connect to {endpoint}"))?;
     // `Browser` is not `Clone`; share via Arc for the page-poll task.
