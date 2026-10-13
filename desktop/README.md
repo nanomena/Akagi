@@ -72,8 +72,14 @@ executables:
 
 ```sh
 npm run check   # type-check the JavaScript (JSDoc types, no build step)
-npm test        # the window's geometry, and the shell's end of the protocol against a stand-in core
+npm test        # the window's geometry, the content policy, and the shell's end of the protocol against a stand-in core
+npm run smoke   # the shell for real — Electron, the built interface, a stand-in core — looked at over its DevTools port
 ```
+
+`npm run smoke` needs a display (`xvfb-run -a npm run smoke` without one) and
+runs on Linux and macOS. It is the check that sees whether the page still
+draws when served the way the shell serves it: a content policy one directive
+short breaks nothing loudly, the tiles just turn into text.
 
 ## Packaging
 
