@@ -3,10 +3,10 @@
 One window on Windows, Linux and macOS: the game on a 16:9 stage and the
 monitor's dock under it, 4:3 in all.
 
-The Tauri application can only do this on Windows. Capture and autoplay both go
-through the Chrome DevTools Protocol, and of the system webviews Tauri uses only
-Windows' is a Chromium. This shell brings its own Chromium (Electron), so there
-is one capture path and one input path on every platform.
+Capture and autoplay both go through the Chrome DevTools Protocol, and of the
+webviews an operating system provides only Windows' is a Chromium. This shell
+brings its own Chromium (Electron), so there is one capture path and one input
+path on every platform.
 
 ## The three parts
 
@@ -14,7 +14,7 @@ is one capture path and one input path on every platform.
 | --- | --- | --- |
 | Shell | `desktop/` | The window, the two views in it, and the local DevTools port. Nothing about mahjong. |
 | Core | `src/headless`, built as `akagi-core` | Everything else: capture, the bridge, the tracker, the bot, autoplay, the monitor snapshot. No window, no webview. |
-| Interface | `frontend/`, the monitor page | Draws the dock from the core's snapshot. The same page the Tauri window loads. |
+| Interface | `frontend/`, the monitor page | Draws the dock from the core's snapshot. |
 
 The shell starts the core as a child process and talks to it in JSON lines over
 the child's stdin and stdout; `src/headless/mod.rs` documents the protocol. The
@@ -22,9 +22,8 @@ core lives exactly as long as that stdin is open, so there is nothing to clean
 up when the shell goes, however it goes.
 
 The interface reaches the shell through two functions the preload script
-exposes, `invoke(command, args)` and `listen(event, callback)` — the same shape
-as the Tauri bridge it uses in the Tauri window (`frontend/src/lib/tauri.ts`
-picks whichever is there). The shell answers the commands about the window
+exposes, `invoke(command, args)` and `listen(event, callback)`
+(`frontend/src/lib/host.ts`). The shell answers the commands about the window
 itself and passes the rest to the core.
 
 The game is a second view in the same window, in a browser session of its own
@@ -37,7 +36,7 @@ game.
 ## Running it from a checkout
 
 ```sh
-cargo build --release --no-default-features --bin akagi-core   # the core, without Tauri
+cargo build --release --bin akagi-core                         # the core
 (cd frontend && npm ci && npm run build)                        # the interface -> frontend/dist
 cd desktop && npm ci
 node node_modules/electron/install.js                           # fetch Electron itself, once
@@ -105,9 +104,7 @@ as an artifact. Nothing is signed:
 
 - **The DevTools port is local and unauthenticated.** It is bound to
   `127.0.0.1`, on a port chosen at start, and it is how the core sees and
-  drives the game. Any program running as the same user could connect to it —
-  as it could to the Tauri application's game view, which is reached the same
-  way.
+  drives the game. Any program running as the same user could connect to it.
 - **The game view is never put to sleep.** It keeps drawing and taking input
   while the window is covered or minimized, because autoplay has to keep
   working then.

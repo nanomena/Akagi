@@ -1,22 +1,27 @@
-//! Capture-mode configuration: which transport supplies WebSocket frames
-//! to the bridge layer.
-//!
-//! Two modes:
-//! - `Mitm` (default): hudsucker MITM proxy — see `[proxy]`.
-//! - `Chromium`: a Chromium browser launched and controlled by Akagi via
-//!   the Chrome DevTools Protocol.
+//! What capture is pointed at, and what it keeps of what it sees.
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CaptureConfig {
-    pub mode: CaptureMode,
-    pub chromium: ChromiumConfig,
+    /// The address the game view is sent to. It has to be Mahjong Soul's own
+    /// site over HTTPS (`capture::embedded::game_url`): the view is signed in
+    /// to the player's account.
+    pub url: String,
     pub http: HttpCaptureConfig,
 }
 
-/// What to record of the HTTP traffic a backend intercepts.
+impl Default for CaptureConfig {
+    fn default() -> Self {
+        Self {
+            url: "https://game.maj-soul.com/1/".to_string(),
+            http: HttpCaptureConfig::default(),
+        }
+    }
+}
+
+/// What to record of the HTTP traffic capture sees.
 ///
 /// Akagi used to record WebSocket frames and discard everything else,
 /// which hid the game's own HTTP entirely — route topology, version
@@ -32,7 +37,7 @@ pub struct CaptureConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct HttpCaptureConfig {
-    /// Record every intercepted exchange, not just recognized ones.
+    /// Record every exchange seen, not just recognized ones.
     /// Off by default — see the struct docs.
     pub record_all: bool,
     /// Keep textual request/response bodies within `max_body_bytes`.
@@ -41,10 +46,10 @@ pub struct HttpCaptureConfig {
     /// Ceiling on a buffered body. Larger ones are recorded with their
     /// size and the reason they were skipped, never truncated silently.
     pub max_body_bytes: usize,
-    /// Chromium backend only: also record static subresources (images,
-    /// fonts, media, stylesheets). Off by default — a WebGL client pulls
-    /// enough of them to bury everything else, and none of it says
-    /// anything about the client.
+    /// Also record static subresources (images, fonts, media,
+    /// stylesheets). Off by default — a WebGL client pulls enough of them
+    /// to bury everything else, and none of it says anything about the
+    /// client.
     pub static_assets: bool,
 }
 
@@ -59,58 +64,6 @@ impl Default for HttpCaptureConfig {
     }
 }
 
-impl HttpCaptureConfig {
-    pub fn policy(&self) -> crate::capture::http::HttpCapturePolicy {
-        crate::capture::http::HttpCapturePolicy {
-            record_all: self.record_all,
-            bodies: self.bodies,
-            max_body_bytes: self.max_body_bytes,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum CaptureMode {
-    #[default]
-    Mitm,
-    Chromium,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct ChromiumConfig {
-    /// Absolute path to a chrome/chromium binary. `""` = auto-detect.
-    pub executable: String,
-    /// User-data-dir for the controlled profile. `""` = exe-adjacent
-    /// `chrome-profile/` (resolved via `util::resolve_dir`, with an
-    /// AppImage / read-only fallback to `<user_config_root>/chrome-profile`).
-    pub user_data_dir: String,
-    /// URL to navigate to on launch. `""` = don't auto-navigate (open new tab page).
-    pub start_url: String,
-    /// Chrome-for-Testing channel/version to download as fallback.
-    /// `"stable"` / `"beta"` resolve to the latest channel pin; otherwise
-    /// treated as a literal version (e.g. `"131.0.6778.85"`).
-    pub cft_channel: String,
-    /// Force using Chrome-for-Testing even when system Chrome is detected.
-    pub force_cft: bool,
-    /// Extra CLI args appended after our defaults. Advanced users only.
-    pub extra_args: Vec<String>,
-}
-
-impl Default for ChromiumConfig {
-    fn default() -> Self {
-        Self {
-            executable: String::new(),
-            user_data_dir: String::new(),
-            start_url: "https://game.maj-soul.com/1/".to_string(),
-            cft_channel: "stable".to_string(),
-            force_cft: false,
-            extra_args: vec![],
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -118,72 +71,21 @@ mod tests {
     #[test]
     fn defaults_round_trip() {
         let cfg = CaptureConfig::default();
-        let s = toml::to_string(&cfg).unwrap();
-        let back: CaptureConfig = toml::from_str(&s).unwrap();
-        assert_eq!(back.mode, CaptureMode::Mitm);
-        assert_eq!(back.chromium.cft_channel, "stable");
+        let back: CaptureConfig = toml::from_str(&toml::to_string(&cfg).unwrap()).unwrap();
+        assert_eq!(back, cfg);
+        assert_eq!(back.url, "https://game.maj-soul.com/1/");
+        assert!(!back.http.record_all, "the firehose is opt-in");
     }
 
+    /// A file written for an earlier build names things this one does not
+    /// have; what it does have still comes through.
     #[test]
-    fn mode_serialises_lowercase() {
-        let cfg = CaptureConfig {
-            mode: CaptureMode::Chromium,
-            chromium: Default::default(),
-            http: Default::default(),
-        };
-        let s = toml::to_string(&cfg).unwrap();
-        assert!(s.contains("mode = \"chromium\""), "got: {s}");
-    }
-
-    /// The default is deliberately conservative: full HTTP capture would
-    /// put access tokens and cookies into every session file, and nothing
-    /// is redacted (redaction would re-create the blind spot the capture
-    /// exists to remove). Recognized exchanges are still recorded.
-    #[test]
-    fn http_capture_is_opt_in_but_bodies_are_on_once_it_is() {
-        let cfg = CaptureConfig::default();
-        assert!(!cfg.http.record_all, "full capture must be opt-in");
-        assert!(cfg.http.bodies);
-        assert!(!cfg.http.static_assets);
-        assert_eq!(cfg.http.max_body_bytes, 256 * 1024);
-
-        let s = toml::to_string(&cfg).unwrap();
-        let back: CaptureConfig = toml::from_str(&s).unwrap();
-        assert_eq!(back.http, cfg.http);
-    }
-
-    #[test]
-    fn chromium_config_round_trip() {
-        let original = CaptureConfig {
-            mode: CaptureMode::Chromium,
-            chromium: ChromiumConfig {
-                executable: "/opt/chrome/chrome".into(),
-                user_data_dir: "/tmp/profile".into(),
-                start_url: "https://example.test/".into(),
-                cft_channel: "131.0.6778.85".into(),
-                force_cft: true,
-                extra_args: vec!["--lang=ja".into()],
-            },
-            http: Default::default(),
-        };
-        let s = toml::to_string(&original).unwrap();
-        let back: CaptureConfig = toml::from_str(&s).unwrap();
-        assert_eq!(back.mode, CaptureMode::Chromium);
-        assert_eq!(back.chromium.executable, "/opt/chrome/chrome");
-        assert!(back.chromium.force_cft);
-        assert_eq!(back.chromium.extra_args, vec!["--lang=ja"]);
-    }
-
-    #[test]
-    fn missing_section_uses_defaults() {
-        // Older configs that lack [capture] entirely should still parse.
-        #[derive(serde::Deserialize)]
-        struct Wrap {
-            #[serde(default)]
-            capture: CaptureConfig,
-        }
-        let s = "";
-        let w: Wrap = toml::from_str(s).unwrap();
-        assert_eq!(w.capture.mode, CaptureMode::Mitm);
+    fn keys_of_other_builds_are_passed_over() {
+        let cfg: CaptureConfig = toml::from_str(
+            "mode = \"chromium\"\n[chromium]\nstart_url = \"https://example.test/\"\n[http]\nrecord_all = true\n",
+        )
+        .unwrap();
+        assert_eq!(cfg.url, CaptureConfig::default().url);
+        assert!(cfg.http.record_all);
     }
 }

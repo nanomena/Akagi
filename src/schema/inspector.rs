@@ -15,7 +15,7 @@
 //!   only answerable by putting it on the same timeline as everything
 //!   else.
 //!
-//! Same shape on the wire (live tail over `tauri::ipc::Channel`) and on
+//! Same shape for a live subscriber and on
 //! disk (`<session>/inspector.jsonl`). The on-disk file is the source of
 //! truth for past-session viewing; the bus/channel is the live tail.
 

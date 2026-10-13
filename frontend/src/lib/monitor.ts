@@ -326,7 +326,7 @@ export function healthOf(s: MonitorSnapshot | null): Health[] {
   const server: ServerStatus = s?.server ?? { state: 'none' }
   return [
     { key: 'capture', name: '采集', detail: capture.state === 'error' ? capture.error : null,
-      ...({ running: { tone: 'ok', state: '运行中' }, starting: { tone: 'busy', state: '启动中' }, stopped: { tone: 'idle', state: '未运行' }, error: { tone: 'bad', state: '异常' } } as const)[capture.state] },
+      ...({ running: { tone: 'ok', state: '运行中' }, stopped: { tone: 'idle', state: '未运行' }, error: { tone: 'bad', state: '异常' } } as const)[capture.state] },
     { key: 'bot', name: 'Bot', detail: bot.state === 'error' ? bot.error : null,
       ...({ ready: { tone: 'ok', state: '就绪' }, loading: { tone: 'busy', state: '加载中' }, idle: { tone: 'idle', state: '未启动' }, stopped: { tone: 'idle', state: '已停止' }, error: { tone: 'bad', state: '异常' } } as const)[bot.state] },
     // A ready Bot process says nothing about the model behind it. The server
