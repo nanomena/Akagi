@@ -52,6 +52,24 @@
 --                       ones; nil when the bot reports no probabilities
 --                       (the four above are unused by this default
 --                       model — see the note before routine_probability)
+--
+-- Read off the table, for a discard (nil when not read; unused by this
+-- default model):
+--   ctx.loose           the discarded tile is loose in the hand: no
+--                       second copy, nothing of its suit within two
+--   ctx.runner_up_loose the same for the runner-up, when the bot's two
+--                       likeliest candidates are discards of different
+--                       tiles
+--   ctx.safe            someone is in riichi, and the discarded tile is
+--                       (true) or is not (false) in the discards of
+--                       every seat in riichi; nil with no riichi
+--
+-- A second opinion, from the built-in bot, which imitates people: the
+-- share of players who would make each move (nil when it has none;
+-- unused by this default model):
+--   ctx.human_top       their likeliest move
+--   ctx.human_second    their next likeliest, or nil
+--   ctx.human_chosen    the move the active bot is making
 --   ctx.budget          { fixed_ms, add_ms, elapsed_ms } or nil
 --   ctx.rng()           uniform random in [0, 1)
 --   ctx.lognormal(mu, sigma)  log-normal sample in SECONDS

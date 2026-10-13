@@ -30,6 +30,8 @@ bot answers is the most obvious tell there is.
 | `tenhou_state.rs` | `TenhouState` — the hand at Tenhou tile-index resolution plus the current decision window (the server's `t` bitmask). Written by the Tenhou bridge, read here. Without it an mjai tile *string* cannot be resolved to the physical copy Tenhou wants. |
 | `budget.rs` | `TimeBudget` — the server's per-decision-window time grant (`OptionalOperationList.time_fixed/time_add`, ms). Written by the Majsoul bridge, read here. Never locally accounted; always the server's own value. |
 | `delay/` | The pre-click "thinking time" model. See below. |
+| `table.rs` | Two facts read off the table for a discard, for delay scripts: whether the tile is *loose* in the hand (no second copy, nothing of its suit within two — by its place, not its kind) and whether it is *safe* against every riichi (each has discarded it). |
+| `advisor.rs` | A second opinion for delay scripts: the built-in bot (`native_bot`, which imitates people) follows the game on the same events and says what share of players would make the active bot's move. Never consulted for the action; any failure turns it off for the game. |
 | `pointer.rs` | Where the pointer is between presses, Majsoul only: the *approach* (it travels to the first press of a plan instead of appearing on it, and may rest on the runner-up first) and the *rest* (once the press has registered it leaves the hand). Pure arithmetic on points and milliseconds; see "The pointer between presses" below. |
 | `context.rs` | `AutoplayContext` — shared slots between the capture backend, the bridge and the manager (`page`, `canvas_rect`, `time_budget`, `input_watch`, `tenhou_state`). |
 | `cdp_input.rs` | chromiumoxide wrappers: hover → press → hold → release click sequence (optionally with a mid-press cursor jiggle for retries), canvas rect query, and the Tenhou route's DOM helpers — action-button selectors, the readiness probe, and the call into the injected discard handler. |
@@ -254,6 +256,31 @@ click still lands after the UI is ready.
 - The script decides *when*, never *what*: it gets no coordinates, no
   action choice, and its output is clamped by caps and floors.
 - `hesitate = true` in its answer is a wish, not a step: see below.
+
+### What a script can read besides the bot's numbers (`delay::Reading`)
+
+A bot's probabilities say how the bot weighs its options, which is not how
+hard the position is for a person: a policy can be flat because nothing
+matters, or sharp where players agonise. Two more sources are passed to
+scripts, each optional (`nil` is "not read"), neither able to alter the
+action:
+
+- **The table** (`table.rs`): `ctx.loose`, `ctx.runner_up_loose`,
+  `ctx.safe`. Two loose tiles at even odds are an order to throw them in,
+  not a question; a live tile against a riichi is one however sure the
+  bot was.
+- **A second opinion** (`advisor.rs`): `ctx.human_top`,
+  `ctx.human_second`, `ctx.human_chosen` — the built-in bot's policy, read
+  as the share of players making each move. Where players split, a person
+  takes time. It lists its three likeliest moves; a move outside them gets
+  half of the most it could have. The advisor is fed in
+  `handle_mjai_event` and asked in `handle_bot_response`; the two arrive
+  on different buses, so a view of the wrong kind of decision (a discard
+  where the action answers a call) is discarded as stale.
+
+Each paced decision logs one `autoplay: decision read` line with the
+action, the probabilities and the reading — what to measure a script's
+tables from.
 
 ## The pointer between presses (`pointer.rs`)
 

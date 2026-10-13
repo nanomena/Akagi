@@ -289,6 +289,23 @@ impl DelayScript {
         }
         ctx.set("junme", input.junme)?;
         ctx.set("legal_count", input.legal_action_count)?;
+        let reading = &input.reading;
+        if let Some(loose) = reading.loose {
+            ctx.set("loose", loose)?;
+        }
+        if let Some(loose) = reading.runner_up_loose {
+            ctx.set("runner_up_loose", loose)?;
+        }
+        if let Some(safe) = reading.safe {
+            ctx.set("safe", safe)?;
+        }
+        if let Some(human) = reading.human {
+            ctx.set("human_top", human.top)?;
+            ctx.set("human_chosen", human.chosen)?;
+            if let Some(second) = human.second {
+                ctx.set("human_second", second)?;
+            }
+        }
         if let Some(p) = input.probs {
             ctx.set("top_prob", p.top)?;
             ctx.set("entropy", p.entropy)?;
@@ -508,6 +525,7 @@ mod tests {
             junme: 0,
             legal_action_count: 1,
             probs: None,
+            reading: Default::default(),
             budget: None,
             click_overhead_ms: 0,
             cfg,
@@ -599,6 +617,42 @@ mod tests {
         });
         let dec = s.try_decide(&i).unwrap();
         assert_eq!((dec.total_target_ms, dec.hesitate), (1500, false));
+    }
+
+    /// The reading reaches a script as plain fields, and only the parts that
+    /// were read: an unread fact is nil, never false.
+    #[test]
+    fn script_sees_the_reading_that_was_made() {
+        let s = DelayScript::compile(
+            r#"
+            function decide_delay(ctx)
+              if ctx.loose == nil then
+                assert(ctx.runner_up_loose == nil and ctx.safe == nil and ctx.human_top == nil)
+                return { delay_ms = 1000 }
+              end
+              assert(ctx.loose == true and ctx.runner_up_loose == false and ctx.safe == false)
+              assert(ctx.human_top == 0.5 and ctx.human_second == 0.25 and ctx.human_chosen == 0.125)
+              return { delay_ms = 2000 }
+            end
+            "#,
+            "test",
+        )
+        .unwrap();
+        let cfg = MajsoulAutoplayConfig::default();
+        let d = DelayModelConfig::default();
+        let mut i = base_input(&cfg, &d);
+        assert_eq!(s.try_decide(&i).unwrap().total_target_ms, 1000);
+        i.reading = crate::autoplay::delay::Reading {
+            loose: Some(true),
+            runner_up_loose: Some(false),
+            safe: Some(false),
+            human: Some(crate::autoplay::delay::HumanView {
+                top: 0.5,
+                second: Some(0.25),
+                chosen: 0.125,
+            }),
+        };
+        assert_eq!(s.try_decide(&i).unwrap().total_target_ms, 2000);
     }
 
     /// Lua's truthiness would read `hesitate = 0` as a yes.

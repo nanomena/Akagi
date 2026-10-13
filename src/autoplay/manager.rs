@@ -58,6 +58,9 @@ pub struct AutoplayManager {
     /// User Lua delay policy (hot-reloaded from disk; see
     /// `autoplay::delay::script`).
     delay_script: crate::autoplay::delay::ScriptHost,
+    /// The built-in bot following the game, for a second opinion on how
+    /// obvious each decision is (see `autoplay::advisor`).
+    advisor: crate::autoplay::advisor::Advisor,
     /// Directory holding the loaded config file; the script lives at
     /// `<config_dir>/delay.lua`.
     config_dir: std::path::PathBuf,
@@ -107,6 +110,7 @@ impl AutoplayManager {
             riichi: RiichiCityAutoplay::new(),
             state: ManagerState::default(),
             delay_script: crate::autoplay::delay::ScriptHost::default(),
+            advisor: crate::autoplay::advisor::Advisor::default(),
             config_dir,
         }
     }
@@ -227,6 +231,42 @@ impl AutoplayManager {
             (our_seat, legal_actions, snapshot, num_players)
         };
 
+        // What the table and a second opinion say about this decision (see
+        // `autoplay::table`, `autoplay::advisor`). Like the probabilities it
+        // feeds the delay model and cannot alter the chosen action.
+        let reading = {
+            let (loose, runner_up_loose, safe) = match &resp.action {
+                MjaiEvent::Dahai { pai, .. } => {
+                    let hand = snapshot
+                        .players
+                        .get(our_seat as usize)
+                        .map_or(&[][..], |p| p.tehai.as_slice());
+                    let candidates = crate::autoplay::delay::probs::candidates(resp.meta.as_ref());
+                    let riichi_rivers: Vec<Vec<&str>> = snapshot
+                        .players
+                        .iter()
+                        .filter(|p| p.seat != our_seat && p.riichi_declared)
+                        .map(|p| p.river.iter().map(|d| d.tile.as_str()).collect())
+                        .collect();
+                    (
+                        Some(crate::autoplay::table::is_loose(pai, hand)),
+                        crate::autoplay::pointer::runner_up(&candidates, pai)
+                            .map(|other| crate::autoplay::table::is_loose(other, hand)),
+                        crate::autoplay::table::is_safe(pai, &riichi_rivers),
+                    )
+                }
+                _ => (None, None, None),
+            };
+            crate::autoplay::delay::Reading {
+                loose,
+                runner_up_loose,
+                safe,
+                human: self.advisor.view(&resp.action),
+            }
+        };
+        // One line a decision, for measuring a pace against afterwards.
+        info!(action = ?resp.action, ?probs, ?reading, "autoplay: decision read");
+
         let action_ctx = ActionContext {
             action: &resp.action,
             snapshot: &snapshot,
@@ -240,6 +280,7 @@ impl AutoplayManager {
             delay_cfg,
             budget,
             probs,
+            reading,
             delay_script: self.delay_script.script(),
             tenhou: tenhou_state.as_ref(),
         };
@@ -979,6 +1020,7 @@ impl AutoplayManager {
     }
 
     fn handle_mjai_event(&mut self, ev: &MjaiEvent) {
+        self.advisor.note(ev);
         match ev {
             MjaiEvent::StartGame { id, .. } => {
                 // Capture our seat directly from the StartGame event rather
