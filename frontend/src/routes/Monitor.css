@@ -241,6 +241,9 @@
 .mdec-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
 .mdec-kicker { display: flex; align-items: baseline; gap: 6px; min-width: 0; font-size: 12.5px; color: var(--m-ink2); white-space: nowrap; overflow: hidden; }
 .mdec-kicker b { color: var(--m-ink); font-variant-numeric: tabular-nums; }
+/* The number has a place of one size — a word and four digits — so what
+ * follows it starts where it did while the number was still to come. */
+.mdec-mark { flex: none; min-width: 3.8em; }
 .mdec-kicker i { overflow: hidden; text-overflow: ellipsis; }
 .mdec-kicker i::before { content: '·'; margin-right: 6px; opacity: 0.6; }
 

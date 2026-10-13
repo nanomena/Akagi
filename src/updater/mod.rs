@@ -21,6 +21,7 @@
 //! `src/ipc/commands.rs`; both are guarded by `AppState::updater_lock`
 //! so two concurrent invocations can't race the file rename.
 
+#[cfg(feature = "app")]
 pub mod apply;
 pub mod check;
 pub mod error;

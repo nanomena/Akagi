@@ -1,7 +1,7 @@
 import type { CSSProperties } from 'react'
 import { AlertTriangle, Check, Hourglass, Info, LoaderCircle, Minus, X } from 'lucide-react'
 import { Faces } from '@/components/monitor/Tiles'
-import type { ActionView, Candidate, DecisionView, MonitorDecision, StepState, Tone } from '@/lib/monitor'
+import { decisionMark, type ActionView, type Candidate, type DecisionView, type MonitorDecision, type StepState, type Tone } from '@/lib/monitor'
 
 const BADGE_ICON: Record<Tone, typeof Check> = { ok: Check, wait: Hourglass, busy: LoaderCircle, bad: AlertTriangle, idle: Minus }
 const STEPS = ['请求', '建议', '确认'] as const
@@ -46,7 +46,7 @@ export function DecisionCard({ view, decision: d, elapsed, past }: CardProps) {
   return <section className="mdec" data-tone={view.tone} data-phase={view.phase} data-past={past || undefined} aria-live="polite">
     <header className="mdec-top">
       <span className="mdec-kicker">
-        {d ? <>{past ? '上一决策' : '决策'} <b>#{d.id}</b></> : '模型建议'}
+        {d ? <>{past ? '上一决策' : '决策'} <b className="mdec-mark">{decisionMark(d)}</b></> : '模型建议'}
         {view.trigger && <i>{view.trigger}</i>}
       </span>
       <Badge view={view} />

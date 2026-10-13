@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  actionLabel, alertsOf, candidatesOf, decisionView, describeAction, factsOf, handMarks, healthOf, meldView, newestSnapshot, ownHand,
+  actionLabel, alertsOf, candidatesOf, decisionMark, decisionView, describeAction, factsOf, handMarks, healthOf, meldView, newestSnapshot, ownHand,
   serverLine,
   type MonitorDecision, type MonitorSnapshot, type Table,
 } from './monitor'
@@ -10,7 +10,7 @@ const table: Table = { self: 0, players: 4 }
 const tiles = (faces: Array<{ tile: string; side?: boolean; back?: boolean }>) => faces.map(f => `${f.side ? '_' : ''}${f.back ? '#' : f.tile}`).join(' ')
 
 function decision(response: MjaiEvent & { meta?: unknown }, items: ShowItem[], trigger: MjaiEvent = { type: 'tsumo', actor: 0, pai: '1m' }): MonitorDecision {
-  return { id: 7, context: { game: 1, round: 1, event_seq: 10 }, started_ms: 0, completed_ms: 1, reaction_ms: 120, bot: 'demo', trigger,
+  return { id: 7, number: 3, context: { game: 1, round: 1, event_seq: 10 }, started_ms: 0, completed_ms: 1, reaction_ms: 120, bot: 'demo', trigger,
     state: 'awaiting', response: { ...response, meta: { show: { items } } } as MonitorDecision['response'], error: null, confirmed_seq: null }
 }
 function snapshot(d: MonitorDecision, patch: Partial<MonitorSnapshot> = {}): MonitorSnapshot {
@@ -106,6 +106,22 @@ describe('candidates', () => {
 
 describe('where a decision stands', () => {
   const discard = () => decision({ type: 'dahai', actor: 0, pai: '9s', tsumogiri: false }, [{ label: 'Discard', pais: ['9s'], value: '60%' }])
+  it('goes by the position its bot gives it, and otherwise by its number in the game', () => {
+    const placed = (position: unknown): MonitorDecision => {
+      const d = discard()
+      return { ...d, response: { ...d.response!, meta: { show: { items: [], position } } } as MonitorDecision['response'] }
+    }
+    expect(decisionMark(discard())).toBe('#3')
+    expect(decisionMark(placed(' step 187 '))).toBe('step 187')
+    // Not the process-wide id, and nothing that is not a short string.
+    expect(decisionMark({ ...discard(), id: 412 })).toBe('#3')
+    expect(decisionMark(placed(187))).toBe('#3')
+    expect(decisionMark(placed(''))).toBe('#3')
+    expect(decisionMark(placed('the hundred and eighty-seventh step'))).toBe('#3')
+    // No reply, no answer to which it is: a failed request falls back, a pending one waits.
+    expect(decisionMark({ ...discard(), state: 'failed', response: null })).toBe('#3')
+    expect(decisionMark({ ...placed('step 187'), state: 'thinking', response: null })).toBe('')
+  })
   it('is live only between the suggestion and the game answering it', () => {
     expect(decisionView(snapshot(discard()))).toMatchObject({ phase: 'awaiting', live: true, steps: ['done', 'done', 'active'] })
     expect(decisionView(snapshot({ ...discard(), state: 'thinking', response: null }))).toMatchObject({ phase: 'thinking', live: false, action: null })

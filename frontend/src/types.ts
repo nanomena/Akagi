@@ -48,6 +48,9 @@ export type ShowMeta = {
   caption?: string
   /** A sentence about them, shown on demand. */
   hint?: string
+  /** Where this decision falls in the game, by the bot's own count and in its
+   *  own words ("step 187"). The monitor numbers the decision by it. */
+  position?: string
   items: ShowItem[]
 }
 

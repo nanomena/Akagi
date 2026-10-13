@@ -8,6 +8,7 @@ pub mod config;
 pub mod event_bus;
 pub mod game_state;
 pub mod github;
+pub mod headless;
 pub mod history;
 pub mod inspector;
 pub mod ipc;
@@ -19,12 +20,17 @@ pub mod schema;
 pub mod updater;
 pub mod util;
 
-use clap::Parser;
-use std::path::Path;
-use std::sync::Arc;
-use tauri::Manager;
-use tracing::{error, info, warn};
+#[cfg(feature = "app")]
+use {
+    clap::Parser,
+    std::path::Path,
+    std::sync::Arc,
+    tauri::Manager,
+    tracing::{error, info, warn},
+};
 
+/// The Tauri application. The same core without a window is `headless::run`.
+#[cfg(feature = "app")]
 pub fn run() {
     platform::setup();
 
@@ -119,7 +125,7 @@ pub fn run() {
     let autoplay_enabled = cfg.autoplay.enabled;
     let first_run_completed = cfg.general.first_run_completed;
     let monitor_cfg = cfg.monitor.clone();
-    let brand = ipc::monitor::brand(&cfg);
+    let brand = monitor::brand(&cfg);
 
     // Game-state tracker handle is built up front so AppState can carry
     // the Arc, but the consumer task is spawned inside `.setup()` once
