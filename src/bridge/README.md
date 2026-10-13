@@ -19,7 +19,7 @@ pub trait Bridge: Send {
 ## mjai types
 
 `MjaiEvent` lives in [`crate::schema::mjai`](../schema/mjai/mod.rs) — it's used
-across the project (bridge output, AI bots, frontend HUD) and isn't owned by
+across the project (bridge output, bots, the monitor) and isn't owned by
 this module. See `src/schema/README.md`.
 
 One bridge instance per independent game session. For Majsoul that means one
@@ -30,14 +30,14 @@ state.
 
 `bridge::for_platform(platform, flow_log, session, hooks)` returns a
 `Box<dyn Bridge>` for the configured [`Platform`](../config/platform.rs). The
-proxy handler builds a fresh bridge inside `handle_websocket` so per-flow state
+capture loop builds a fresh bridge for each WebSocket (`capture::flow`) so per-flow state
 is isolated.
 
 ## `BridgeHooks`
 
 Shared slots the autoplay layer hands to a bridge. Every field is optional and
-platform-specific, and only the chromium capture path wires them at all — the
-MITM path has no `Page` handle, so nothing consumes them. They exist because
+platform-specific, and capture wires them when autoplay is in play.
+They exist because
 autoplay needs facts only the protocol parser sees:
 
 | Field | Platform | Carries |

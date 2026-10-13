@@ -245,47 +245,6 @@ pub fn load_values(
     Ok(resolved)
 }
 
-/// Validate every entry in `values` against `manifest.settings`. Returns
-/// the first validation error. Used by IPC commands before persisting.
-pub fn validate_all(
-    manifest: &Manifest,
-    values: &BTreeMap<String, serde_json::Value>,
-) -> Result<()> {
-    for (key, value) in values {
-        let Some(spec) = manifest.settings.get(key) else {
-            bail!("unknown setting {key:?}");
-        };
-        validate(key, spec, value)?;
-    }
-    Ok(())
-}
-
-/// Persist `values` to `<bot_dir>/settings.toml` atomically (write-temp +
-/// rename). Unknown keys are dropped before writing.
-pub fn save_values(
-    bot_dir: &Path,
-    manifest: &Manifest,
-    values: &BTreeMap<String, serde_json::Value>,
-) -> Result<()> {
-    validate_all(manifest, values)?;
-
-    let mut out = toml::Table::new();
-    for (key, value) in values {
-        if !manifest.settings.contains_key(key) {
-            continue;
-        }
-        out.insert(key.clone(), json_to_toml(value)?);
-    }
-
-    let body = toml::to_string_pretty(&out).context("serialize settings.toml")?;
-    let path = bot_dir.join(SETTINGS_FILE);
-    let tmp = bot_dir.join(format!(".{SETTINGS_FILE}.tmp"));
-    std::fs::write(&tmp, &body).with_context(|| format!("write {}", tmp.display()))?;
-    std::fs::rename(&tmp, &path)
-        .with_context(|| format!("rename {} -> {}", tmp.display(), path.display()))?;
-    Ok(())
-}
-
 /// Write the resolved (defaults ⊕ on-disk values) settings dict to
 /// `<bot_dir>/.akagi/resolved_settings.json`. Returns the path so the
 /// caller can set `AKAGI_BOT_CONFIG=<path>` on the child.
@@ -384,32 +343,6 @@ fn toml_to_json(v: toml::Value) -> serde_json::Value {
             J::Object(t.into_iter().map(|(k, v)| (k, toml_to_json(v))).collect())
         }
     }
-}
-
-fn json_to_toml(v: &serde_json::Value) -> Result<toml::Value> {
-    use serde_json::Value as J;
-    Ok(match v {
-        J::String(s) => toml::Value::String(s.clone()),
-        J::Bool(b) => toml::Value::Boolean(*b),
-        J::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                toml::Value::Integer(i)
-            } else if let Some(f) = n.as_f64() {
-                toml::Value::Float(f)
-            } else {
-                bail!("number {n} not representable in TOML")
-            }
-        }
-        J::Null => bail!("null is not a valid setting value"),
-        J::Array(a) => toml::Value::Array(a.iter().map(json_to_toml).collect::<Result<Vec<_>>>()?),
-        J::Object(o) => {
-            let mut t = toml::Table::new();
-            for (k, v) in o {
-                t.insert(k.clone(), json_to_toml(v)?);
-            }
-            toml::Value::Table(t)
-        }
-    })
 }
 
 #[cfg(test)]
@@ -526,69 +459,6 @@ mystery = "ignored"
         let v = load_values(tmp.path(), &m).unwrap();
         assert_eq!(v["api_url"], json!("https://override.example"));
         assert!(!v.contains_key("mystery"));
-    }
-
-    #[test]
-    fn validate_rejects_wrong_type() {
-        let m = sample_manifest();
-        let mut values: BTreeMap<String, serde_json::Value> = BTreeMap::new();
-        values.insert("online".into(), json!("not a bool"));
-        let err = validate_all(&m, &values).unwrap_err();
-        assert!(err.to_string().contains("expected bool"), "got: {err:#}");
-    }
-
-    #[test]
-    fn validate_rejects_out_of_range_number() {
-        let m = sample_manifest();
-        let mut values: BTreeMap<String, serde_json::Value> = BTreeMap::new();
-        values.insert("temperature".into(), json!(5.0));
-        let err = validate_all(&m, &values).unwrap_err();
-        assert!(err.to_string().contains("> max"), "got: {err:#}");
-    }
-
-    #[test]
-    fn validate_rejects_unknown_enum_choice() {
-        let m = sample_manifest();
-        let mut values: BTreeMap<String, serde_json::Value> = BTreeMap::new();
-        values.insert("model".into(), json!("c"));
-        let err = validate_all(&m, &values).unwrap_err();
-        assert!(err.to_string().contains("not in choices"), "got: {err:#}");
-    }
-
-    #[test]
-    fn save_values_round_trips_through_disk() {
-        let tmp = TempDir::new().unwrap();
-        let m = sample_manifest();
-        let mut values: BTreeMap<String, serde_json::Value> = BTreeMap::new();
-        values.insert("api_url".into(), json!("https://saved.example"));
-        values.insert("online".into(), json!(true));
-        values.insert("temperature".into(), json!(0.5));
-        values.insert("model".into(), json!("b"));
-
-        save_values(tmp.path(), &m, &values).unwrap();
-        let read_back = load_values(tmp.path(), &m).unwrap();
-        assert_eq!(read_back["api_url"], json!("https://saved.example"));
-        assert_eq!(read_back["online"], json!(true));
-        assert_eq!(read_back["temperature"], json!(0.5));
-        assert_eq!(read_back["model"], json!("b"));
-    }
-
-    #[test]
-    fn save_values_rejects_invalid_then_leaves_file_untouched() {
-        let tmp = TempDir::new().unwrap();
-        let m = sample_manifest();
-        write(
-            &tmp.path().join("settings.toml"),
-            r#"api_url = "old"
-"#,
-        );
-        let mut values: BTreeMap<String, serde_json::Value> = BTreeMap::new();
-        values.insert("temperature".into(), json!(99.0));
-        let err = save_values(tmp.path(), &m, &values).unwrap_err();
-        assert!(err.to_string().contains("> max"), "got: {err:#}");
-
-        let on_disk = std::fs::read_to_string(tmp.path().join("settings.toml")).unwrap();
-        assert!(on_disk.contains(r#"api_url = "old""#));
     }
 
     #[test]

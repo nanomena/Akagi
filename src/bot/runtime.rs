@@ -3,11 +3,9 @@
 //! Two modes:
 //!
 //! - **Bundled**: `runtime/python/<triple>/...` and `runtime/uv/<triple>/uv`
-//!   ship next to the binary in the portable zip distribution. The locator
-//!   checks the exe-adjacent layout first; the Tauri-managed
-//!   `app.path().resource_dir()` is checked as a secondary fallback so
-//!   `cargo run` from a checkout (and any future Tauri-bundled target) keeps
-//!   working. Zero Python install required for end users.
+//!   ship beside the core in the packaged application. The locator checks
+//!   that exe-adjacent layout first; a caller may name one more folder to
+//!   look in. Zero Python install required for end users.
 //! - **System**: `python3` and `uv` are looked up on `PATH` via the `which`
 //!   crate. Used during development (`cargo run` from a checkout without a
 //!   populated `runtime/`) and as a graceful fallback if the bundled
@@ -32,7 +30,7 @@ const AKAGI_DIR: &str = ".akagi";
 /// Origin of the python + uv binaries this runtime points at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeMode {
-    /// Bundled python-build-standalone + uv from the Tauri resource dir.
+    /// Bundled python-build-standalone + uv from beside the executable.
     Bundled,
     /// `python3` + `uv` discovered on `PATH`. Dev-mode fallback.
     System,
@@ -57,14 +55,12 @@ impl PythonRuntime {
     ///
     /// Lookup order:
     /// 1. **Exe-adjacent**: `<exe_parent>/runtime/{python,uv}/<triple>/...` —
-    ///    this is the portable zip layout users get from Releases.
-    /// 2. **Resource dir**: the Tauri-managed `app.path().resource_dir()` —
-    ///    secondary fallback so `cargo run` and any future Tauri-bundled
-    ///    install (`/usr/lib/akagi/`, `.app/Contents/Resources/`) keep
-    ///    working.
+    ///    this is the layout of the packaged application.
+    /// 2. **`resource_dir`**, if the caller names one: the same layout
+    ///    somewhere else.
     /// 3. **System PATH**: `python3` and `uv` resolved via the `which` crate.
     ///
-    /// Pass `None` for `resource_dir` outside Tauri (tests, CLI tools).
+    /// The core passes `None`: its runtime is beside it or on `PATH`.
     pub fn locate(resource_dir: Option<&Path>) -> Result<Self> {
         if let Some(rt) = try_bundled_exe_adjacent() {
             return Ok(rt);
@@ -286,14 +282,8 @@ pub async fn reset_sync_state(bot_dir: &Path) {
 }
 
 /// Look for the bundled runtime in the directory containing the running
-/// executable. This is the layout shipped by the portable zip
-/// distribution: `<exe_parent>/runtime/{python,uv}/<triple>/...`.
-///
-/// On Linux/macOS, `tauri::path::resource_dir()` does not return
-/// exe-adjacent paths in a portable layout — it tries Tauri-bundled
-/// install locations like `/usr/lib/akagi/` and returns `Err` or a
-/// non-existent path otherwise. Checking exe-adjacent here ensures the
-/// portable zip works without depending on Tauri's resource resolution.
+/// executable. This is the layout of the packaged application:
+/// `<exe_parent>/runtime/{python,uv}/<triple>/...`.
 fn try_bundled_exe_adjacent() -> Option<PythonRuntime> {
     let exe = std::env::current_exe().ok()?;
     let exe_dir = exe.parent()?;
@@ -601,9 +591,8 @@ mod tests {
         assert!(try_bundled(tmp.path()).is_none());
     }
 
-    /// Regression: portable zip relies on `try_bundled_exe_adjacent` to
-    /// find `<exe_parent>/runtime/...` because Tauri's `resource_dir()`
-    /// doesn't return exe-adjacent on Linux/macOS in a portable layout.
+    /// The packaged application relies on `try_bundled_exe_adjacent` to
+    /// find `<exe_parent>/runtime/...`.
     /// In the test runner the binary lives in `target/<profile>/deps/`
     /// with no `runtime/` next to it, so this must return `None` (and
     /// must not panic on the optional chain).

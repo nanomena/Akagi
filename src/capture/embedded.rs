@@ -1,24 +1,18 @@
-//! Capture from a game the application shows in a Chromium view of its own,
-//! over the same CDP route and with the same autoplay page as a browser
-//! launched for the purpose.
-use super::{CaptureBackend, CaptureCtx, CaptureDescriptor, CaptureKind, ShutdownToken};
-use crate::capture::chromium::cdp;
+//! The game the desktop shell shows in a Chromium view of its own: where it is,
+//! which address it may be sent to, and the loop that captures from it.
+use super::{cdp, CaptureCtx, ShutdownToken};
 use crate::capture::flow::FlowBridges;
 use anyhow::{Context, Result};
-use async_trait::async_trait;
 use std::sync::Arc;
 use std::time::Duration;
 
-/// Where the embedded game is: the view's local DevTools endpoint, and the page
-/// in it to watch and send to the game.
+/// Where the game view is: the shell's local DevTools endpoint, and the page
+/// there to watch and send to the game.
 #[derive(Debug, Clone)]
-pub struct EmbeddedBackend {
+pub struct EmbeddedGame {
     pub endpoint: String,
     pub page: cdp::EmbeddedPage,
 }
-
-/// What the capture status calls this source.
-pub const LABEL: &str = "embedded";
 
 pub async fn discover_endpoint(port: u16) -> Result<String> {
     let client = reqwest::Client::builder()
@@ -68,9 +62,9 @@ pub fn game_url(configured: &str) -> Result<reqwest::Url, String> {
     Ok(url)
 }
 
-#[async_trait]
-impl CaptureBackend for EmbeddedBackend {
-    async fn run(self: Box<Self>, ctx: CaptureCtx, shutdown: ShutdownToken) -> Result<()> {
+impl EmbeddedGame {
+    /// Capture until the browser goes away, the loop fails, or `shutdown` is asked for.
+    pub async fn run(self, ctx: CaptureCtx, shutdown: ShutdownToken) -> Result<()> {
         let mut hooks = ctx
             .autoplay
             .as_ref()
@@ -94,17 +88,33 @@ impl CaptureBackend for EmbeddedBackend {
             _ = shutdown.wait() => Ok(()),
         }
     }
-    fn descriptor(&self) -> CaptureDescriptor {
-        CaptureDescriptor {
-            kind: CaptureKind::Chromium,
-            label: LABEL.into(),
-        }
+
+    /// The address capture reaches the view at, for the status to show: the
+    /// endpoint's host and port, without the browser's id.
+    pub fn address(&self) -> String {
+        self.endpoint
+            .parse::<reqwest::Url>()
+            .ok()
+            .and_then(|url| Some(format!("{}:{}", url.host_str()?, url.port()?)))
+            .unwrap_or_else(|| self.endpoint.clone())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::game_url;
+    use super::*;
+
+    #[test]
+    fn the_status_shows_where_the_view_is_and_not_which_browser() {
+        let game = EmbeddedGame {
+            endpoint: "ws://127.0.0.1:58129/devtools/browser/e579741d-cbe6".into(),
+            page: cdp::EmbeddedPage {
+                url: "https://game.maj-soul.com/1/".into(),
+                target: None,
+            },
+        };
+        assert_eq!(game.address(), "127.0.0.1:58129");
+    }
 
     #[test]
     fn the_game_opens_only_at_its_own_site_over_https() {

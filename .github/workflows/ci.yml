@@ -1,24 +1,18 @@
 name: CI
 
-# Fast PR gate: lint + test on Linux, plus a compile-only check on the other
-# two release targets. The full cross-platform build and packaging still lives
-# in release.yml (tag-triggered). The goal here is to catch fmt / clippy /
-# compile / test / frontend breakage before merge — `cargo test --lib` alone
-# misses integration-test compile breaks, so we also compile every test target.
+# Fast gate: lint and test the core on Linux, compile it on the other two
+# platforms, and lint, test and build the interface. Packaging the application
+# is desktop.yml's.
 #
 # The macOS/Windows check exists because Linux alone is not enough to prove the
 # code compiles: an API can be `cfg`'d out on another platform and still build
-# clean here. That is not hypothetical — `WebviewWindowBuilder::transparent` is
-# gated behind Tauri's `macos-private-api` feature on macOS, so the overlay
-# window compiled fine on Linux, passed every PR, and only blew up when the
-# v3.3.2 tag reached release.yml, which is the first thing that ever compiles
-# for macOS.
+# clean here.
 
 on:
   pull_request:
-    branches: [v2, v3]
+    branches: [v3]
   push:
-    branches: [v2, v3]
+    branches: [v3]
 
 # A newer push to the same ref cancels the in-flight run.
 concurrency:
@@ -49,38 +43,24 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      # The crate links tauri, so even `cargo test --lib` needs the GTK /
-      # WebKit dev libs to compile. Mirrors release.yml's Linux deps
-      # (minus the bundling-only patchelf / libfuse2).
-      - name: Linux system deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            libsoup-3.0-dev \
-            libssl-dev
-
       - name: rustfmt
         run: cargo fmt --all -- --check
 
       - name: clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings
 
       - name: test (lib)
-        run: cargo test --lib
+        run: cargo test --locked --lib
 
       # Compile every test target (integration tests, benches) without
-      # running them. This is the check that would have caught the
-      # spawn_with_command arity break in tests/example_bot.rs.
+      # running them: `cargo test --lib` alone misses a test that no longer
+      # builds.
       - name: build all test targets
-        run: cargo test --no-run --all-targets
+        run: cargo test --locked --no-run --all-targets
 
-  # Compile-only on the other two release targets. No tests, no packaging — the
+  # Compile-only on the other two platforms. No tests, no packaging — the
   # point is purely "does this platform's cfg path still build", which is the
-  # one thing the Linux gate above structurally cannot tell us. `macos-14` is
-  # arm64, matching release.yml's `aarch64-apple-darwin`.
+  # one thing the Linux gate above structurally cannot tell us.
   compile:
     name: Compile (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -103,13 +83,11 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      # --all-targets so the bin (and its `generate_context!`) is compiled too,
-      # not just the lib.
       - name: cargo check
         run: cargo check --all-targets --locked
 
   frontend:
-    name: Frontend (lint + build)
+    name: Interface (lint + test + build)
     runs-on: ubuntu-22.04
     defaults:
       run:
@@ -120,7 +98,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
@@ -129,6 +107,9 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+      - name: Test
+        run: npm test
 
       # `npm run build` is `tsc -b && vite build` — type-checks too.
       - name: Build

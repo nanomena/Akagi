@@ -2,8 +2,8 @@
 
 Translates the bot's chosen mjai action into something the game client
 actually does, dispatched over CDP. Only active when
-`autoplay.enabled = true` **and** the chromium capture backend is running
-(the MITM path has no page handle at all).
+`autoplay.enabled = true` **and** capture is running: the page handle it
+clicks with is the one capture attached to.
 
 Two very different routes in, decided by `platform.kind`:
 
@@ -170,7 +170,7 @@ named.
 `delay::decide` computes a target **total** thinking time for the
 current decision window — not a sleep length. The caller subtracts what
 the window has already consumed before emitting the `Step::Sleep`:
-`majsoul::push_pre_delay` deducts network, proxy and bot inference time
+`majsoul::push_pre_delay` deducts network and bot inference time
 from the server's own budget, plus the upcoming click sequence's duration.
 `tenhou::push_pre_delay` has neither to deduct — Tenhou publishes no
 per-window budget and nothing is being clicked — so the target *is* the
@@ -231,8 +231,7 @@ click still lands after the UI is ready.
 3. Expose it to Lua in `script::DelayScript::build_ctx` and document it
    in `assets/delay_default.lua` + the README's ctx table.
 4. Config knobs go in `config/autoplay.rs::DelayModelConfig` (serde
-   defaults!), mirrored in `frontend/src/types.ts` and, if user-facing,
-   `Settings.tsx`.
+   defaults!).
 
 ### Lua host invariants (`delay/script.rs`)
 
@@ -265,8 +264,8 @@ Majsoul server frame (ActionPrototype with operation for our seat)
 The bridge clears the slot when an action carries no operation (window
 closed) and at game boundaries. `GameRestore` replays park the value and
 commit only the final still-open window, backdating `opened_at` by
-`passed_waiting_time`. The MITM proxy passes no slot — `budget` is
-simply `None` there and the static `no_budget_cap_ms` applies.
+`passed_waiting_time`. Where no slot was seen, `budget` is
+`None` and the static `no_budget_cap_ms` applies.
 
 ## Testing notes
 

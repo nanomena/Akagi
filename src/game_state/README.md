@@ -2,14 +2,14 @@
 
 Wraps [`riichienv-core`](https://crates.io/crates/riichienv-core) to
 maintain an authoritative, queryable mirror of the current mahjong game
-fed by the MJAI event stream from the proxy bridge.
+fed by the MJAI event stream from the bridge.
 
 ## Why a wrapper?
 
 `riichienv-core` is great as a simulation engine but its public API is
 shaped for RL training: `Vec<...>` everywhere, raw `u8` tile IDs in
 0..136 with the red-five convention (16/52/88), `Phase` as a bare enum,
-and so on. None of that is what a UI or downstream IPC layer wants.
+and so on. None of that is what the monitor or autoplay wants.
 
 This module:
 
@@ -46,10 +46,10 @@ Spawned from `lib.rs` once the MJAI bus exists:
 ```rust
 let tracker = game_state::spawn(mjai_bus.subscribe());
 // tracker: Arc<Mutex<GameTracker>>
-//   → IPC commands (future) read snapshot via `tracker.lock().await.snapshot()`
+//   → the monitor and autoplay read a snapshot via `tracker.lock().await.snapshot()`
 ```
 
-The handle is held by `AppState` so future IPC commands can pull
+The handle is held by `AppState` so that autoplay can pull
 snapshots without keeping a separate reference.
 
 ## Querying
@@ -76,7 +76,7 @@ pub struct TrackedEvent {
 }
 ```
 
-Subscribers to that bus (the analysis runner, the bot manager) can rely on
+Subscribers to that bus (the bot manager) can rely on
 the mirror being current when it fires, which the raw `MjaiBus` cannot
 promise.
 
@@ -123,7 +123,7 @@ The hand string is `riichienv`'s MPSZ notation, not mjai. Use
 
 ## Future: GameStateBus
 
-When the IPC layer needs live state push (toast-style or reactive UI),
+If something needs every state pushed to it rather than read on demand,
 add a `GameStateBus` to `crate::event_bus` and have `tracker::run`
 publish a snapshot on every event (or every N events). The current
 design intentionally stops one step short of that — snapshot-on-pull

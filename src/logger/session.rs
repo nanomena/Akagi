@@ -1,6 +1,5 @@
 use crate::inspector::{InspectorBus, InspectorWriter};
 use crate::logger::{
-    binary::BinaryLogger,
     flow::FlowLogger,
     stream::{LogStreamHandle, LogStreamLayer},
 };
@@ -8,10 +7,9 @@ use crate::schema::{InspectorEntry, LogEntry};
 use anyhow::{Context, Result};
 use chrono::Local;
 use std::{
-    collections::HashMap,
     fmt as stdfmt,
     path::{Path, PathBuf},
-    sync::{Arc, RwLock},
+    sync::Arc,
 };
 use tokio::sync::broadcast;
 use tracing::{Event, Subscriber};
@@ -92,12 +90,10 @@ impl LogTarget {
     }
 }
 
-/// Active logging session. Holds the session directory, registered binary
-/// loggers, and tracing-appender worker guards (must stay alive for log
-/// flushing).
+/// Active logging session. Holds the session directory and the
+/// tracing-appender worker guards (must stay alive for log flushing).
 pub struct Session {
     dir: PathBuf,
-    binary_loggers: RwLock<HashMap<String, Arc<BinaryLogger>>>,
     _guards: Vec<WorkerGuard>,
     /// Handle to the JSONL + broadcast layer. Kept on `Session` so the
     /// IPC layer can call `subscribe_log_events` long after init, and so
@@ -222,7 +218,6 @@ impl Session {
 
         Ok(Self {
             dir,
-            binary_loggers: RwLock::new(HashMap::new()),
             _guards: guards,
             stream: stream_handle,
             inspector_writer,
@@ -281,29 +276,6 @@ impl Session {
         Ok(Arc::new(FlowLogger::new(
             &self.dir, subdir, file_name, label,
         )?))
-    }
-
-    /// Get-or-create a binary logger by name. The file lives at
-    /// `<session>/<name>.binlog`.
-    pub fn binary_logger(&self, name: &str) -> Result<Arc<BinaryLogger>> {
-        if let Some(existing) = self
-            .binary_loggers
-            .read()
-            .expect("binary logger map poisoned")
-            .get(name)
-        {
-            return Ok(existing.clone());
-        }
-        let mut w = self
-            .binary_loggers
-            .write()
-            .expect("binary logger map poisoned");
-        if let Some(existing) = w.get(name) {
-            return Ok(existing.clone());
-        }
-        let logger = Arc::new(BinaryLogger::new(&self.dir, name)?);
-        w.insert(name.to_string(), logger.clone());
-        Ok(logger)
     }
 }
 

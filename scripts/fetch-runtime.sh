@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # Fetch python-build-standalone + uv for a target triple and drop them
-# into <repo-root>/runtime/{python,uv}/<triple>/. `scripts/package-zip.sh`
-# copies that tree next to the binary in the portable zip; `try_bundled`
+# into <repo-root>/runtime/{python,uv}/<triple>/. `desktop/scripts/package.mjs`
+# copies that tree next to the core in the packaged application; `try_bundled`
 # in src/bot/runtime.rs then picks it up exe-adjacent at runtime.
 #
 # Usage:
