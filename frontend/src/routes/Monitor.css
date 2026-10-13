@@ -119,14 +119,19 @@
 }
 .mfaces { display: inline-flex; align-items: flex-end; flex: none; }
 
-/* A hand solves its own tile height from the width it has and the number of
- * tile-widths it holds (`--units`), up to `--th-max`. */
+/* A hand's tile height is solved from the width it has and the tile-widths it
+ * has room for (`--room`), up to `--th-max`. The room is the most a row of its
+ * kind holds in play, not what it holds now, so its tiles are one size and a
+ * tile stays where it is while the hand changes. Standing tiles run from the
+ * left edge; calls are laid from the right edge inwards. */
 .mhand-box { container-type: inline-size; flex: 1; min-width: 0; }
-.mhand { --th: min(var(--th-max), calc(100cqw / var(--units) / 0.7)); display: flex; align-items: flex-end; }
+.mhand { --th: min(var(--th-max), calc(100cqw / var(--room) / 0.7)); display: flex; align-items: flex-end; }
 .mhand-drawn, .mhand-meld { display: inline-flex; margin-left: calc(var(--th) * 0.21); }
 .mhand > .mhand-meld:first-child { margin-left: 0; }
+.mhand > :not(.mhand-meld) + .mhand-meld { margin-left: auto; }
 
-/* A pond is three rows of six. A longer one shrinks its tiles to stay in its cell. */
+/* A pond is rows of six, its tiles sized for the rows it has room for
+ * (`--rows`); only a pond that outgrows them shrinks its tiles. */
 .mriver { --th: calc(var(--u) * 3 / var(--rows)); display: flex; flex-direction: column; }
 .mmelds { display: flex; flex-direction: column; gap: 3px; width: 100%; }
 .mmelds .mhand-box { flex: none; width: 100%; }
@@ -189,12 +194,12 @@
 .mtool:hover:not(:disabled) { color: var(--m-ink); background: hsl(35 20% 14% / 0.07); }
 .mtool[aria-pressed='true'] { color: var(--m-ink); background: var(--m-panel); box-shadow: var(--m-shadow); }
 
-.mchip { display: inline-flex; align-items: center; gap: 5px; flex: none; white-space: nowrap; color: var(--m-ink2); }
+.mchip { display: flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; white-space: nowrap; color: var(--m-ink2); }
 .mchip b { font-weight: 600; color: color-mix(in srgb, var(--tone, var(--m-ink)) 85%, var(--m-ink)); }
 .mchip[data-tone='idle'], .mchip[data-tone='idle'] b { color: var(--m-dim); }
 
 /* The system's switch: a grey track, a white knob; olive while what it allows is live. */
-.mswitch { display: inline-flex; align-items: center; gap: 7px; flex: none; height: 26px; padding: 0 9px; border-radius: 6px; font-size: 12px; color: var(--m-ink2); white-space: nowrap; }
+.mswitch { display: inline-flex; align-items: center; gap: 7px; justify-self: start; height: 26px; padding: 0 6px; border-radius: 6px; font-size: 12px; color: var(--m-ink2); white-space: nowrap; }
 .mswitch:hover:not(:disabled) { background: hsl(35 20% 14% / 0.06); }
 .mswitch i { position: relative; width: 28px; height: 16px; border-radius: 8px; background: var(--m-line-strong); transition: background 0.12s ease; }
 .mswitch i::after { content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px hsl(35 15% 8% / 0.25); transition: transform 0.12s ease; }
@@ -203,7 +208,13 @@
 .mswitch b { min-width: 1em; color: var(--m-dim); }
 .mswitch[aria-checked='true'] b { color: var(--m-ink); }
 
-.mround { display: flex; align-items: baseline; gap: 9px; flex: none; white-space: nowrap; }
+/* The round, the seat and the counters each have a place; a dealer's mark or a
+ * second digit moves nothing. Before a game the window's name and one line of
+ * status stand there instead. */
+.mround { display: grid; grid-template-columns: 62px 72px minmax(0, 1fr); align-items: baseline; align-content: center; column-gap: 8px; min-width: 0; height: 26px; white-space: nowrap; }
+.mround > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mround-idle { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 9px; }
+.mround-seat { align-self: center; display: flex; }
 .mround strong { font: 500 20px/1 var(--m-display); letter-spacing: 0.02em; }
 .mround span { font-size: 12.5px; color: var(--m-ink2); font-variant-numeric: tabular-nums; }
 .mround em { align-self: center; padding: 0 9px; border-radius: 999px; font-size: 12px; line-height: 20px; background: var(--m-panel); border: 1px solid var(--m-line); }
@@ -240,14 +251,19 @@
 .mact-text { display: flex; align-items: baseline; min-width: 0; white-space: nowrap; }
 .mact strong { color: var(--tone, var(--m-ink)); }
 
-.mact--hero { --th: 76px; gap: 16px; }
-.mact--hero[data-faces='2'] { --th: 68px; }
-.mact--hero[data-faces='3'] { --th: 60px; }
-.mact--hero[data-faces='4'] { --th: 52px; }
+/* The tiles of an action stand in a well of one size, so its words begin at
+ * the same place whether it shows one tile, four or none. */
+.mact-well { flex: none; display: flex; align-items: center; justify-content: center; }
+.mact--hero { gap: 14px; width: 100%; }
+.mact--hero .mact-well { --th: 68px; width: 120px; height: 84px; border-radius: 8px; background: var(--m-table); box-shadow: inset 0 0 0 1px hsl(35 30% 80%); }
+.mact--hero[data-faces='3'] .mact-well { --th: 50px; }
+.mact--hero[data-faces='4'] .mact-well { --th: 38px; }
 .mact--hero .mact-text { gap: 10px; }
 .mact--hero strong { font: 600 32px/1.1 var(--m-display); letter-spacing: 0.02em; }
 .mact--hero .mact-text > span { font: 500 23px/1.15 var(--m-display); }
-.mact--hero em { align-self: center; padding: 1px 7px; border-radius: 4px; font-size: 11.5px; color: var(--m-ink2); background: hsl(35 20% 14% / 0.06); }
+/* How the tile left the hand, at the end of the row whatever stands before it. */
+.mact-note { flex: none; margin-left: auto; padding: 1px 7px; border-radius: 4px; font-size: 11.5px; font-style: normal; color: var(--m-ink2); background: hsl(35 20% 14% / 0.06); }
+.mact-note:empty { visibility: hidden; }
 .mact--pending strong { font: 500 24px/1.1 var(--m-display); color: var(--m-ink); }
 .mact--pending .mact-text > .mdec-clock { font-size: 16px; font-weight: 400; color: var(--m-dim); font-variant-numeric: tabular-nums; }
 
@@ -295,15 +311,16 @@
 .mcand-list { display: grid; grid-template-rows: repeat(5, minmax(0, 1fr)); row-gap: 4px; min-height: 0; }
 .mcand {
   --th: 24px;
-  position: relative; display: flex; align-items: center; gap: 9px; min-height: 0; padding: 0 12px 0 10px;
+  position: relative; display: grid; grid-template-columns: 10px 58px 96px minmax(0, 1fr) 56px; align-items: center; column-gap: 9px; min-height: 0; padding: 0 12px 0 10px;
   border-radius: 6px; overflow: hidden; background: var(--m-panel); box-shadow: inset 0 0 0 1px var(--m-line); animation: m-fade 0.16s ease-out;
 }
 .mcand::before { content: ''; position: absolute; inset: 0 auto 0 0; width: var(--share); background: var(--m-row); transition: width 0.2s ease-out; }
 .mcand > * { position: relative; }
-.mcand-rank { flex: none; width: 10px; text-align: center; font-size: 11.5px; color: var(--m-dim); font-variant-numeric: tabular-nums; }
-.mcand-verb { flex: none; min-width: 16px; font-size: 14px; font-weight: 600; color: var(--tone, var(--m-ink)); white-space: nowrap; }
-.mcand-val { margin-left: auto; flex: none; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.mcand-mark { flex: 0 1 auto; min-width: 0; overflow: hidden; font-size: 11px; font-weight: 600; white-space: nowrap; }
+.mcand-rank { text-align: center; font-size: 11.5px; color: var(--m-dim); font-variant-numeric: tabular-nums; }
+.mcand-verb { min-width: 0; overflow: hidden; font-size: 14px; font-weight: 600; color: var(--tone, var(--m-ink)); white-space: nowrap; }
+.mcand-faces { display: flex; min-width: 0; }
+.mcand-val { text-align: right; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.mcand-mark { min-width: 0; overflow: hidden; font-size: 11px; font-weight: 600; white-space: nowrap; }
 .mcand[data-chosen] { box-shadow: inset 0 0 0 1px hsl(228 65% 32% / 0.5); }
 .mcand[data-chosen]::before { background: var(--m-plan-bg); }
 .mcand[data-chosen] .mcand-mark { color: var(--m-plan); }
@@ -351,7 +368,7 @@
 .mhandsec .msec-head { height: 18px; }
 .mhandsec .msec-head h3 { font-size: 11.5px; font-weight: 400; color: var(--m-ink2); }
 .mhandsec-row { flex: 1; display: flex; align-items: flex-end; gap: 14px; min-height: 0; padding-bottom: 9px; }
-.mdora { --th: 24px; display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: 11.5px; color: var(--m-ink2); white-space: nowrap; }
+.mdora { --th: 24px; display: flex; align-items: center; gap: 6px; min-width: 0; height: 26px; overflow: hidden; font-size: 11.5px; color: var(--m-ink2); white-space: nowrap; }
 
 /* Four seats, ours first: 456 × 80 in the dock. */
 .mscorestrip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; min-height: 0; }
@@ -371,11 +388,15 @@
 .mresult > .msec-head { grid-column: 1 / -1; }
 .mresult-hands { display: grid; grid-template-rows: repeat(4, minmax(0, 1fr)); row-gap: 4px; min-height: 0; }
 .mresult-hands > .mslot-empty { grid-row: 1 / -1; }
-.mreveal { display: flex; align-items: center; gap: 12px; min-width: 0; min-height: 0; }
-.mreveal-who { display: flex; align-items: center; gap: 7px; flex: none; width: 176px; font-size: 13px; white-space: nowrap; overflow: hidden; }
-.mreveal-who > span:not(.mseat-tag) { color: var(--m-ink2); }
-.mreveal-ura { --th: 26px; display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: 11.5px; color: var(--m-ink2); white-space: nowrap; }
-.mreveal .mhand-box { flex: 0 1 380px; }
+/* A revealed hand: who and how, the hand, the ura markers — three columns the
+ * same in every line, so hands stand under one another. */
+.mreveal { display: grid; grid-template-columns: 112px minmax(0, 1fr) 108px; align-items: center; column-gap: 12px; min-width: 0; min-height: 0; }
+.mreveal-who { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; column-gap: 7px; min-width: 0; font-size: 13px; line-height: 1.25; white-space: nowrap; }
+.mreveal-who > .mseat-tag { grid-row: 1 / 3; }
+.mreveal-who > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mreveal-who > span:not(.mseat-tag) { grid-column: 2; font-size: 11.5px; color: var(--m-ink2); }
+.mreveal-ura { --th: 22px; display: flex; align-items: center; justify-content: flex-end; gap: 5px; min-width: 0; overflow: hidden; font-size: 11px; color: var(--m-ink2); white-space: nowrap; }
+.mreveal .mhand-box { flex: none; width: 100%; }
 
 /* What it cost each seat: one line a seat. */
 .mscores { display: grid; grid-template-rows: repeat(4, minmax(0, 1fr)); row-gap: 4px; min-height: 0; }
@@ -395,10 +416,12 @@
 }
 .mseat { display: grid; grid-template-rows: 22px 120px minmax(0, 1fr); row-gap: 4px; min-width: 0; min-height: 0; padding: 0 12px; }
 .mseat + .mseat { border-left: 1px solid hsl(35 30% 80%); }
-.mseat > header { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 13px; white-space: nowrap; }
+.mseat > header { display: grid; grid-template-columns: auto 14px 16px minmax(0, 1fr) 54px; align-items: center; column-gap: 6px; min-width: 0; font-size: 13px; white-space: nowrap; }
 .mseat > header > span:nth-child(2) { font-weight: 600; }
-.mseat > header b { margin-left: auto; font-size: 15px; font-variant-numeric: tabular-nums; }
-.mseat-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 11.5px; color: var(--m-ink2); }
+.mseat > header b { text-align: right; font-size: 15px; font-variant-numeric: tabular-nums; }
+.mseat-riichi { display: grid; place-items: center; height: 16px; border-radius: 4px; font-size: 10.5px; font-weight: 600; line-height: 1; color: #fff; background: var(--m-riichi); }
+.mseat-riichi:empty { visibility: hidden; }
+.mseat-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 11.5px; color: var(--m-ink2); }
 .mseat-pond { --u: 40px; min-width: 0; min-height: 0; }
 .mseat-foot { display: flex; align-items: center; min-width: 0; min-height: 0; }
 .mseat-foot small { font-size: 11.5px; color: var(--m-ink2); white-space: nowrap; }
@@ -449,17 +472,19 @@
   grid-column: 2 / -1; display: flex; flex-direction: column; min-height: 0; padding: 0 8px; overflow: hidden auto;
   scroll-snap-type: y proximity; scrollbar-width: thin; scrollbar-color: var(--m-line-strong) transparent;
 }
-.mevent { --th: 20px; flex: none; display: grid; grid-template-columns: 64px 190px auto auto minmax(0, 1fr); align-items: center; column-gap: 10px; height: calc(190px / 7); padding: 0 8px; border-radius: 5px; font-size: 12.5px; scroll-snap-align: start; }
+.mevent { --th: 20px; flex: none; display: grid; grid-template-columns: 64px 190px 150px 96px minmax(0, 1fr); align-items: center; column-gap: 10px; height: calc(190px / 7); padding: 0 8px; border-radius: 5px; font-size: 12.5px; scroll-snap-align: start; }
 .mevent time { font-size: 11.5px; color: var(--m-dim); font-variant-numeric: tabular-nums; }
 .mevent-seat { display: flex; align-items: center; gap: 7px; min-width: 0; white-space: nowrap; }
 .mevent-seat small { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 11.5px; color: var(--m-dim); }
-.mevent-text { white-space: nowrap; }
+.mevent-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mevent-faces { display: flex; min-width: 0; }
+.mevent-mark { display: flex; justify-content: flex-end; min-width: 0; }
 .mevent[data-self] :is(.mevent-seat, .mevent-text) { font-weight: 600; }
 .mevent[data-self] .mevent-seat small { font-weight: 400; }
 .mevent[data-quiet] { color: var(--m-dim); }
 .mevent[data-quiet] .mt { opacity: 0.7; }
 .mevent[data-system] { background: hsl(35 20% 14% / 0.05); color: var(--m-ink2); }
-.mevent-ok { grid-column: -2 / -1; justify-self: end; display: inline-flex; align-items: center; gap: 3px; font-size: 11.5px; font-weight: 600; white-space: nowrap; color: color-mix(in srgb, var(--m-live) 85%, var(--m-ink)); }
+.mevent-ok { display: inline-flex; align-items: center; gap: 3px; font-size: 11.5px; font-weight: 600; white-space: nowrap; color: color-mix(in srgb, var(--m-live) 85%, var(--m-ink)); }
 
 /* ------------------------------------------------------- diagnostics ---- */
 
@@ -485,17 +510,28 @@
 
 /* 1280 × 240: a 36 bar, then 192 of content 12 off the bottom edge. */
 .md { display: grid; grid-template: 36px minmax(0, 1fr) / minmax(0, 1fr); width: 1280px; height: 240px; border-top: 1px solid var(--m-line); }
-.md-bar { display: flex; align-items: center; gap: 16px; min-width: 0; padding: 0 9px 0 16px; }
+/* 1280 × 36, seven places of fixed width: round, dora, tabs, links, switch,
+ * the service's name, tools. What one of them shows never moves another. */
+.md-bar { display: grid; grid-template-columns: 244px 122px 240px 336px 114px minmax(0, 1fr) 28px; align-items: center; column-gap: 8px; min-width: 0; padding: 0 9px 0 16px; }
+.md-bar > .mround { grid-column: 1; }
+.md-bar > .mdora { grid-column: 2; }
+.md-bar > .md-tabs { grid-column: 3; }
+.md-bar > .md-health { grid-column: 4; }
+.md-bar > .mswitch { grid-column: 5; }
+.md-bar > .md-model { grid-column: 6; }
+.md-bar > .mtools { grid-column: 7; }
 .md-bar .mdora { --th: 26px; }
 /* The segmented control: a grey well, the chosen segment a white pill. */
-.md-tabs { display: flex; flex: none; gap: 2px; padding: 3px; border-radius: 8px; background: var(--m-well); }
-.md-tabs button { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 13px; border-radius: 6px; font-size: 12.5px; color: var(--m-ink2); }
+.md-tabs { display: flex; justify-self: start; gap: 2px; padding: 3px; border-radius: 8px; background: var(--m-well); }
+.md-tabs button { position: relative; display: inline-flex; align-items: center; height: 22px; padding: 0 10px; border-radius: 6px; font-size: 12.5px; color: var(--m-ink2); }
+/* A fault on the links tab is flagged in its corner, where it takes no room. */
+.md-tab-flag { position: absolute; top: 1px; right: 1px; width: 6px; height: 6px; box-shadow: none; }
 .md-tabs button:hover { color: var(--m-ink); }
 .md-tabs button[aria-selected='true'] { color: var(--m-ink); background: var(--m-panel); box-shadow: var(--m-shadow); }
 /* The status: quiet while everything runs, the first place a fault shows. */
-.md-health { display: flex; align-items: center; gap: 12px; flex: 0 1 auto; min-width: 0; overflow: hidden; height: 26px; margin-left: auto; margin-right: -8px; padding: 0 9px; border-radius: 6px; font-size: 12px; }
+.md-health { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: center; column-gap: 4px; min-width: 0; height: 26px; padding: 0 6px; border-radius: 6px; font-size: 12px; text-align: left; }
 .md-health:hover { background: hsl(35 20% 14% / 0.06); }
-.md-model { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--m-dim); }
+.md-model { min-width: 0; height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 18px; color: var(--m-dim); }
 
 /* Decision 384 · candidates 384 · hand and scores 456, 12 apart. The decision
  * keeps the first column on every tab; the tabs own the other two. */

@@ -147,7 +147,7 @@ describe('links', () => {
       .toMatchObject({ tone: 'ok', state: '就绪' })
     expect(service({ server: { state: 'ready', bot: 'demo', label: null, facts: [], since_ms: 0, startup_ms: 1 } })).toMatchObject({ state: '已连接' })
     expect(service({ service: 'unknown', server: { state: 'starting', bot: 'demo', since_ms: 0 } })).toMatchObject({ tone: 'busy', state: '加载中' })
-    expect(service({ service: 'unknown', server: { state: 'installing', bot: 'demo' } })).toMatchObject({ tone: 'busy', state: '安装环境' })
+    expect(service({ service: 'unknown', server: { state: 'installing', bot: 'demo' } })).toMatchObject({ tone: 'busy', state: '安装中' })
     // A server that is down outranks whatever the bot last said about it.
     expect(service({ service: 'connected', server: { state: 'failed', bot: 'demo', error: 'it exited (exit code: 1)', retry_at_ms: 4_000 } }))
       .toMatchObject({ tone: 'bad', state: '未运行', detail: 'it exited (exit code: 1)' })

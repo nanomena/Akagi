@@ -1,7 +1,7 @@
 import { Faces, Hand, Melds, River } from '@/components/monitor/Tiles'
 import { fmtScore } from '@/lib/format'
 import {
-  REL_SHORT, handMarks, handOutcome, meldView, ownHand, relOf, resultTitle, roundLabel, seatLabel, seatWind, signed, tableOf,
+  REL_SHORT, HAND_ROOM, handMarks, handOutcome, meldView, ownHand, relOf, resultTitle, roundLabel, seatLabel, seatWind, signed, tableOf,
   type MonitorSnapshot, type RoundResult, type Table,
 } from '@/lib/monitor'
 import type { GameStateSnapshot, MjaiEvent } from '@/types'
@@ -38,7 +38,7 @@ export function HandStrip({ game, suggestion }: StripProps) {
   return <section className="mhandsec">
     <header className="msec-head"><h3>手牌{me.riichi_declared && <span className="mtag" data-tone="riichi">立直</span>}</h3></header>
     <div className="mhandsec-row">
-      <Hand tiles={hand.tiles} drawn={hand.drawn} marks={handMarks(hand, suggestion)} melds={me.melds.map(m => meldView(m, seat, table))} max={44} />
+      <Hand tiles={hand.tiles} drawn={hand.drawn} marks={handMarks(hand, suggestion)} melds={me.melds.map(m => meldView(m, seat, table))} room={HAND_ROOM} max={44} />
     </div>
   </section>
 }
@@ -80,8 +80,8 @@ export function ResultCard({ result, snapshot: s, previous = false }: ResultProp
         const melds = previous ? [] : game?.players[h.seat]?.melds.map(m => meldView(m, h.seat, table)) ?? []
         return <div key={h.seat} className="mreveal">
           <div className="mreveal-who"><SeatTag seat={h.seat} table={table} /><b>{seatLabel(h.seat, table)}</b><span>{handOutcome(h, table)}</span></div>
-          <Hand tiles={h.tiles} drawn={h.winning_tile} melds={melds} max={28} />
-          {h.ura_markers.length > 0 && <span className="mreveal-ura">里宝牌指示<Faces faces={h.ura_markers.map(tile => ({ tile }))} /></span>}
+          <Hand tiles={h.tiles} drawn={h.winning_tile} melds={melds} room={HAND_ROOM} max={28} />
+          <span className="mreveal-ura">{h.ura_markers.length > 0 && <>里宝牌指示<Faces faces={h.ura_markers.map(tile => ({ tile }))} /></>}</span>
         </div>
       })}
     </div>
@@ -116,14 +116,15 @@ export function SeatColumns({ snapshot: s }: { snapshot: MonitorSnapshot }) {
     {order.map(p => {
       const self = p.seat === game.our_seat
       return <section key={p.seat} className="mseat" data-self={self || undefined}>
+        {/* Five places, each its own: a seat that declares riichi moves nothing. East is the dealer. */}
         <header>
           <SeatTag seat={p.seat} table={table} />
-          <span>{seatWind(p.seat, game)}</span>{p.seat === game.oya && <i>庄</i>}
+          <span className="mseat-wind" title={p.seat === game.oya ? '庄家' : undefined}>{seatWind(p.seat, game)}</span>
+          <span className="mseat-riichi" title={p.riichi_declared ? '已立直' : undefined}>{p.riichi_declared && '立'}</span>
           <span className="mseat-name">{s.names[p.seat] ?? ''}</span>
-          {p.riichi_declared && <span className="mtag" data-tone="riichi">立直</span>}
           <b>{fmtScore(p.score)}</b>
         </header>
-        <div className="mseat-pond" title="横置：立直宣言牌　变暗：摸切　被鸣走的牌不在牌河"><River river={p.river} /></div>
+        <div className="mseat-pond" title="横置：立直宣言牌　变暗：摸切　被鸣走的牌不在牌河"><River river={p.river} room={4} /></div>
         <div className="mseat-foot">
           <Melds melds={p.melds} seat={p.seat} table={table} max={20} perRow={4} />
           {p.melds.length === 0 && <small>{self ? `手牌 ${p.tehai.length} 张` : `暗手 ${p.tehai.length} 张，未公开`}</small>}

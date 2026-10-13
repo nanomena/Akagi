@@ -1,14 +1,14 @@
 import type { CSSProperties } from 'react'
 import { faceSeq, useFace } from '@/lib/tileFace'
-import { meldView, tileLabel, type Face, type Table } from '@/lib/monitor'
+import { meldsRoom, meldView, SIDE, tileLabel, type Face, type Table } from '@/lib/monitor'
 import type { DiscardEntry, MeldSnapshot } from '@/types'
 
 // Every tile in the monitor is one of these. Size comes from the `--th` (tile
 // height) custom property of whatever row it sits in, so a row scales as a
 // unit and nothing here measures the DOM.
 
-/** Width of a row of faces in upright-tile widths; a face lying down is 92/70 of one. */
-const faceUnits = (faces: Face[]) => faces.reduce((sum, f) => sum + (f.side ? 92 / 70 : 1), 0)
+/** Width of a row of faces in upright-tile widths. */
+const faceUnits = (faces: Face[]) => faces.reduce((sum, f) => sum + (f.side ? SIDE : 1), 0)
 
 export function Tile({ face, pick = false }: { face: Face; pick?: boolean }) {
   const src = useFace(faceSeq(face.tile, face.side, face.back))
@@ -29,41 +29,54 @@ type HandProps = {
   /** Tiles a live suggestion takes out of the hand — lifted out of the row. */
   marks?: { tiles: Set<number>; drawn: boolean }
   melds?: Face[][]
-  /** Upper bound for the tile height, in px. The row shrinks below it to fit. */
+  /** Tile-widths the row has room for: the most a row of its kind holds in
+   *  play, not what it holds now. The tile size follows from this, so a tile
+   *  is one size and stays where it is while the hand changes. */
+  room: number
+  /** Upper bound for the tile height, in px. */
   max?: number
 }
 
-/** A hand that always fits its container: the tile height is solved from the
- *  container width and the number of tile-widths the row holds. */
-export function Hand({ tiles, drawn, marks, melds = [], max = 46 }: HandProps) {
-  // Gaps are fractions of a tile so the whole row keeps scaling together.
-  const units = tiles.length + (drawn ? 1.3 : 0) + melds.reduce((sum, m) => sum + faceUnits(m) + 0.3, 0) - (tiles.length || drawn ? 0 : 0.3)
-  const style = { '--units': Math.max(units, 1), '--th-max': `${max}px` } as CSSProperties
+/** A hand in a row of fixed room. Standing tiles run from the left edge, each
+ *  at the place its position in the hand gives it; calls are laid from the
+ *  right edge inwards, the first outermost, as on the table — once down, a
+ *  meld does not move. Only a hand wider than any that comes up in play (three
+ *  kans, say) makes its tiles smaller, rather than run out of its row. */
+export function Hand({ tiles, drawn, marks, melds = [], room, max = 46 }: HandProps) {
+  const standing = tiles.length > 0 || !!drawn
+  const units = tiles.length + (drawn ? 1.3 : 0) + melds.reduce((sum, m) => sum + faceUnits(m) + 0.3, 0) - (standing ? 0 : 0.3)
+  const style = { '--room': Math.max(room, units), '--th-max': `${max}px` } as CSSProperties
+  const laid = melds.map((faces, i) => ({ faces, i }))
+  if (standing) laid.reverse()
   return <div className="mhand-box"><div className="mhand" style={style}>
     {tiles.map((tile, i) => <Tile key={i} face={{ tile }} pick={marks?.tiles.has(i)} />)}
     {drawn && <span className="mhand-drawn"><Tile face={{ tile: drawn }} pick={marks?.drawn} /></span>}
-    {melds.map((faces, i) => <span key={i} className="mhand-meld"><Faces faces={faces} /></span>)}
+    {laid.map(({ faces, i }) => <span key={i} className="mhand-meld"><Faces faces={faces} /></span>)}
   </div></div>
 }
 
 /** Discards six to a row, as on the table. A sideways tile declared riichi; a
  *  dimmed one was discarded straight from the draw. Claimed discards have left
- *  the pond and are not drawn. The pond has room for three rows; a longer one
- *  shrinks its tiles rather than spill over its neighbours (`--rows`). */
-export function River({ river }: { river: DiscardEntry[] }) {
+ *  the pond and are not drawn.
+ *
+ *  `room` is the number of rows the pond is sized for. Its tiles are one size
+ *  up to that many rows; only a longer pond shrinks them, rather than spill
+ *  over its neighbours. The dock's ponds have room for four rows — twenty-four
+ *  discards, more than a seat makes in play — so theirs never change size. */
+export function River({ river, room = 3 }: { river: DiscardEntry[]; room?: number }) {
   const faces: Face[] = river.filter(d => !d.called).map(d => ({ tile: d.tile, side: d.is_riichi, dim: !d.tedashi }))
   const rows: Face[][] = []
   for (let i = 0; i < faces.length; i += 6) rows.push(faces.slice(i, i + 6))
-  return <div className="mriver" style={{ '--rows': Math.max(3, rows.length) } as CSSProperties} aria-label={`牌河 ${faces.length} 张`}>
+  return <div className="mriver" style={{ '--rows': Math.max(room, rows.length) } as CSSProperties} aria-label={`牌河 ${faces.length} 张`}>
     {rows.map((row, i) => <Faces key={i} faces={row} />)}
   </div>
 }
 
-/** Open melds in rows, each row fitted to the width it has: a cell of the
- *  table is a fixed size, and two kans side by side must still fit it. */
+/** Open melds in rows of `perRow`, at one tile size: each row has the room
+ *  `perRow` melds need in play, whatever melds it holds. */
 export function Melds({ melds, seat, table, max, perRow = 2 }: { melds: MeldSnapshot[]; seat: number; table: Table; max: number; perRow?: number }) {
   if (melds.length === 0) return null
   const rows: Face[][][] = []
   for (let i = 0; i < melds.length; i += perRow) rows.push(melds.slice(i, i + perRow).map(m => meldView(m, seat, table)))
-  return <div className="mmelds">{rows.map((row, i) => <Hand key={i} tiles={[]} drawn={null} melds={row} max={max} />)}</div>
+  return <div className="mmelds">{rows.map((row, i) => <Hand key={i} tiles={[]} drawn={null} melds={row} room={meldsRoom(perRow)} max={max} />)}</div>
 }

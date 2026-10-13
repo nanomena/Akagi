@@ -30,8 +30,8 @@ export function EventList({ snapshot: s }: { snapshot: MonitorSnapshot }) {
         <time>{clock(e.ts_ms)}</time>
         <span className="mevent-seat">{line.seat != null && <><SeatTag seat={line.seat} table={table} />{seatLabel(line.seat, table)}<small>{s.names[line.seat] ?? ''}</small></>}</span>
         <span className="mevent-text">{line.text}</span>
-        <Faces faces={line.faces} />
-        {e.seq === confirmed && <span className="mevent-ok"><Check size={11} strokeWidth={3} />与建议一致</span>}
+        <span className="mevent-faces"><Faces faces={line.faces} /></span>
+        <span className="mevent-mark">{e.seq === confirmed && <span className="mevent-ok"><Check size={11} strokeWidth={3} />与建议一致</span>}</span>
       </li>
     })}
   </ol>
@@ -88,11 +88,11 @@ export function Diagnostics({ snapshot: s, health, now }: DiagProps) {
       about={s?.game && !s.game_ended ? `对局 ${s.context.game} · 局序 ${s.context.round} · 事件 ${s.context.event_seq}` : '对局开始后跟踪牌局'} />
 
     <dl className="mfacts">
-      {/* What the bot says about itself, as it says it; then what this window knows on its own. */}
-      {factsOf(s).map(fact => <Fact key={fact.name} name={fact.name} value={fact.value} note={fact.note} />)}
+      {/* What this window knows on its own keeps the first three lines; what the bot says about itself follows. */}
       <Fact name="决策往返" value={d?.reaction_ms != null ? `${d.reaction_ms} ms` : '—'} note="完整的 Bot 往返，立直时含后续请求" />
       <Fact name="最近牌局事件" value={s?.last_event_ms ? ago(Math.max(0, now - s.last_event_ms)) : '尚未收到'} note="没有新事件不等于断线" />
       <Fact name="规则" value={s?.game ? `${s.game.num_players} 人${s.red_fives == null ? '' : s.red_fives ? ' · 有赤牌' : ' · 无赤牌'}` : '—'} />
+      {factsOf(s).map(fact => <Fact key={fact.name} name={fact.name} value={fact.value} note={fact.note} />)}
     </dl>
   </div>
 }
