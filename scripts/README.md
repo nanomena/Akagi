@@ -37,7 +37,7 @@ table in `docs/proto_config.bytes` — and writes:
 - `src/bridge/majsoul/liqi.json` — flat rpc-map `".lq.Svc.method" → {req, resp}`.
 
 It exposes `product_version`, `bundle_hash`, and `changed=true/false` as GHA
-outputs; the workflow opens a PR on `v3` when the schema moved. Requires
+outputs; the workflow opens a PR on `main` when the schema moved. Requires
 `requests`, `UnityPy`, and `protobuf`. There is no dependency on any external
 proto release or on the legacy `res/proto/liqi.json` CDN file (a lagging
 Laya-era artifact since Mahjong Soul's Unity WASM migration).
