@@ -576,11 +576,9 @@ fn confirm(s: &mut MonitorSnapshot) {
         d.confirmed_seq = Some(e.seq);
     }
     // A real own action different from the plan invalidates the suggestion.
-    if d.state == "awaiting" {
-        if actual.is_some() {
-            d.state = "expired".into();
-            d.error = Some("The game confirmed a different action.".into());
-        }
+    if d.state == "awaiting" && actual.is_some() {
+        d.state = "expired".into();
+        d.error = Some("The game confirmed a different action.".into());
     }
 }
 

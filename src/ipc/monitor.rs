@@ -177,7 +177,7 @@ pub fn reconcile<R: Runtime>(app: &AppHandle<R>, config: &MonitorConfig) {
             if let Some(frame) = app.get_window(LABEL) {
                 conform(&frame)?;
                 #[cfg(target_os = "windows")]
-                ratio_lock::install(frame.hwnd()?.0 as *mut std::ffi::c_void, RATIO);
+                ratio_lock::install(frame.hwnd()?.0, RATIO);
             }
             let handle = app.clone();
             window.on_window_event(move |event| match event {
