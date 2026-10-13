@@ -5,12 +5,19 @@
 -- the default on the next start. If the script ever errors, Akagi keeps
 -- playing with its built-in model and logs the reason once.
 --
--- decide_delay(ctx) returns { delay_ms = <number>, allow_bank = <bool> }.
+-- decide_delay(ctx) returns
+--   { delay_ms = <number>, allow_bank = <bool>, hesitate = <bool> }.
 --
 -- delay_ms is the target TOTAL thinking time for the decision window —
 -- the time the SERVER observes between offering the decision and
 -- receiving the action. It is NOT a sleep length: Akagi subtracts
 -- whatever networking and bot inference already consumed.
+--
+-- hesitate asks for the pointer to rest on the runner-up before a discard
+-- is pressed. It is a wish: it is shown only when the bot's two likeliest
+-- candidates are discards of different tiles (the bot has to say so —
+-- `type` and `prob` on its candidates), and only inside delay_ms, which
+-- it never lengthens. This default never asks for it.
 --
 -- Akagi always enforces on top of whatever this script returns:
 --   * a minimum delay (config `min_delay_ms`; the higher
@@ -40,7 +47,10 @@
 --   ctx.top_prob        bot's top candidate probability (0..1), or nil
 --   ctx.second_prob     second candidate probability, or nil
 --   ctx.margin          top_prob - second_prob, or nil
---                       (the three above are unused by this default
+--   ctx.entropy         how spread the bot's candidates were, in nats:
+--                       0 for a forced move, ln(n) for n equally likely
+--                       ones; nil when the bot reports no probabilities
+--                       (the four above are unused by this default
 --                       model — see the note before routine_probability)
 --   ctx.budget          { fixed_ms, add_ms, elapsed_ms } or nil
 --   ctx.rng()           uniform random in [0, 1)

@@ -122,6 +122,11 @@ pub struct ActionContext<'a> {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct PlanResult {
     pub steps: Vec<Step>,
+    /// The delay model asked for a look at the runner-up before this
+    /// plan's press. Whether there is one to look at is the manager's to
+    /// work out (see `autoplay::pointer`); the steps are the same either
+    /// way.
+    pub hesitate: bool,
 }
 
 pub trait PlatformAutoplay: Send + Sync {

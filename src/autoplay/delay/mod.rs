@@ -162,11 +162,15 @@ pub struct DelayInput<'a> {
 /// Model output. `total_target_ms` is the target **total** thinking time
 /// since the window opened — the caller subtracts what has already
 /// elapsed. `allow_bank` reports whether this decision justifies dipping
-/// into the server's extra time pool (`time_add`).
+/// into the server's extra time pool (`time_add`). `hesitate` asks for the
+/// pointer to rest on the runner-up before the press — a wish: it is shown
+/// only where there is a runner-up to rest on and time to do it in, and it
+/// changes neither the action nor when it lands (see `autoplay::pointer`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DelayDecision {
     pub total_target_ms: u32,
     pub allow_bank: bool,
+    pub hesitate: bool,
 }
 
 /// The built-in delay policy. Pure given `rng`.
@@ -205,6 +209,9 @@ pub fn decide<R: Rng + ?Sized>(input: &DelayInput, rng: &mut R) -> DelayDecision
     DelayDecision {
         total_target_ms: target,
         allow_bank,
+        // Hesitation is a reading of the bot's own confidence, which the
+        // built-in model does not consult; only a script asks for it.
+        hesitate: false,
     }
 }
 
@@ -574,10 +581,12 @@ mod tests {
             Some(DecisionProbs {
                 top: 0.41,
                 second: Some(0.409), // near-tie
+                entropy: 0.0,
             }),
             Some(DecisionProbs {
                 top: 0.999,
                 second: Some(0.001), // obvious
+                entropy: 0.0,
             }),
         ] {
             let mut i = input(&c, &d);
