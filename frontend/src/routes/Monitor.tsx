@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
-import { Gamepad2, LoaderCircle, Pin, PinOff, X } from 'lucide-react'
+import { LoaderCircle, Pin, PinOff, X } from 'lucide-react'
 import { CandidateList, DecisionCard } from '@/components/monitor/Decision'
-import { Board, BoardLegend, HandStrip, ResultCard, ScoreStrip, SeatColumns } from '@/components/monitor/Table'
+import { HandStrip, ResultCard, ScoreStrip, SeatColumns } from '@/components/monitor/Table'
 import { Diagnostics, EventList, FaultCard } from '@/components/monitor/Details'
 import { Faces } from '@/components/monitor/Tiles'
 import { useMonitor } from '@/hooks/useMonitor'
@@ -10,16 +10,14 @@ import {
   MONITOR_DEFAULTS, alertsOf, candidatesOf, decisionView, healthOf, roundLabel, seatWind, tableOf,
   type Alert, type Candidate, type DecisionView, type Health, type MonitorConfig, type MonitorSnapshot,
 } from '@/lib/monitor'
-import { invoke, listen } from '@/lib/tauri'
-import type { AppConfig } from '@/types'
+import { invoke } from '@/lib/host'
 import './Monitor.css'
 
 // The application is this one window, and the window is a fixed canvas: drawn
 // at the size below and scaled as one piece to whatever size the window is.
-// The host keeps the window at the canvas's aspect ratio (`ipc::monitor` in
-// the Tauri application, `desktop/` in the shell), so in practice the canvas
-// always fills it; if something else resizes the window, the canvas is centred
-// and nothing is cut off.
+// The shell keeps the window at the canvas's aspect ratio (`desktop/`), so in
+// practice the canvas always fills it; if something else resizes the window,
+// the canvas is centred and nothing is cut off.
 //
 //   1280 × 960 (4:3) — the game on a 16:9 stage, and a 1280 × 240 dock under it
 const STAGE = { w: 1280, h: 720 }
@@ -28,8 +26,6 @@ const DOCK = { w: 1280, h: 240 }
 type Tab = 'decision' | 'table' | 'result' | 'events' | 'link'
 const TABS: Array<[Tab, string]> = [['decision', '决策'], ['table', '牌桌'], ['result', '结果'], ['events', '事件'], ['link', '连接']]
 
-/** What `capture.descriptor` is while the game in this window is the source — `capture::embedded`'s label, as the supervisor words it. */
-const EMBEDDED = 'chromium (embedded)'
 /** The stage the game is shown in may not be smaller than this; `resize_monitor_game` rejects less than 100. */
 const STAGE_MIN = 160
 
@@ -150,22 +146,17 @@ export function Monitor() {
 
   useEffect(() => {
     let cancelled = false
-    let stop: (() => void) | undefined
-    void (async () => {
-      const unlisten = await listen<MonitorConfig>('monitor-config', c => { if (!cancelled) setOptions(c) })
-      if (cancelled) { unlisten(); return }
-      stop = unlisten
-      try {
-        const cfg = await invoke<AppConfig>('get_config')
-        if (!cancelled) { setOptions(cfg.monitor); setReady(true) }
-      } catch (e) { if (!cancelled) setUiError(String(e)) }
-    })()
-    return () => { cancelled = true; stop?.() }
+    invoke<MonitorConfig>('get_monitor_options').then(
+      saved => { if (!cancelled) { setOptions(saved); setReady(true) } },
+      e => { if (!cancelled) setUiError(String(e)) },
+    )
+    return () => { cancelled = true }
   }, [])
 
   const k = useFit(STAGE.w, STAGE.h + DOCK.h)
-  // The game child outlives a reload of this page; the capture it feeds says so.
-  const embedded = opened || (s != null && 'descriptor' in s.capture && s.capture.descriptor === EMBEDDED)
+  // The game view outlives a reload of this page, and capture says so: it only
+  // ever runs from a view the shell has made.
+  const embedded = opened || (s != null && s.capture.state !== 'stopped')
 
   // The game is a native child view, not DOM: it goes exactly where the stage
   // element is, and has to be told every time that moves or goes away.
@@ -203,15 +194,14 @@ export function Monitor() {
     finally { setBusy(false) }
   }, [])
   // The window is the game: it is opened without being asked, once, as soon as
-  // there is a stage to put it on and no game is being played anywhere else.
-  // If that fails the stage keeps its button, and the reason is shown.
-  const idle = s?.game_ended
+  // there is a stage to put it on. If that fails the stage keeps its button,
+  // and the reason is shown.
   const asked = useRef(false)
   useEffect(() => {
-    if (asked.current || !ready || embedded || !idle) return
+    if (asked.current || !ready || !s || embedded) return
     asked.current = true
     void openGame()
-  }, [ready, embedded, idle, openGame])
+  }, [ready, s, embedded, openGame])
   const setAutoplay = (enabled: boolean) => {
     setUiError(null)
     void invoke('set_monitor_autoplay', { enabled }).catch(e => setUiError(String(e)))
@@ -252,17 +242,12 @@ export function Monitor() {
             <p>雀魂视图在这里显示</p>
             <button className="mbtn" onClick={place}>重新对齐游戏视图</button>
           </div>
-            : s && !s.game_ended && s.game ? <div className="mon-stage-board">
-              <p className="mon-stage-note"><Gamepad2 size={16} />正在采集窗外的对局。这一局打完后，可以改为在本窗内打开雀魂。</p>
-              <Board snapshot={s} size="stage" />
-              <BoardLegend />
-            </div>
             : <div className="mon-stage-start">
               <h2>{s?.brand ? `${s.brand} · 雀魂` : '雀魂'}</h2>
               <p>上面登录雀魂并对局，下面核对模型建议和雀魂的实际动作。</p>
               <div className="mon-start-card">
-                <p>{s && !s.game_ended ? '当前对局结束后才能切换游戏窗口。' : '游戏使用独立的登录资料。打开后，本实例改为采集这个窗口里的游戏。'}</p>
-                <button className="mbtn mbtn--primary" disabled={!ready || busy || (s != null && !s.game_ended)} onClick={() => void openGame()}>
+                <p>游戏使用独立的登录资料，只在这个窗口里用。</p>
+                <button className="mbtn mbtn--primary" disabled={!ready || busy} onClick={() => void openGame()}>
                   {busy ? <><LoaderCircle size={16} className="mspin" />正在连接游戏视图…</> : '打开雀魂'}
                 </button>
               </div>

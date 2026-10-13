@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { hexToRgba, pickShow, visibleItems } from './botShow'
+import { pickShow, visibleItems } from './botShow'
 import type { ShowItem, ShowMeta } from '@/types'
 
 const row = (label: string, pais?: string[]): ShowItem => ({ label, pais, value: '50%' })
@@ -76,18 +76,5 @@ describe('visibleItems', () => {
     expect(visibleItems(show, 99)).toHaveLength(4)
     expect(visibleItems(show, 0)).toHaveLength(0)
     expect(visibleItems(null, 3)).toHaveLength(0)
-  })
-})
-
-describe('hexToRgba', () => {
-  it('converts a six-digit hex, with or without the hash', () => {
-    expect(hexToRgba('#aabbcc', 0.1)).toBe('rgba(170, 187, 204, 0.1)')
-    expect(hexToRgba('AABBCC', 1)).toBe('rgba(170, 187, 204, 1)')
-  })
-
-  it('returns undefined for anything it cannot parse', () => {
-    expect(hexToRgba(undefined, 0.1)).toBeUndefined()
-    expect(hexToRgba('red', 0.1)).toBeUndefined()
-    expect(hexToRgba('#abc', 0.1)).toBeUndefined()
   })
 })

@@ -79,7 +79,7 @@ export function Diagnostics({ snapshot: s, health, now }: DiagProps) {
   const d = s?.decision ?? s?.previous_decision ?? null
   return <div className="mdiag">
     <Link health={capture}
-      about={s && 'kind' in s.capture ? `${s.capture.kind === 'chromium' ? 'Chromium' : 'MITM'}${s.capture.descriptor ? ` · ${s.capture.descriptor}` : ''}` : '没有正在运行的采集'} />
+      about={s && s.capture.state !== 'stopped' ? `游戏视图${s.capture.descriptor ? ` · ${s.capture.descriptor}` : ''}` : '没有正在运行的采集'} />
     <Link health={bot}
       about={s && 'bot' in s.bot ? `${s.bot.bot}${s.bot.state === 'ready' ? ` · 座位 ${s.bot.actor_id + 1}` : s.bot.state === 'loading' ? ` · ${s.bot.stage === 'syncing_deps' ? '同步依赖' : '启动进程'}` : ''}` : '进程就绪不代表模型已连接'} />
     <Link health={service} about={serverLine(s, now)}
