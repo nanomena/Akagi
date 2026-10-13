@@ -1,7 +1,7 @@
 # Schema Module
 
 Shared types used across the project. Anything that crosses module boundaries
-— protocol events, backend↔frontend IPC payloads, persisted records — lives
+— protocol events, what the core's parts report about themselves, persisted records — lives
 here so it isn't owned by a single subsystem.
 
 ## Existing schemas
@@ -10,7 +10,7 @@ here so it isn't owned by a single subsystem.
   mjai protocol spec **plus** the 3p-only `Kita` variant
   (北抜き / nukidora). Used by
   `bridge::Bridge` to expose parsed game events, and by anything
-  downstream that consumes them (AI bots, loggers, frontend HUD). Tiles
+  downstream that consumes them (bots, loggers, the monitor). Tiles
   are kept as `String`. JSON serialization uses `#[serde(tag = "type")]`,
   so `"type"` is always the first key. Player-shaped fields (`names`,
   `scores`, `tehais`, `deltas`) are `Vec<T>` of native length; `StartGame`
@@ -21,8 +21,8 @@ here so it isn't owned by a single subsystem.
 winning tile, retaining red-five identity. `tehai` contains only the revealed
 closed tiles, excluding `pai`; melds are already public. `scores` contains
 authoritative post-settlement point totals, one per player. Multi-ron events
-share the same score vector. Absent provider data stays absent. The frontend
-mirror declares these fields in `frontend/src/types.ts`.
+share the same score vector. Absent provider data stays absent. The interface
+mirrors these fields in `frontend/src/types.ts`.
 
 `ryukyoku.tehais` optionally carries one closed-hand list or `null` per absolute
 seat. `null` explicitly means that seat's hand was not disclosed. Its optional
@@ -36,9 +36,8 @@ Draw hands retain red identity and contain no extra winning tile.
    types. Derive `Serialize`/`Deserialize` so the type is usable on both
    sides of any boundary it might cross.
 2. Register the module in `src/schema/mod.rs` and re-export the main type.
-3. If the schema is consumed by `tauri` IPC commands, also derive
-   `tauri::specta::Type` (or whatever binding generator is in use) so the
-   frontend gets a typed definition.
+3. If the type reaches the interface — in the monitor snapshot — mirror it in
+   `frontend/src/types.ts`; nothing generates that file.
 
 ## Conventions
 

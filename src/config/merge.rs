@@ -279,8 +279,8 @@ future_knob = 42
 [autoplay.delay.lognormal]
 reach = [1.0, 0.5]
 
-[overlay]
-enabled = true
+[monitor]
+always_on_top = true
 ";
         let out = merge_into(&AppConfig::default(), existing).unwrap();
 
@@ -289,7 +289,7 @@ enabled = true
             "{out}"
         );
         assert!(
-            out.find("[autoplay.delay.lognormal]") < out.find("[overlay]"),
+            out.find("[autoplay.delay.lognormal]") < out.find("[monitor]"),
             "the table moved:\n{out}"
         );
     }
@@ -301,8 +301,8 @@ enabled = true
         let existing = "\
 # my notes
 
-[general]
-first_run_completed = true
+[monitor]
+always_on_top = true
 
 [experimental_v4]
 feature = \"on\"
@@ -318,10 +318,10 @@ level = 3
         assert!(out.contains("# my notes"), "{out}");
 
         let back: AppConfig = toml::from_str(&out).unwrap();
-        assert!(back.general.first_run_completed);
+        assert!(back.monitor.always_on_top);
         // ...and the sections this build owns are all present now.
         assert!(out.contains("[bot]"), "{out}");
-        assert!(out.contains("[overlay]"), "{out}");
+        assert!(out.contains("[capture]"), "{out}");
     }
 
     /// A hand-written file may use dotted keys where we emit header tables

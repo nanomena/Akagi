@@ -1,24 +1,17 @@
-//! Backend ↔ frontend IPC payload types.
+//! What the core's parts report about themselves: notices for the user, the
+//! bot's lifecycle, how capture stands, and one line of the log.
 //!
-//! These types travel two directions:
-//!
-//! - **Backend → frontend**: emitted as Tauri events by `crate::ipc`. Names
-//!   match the Tauri event names (kebab-case): `notify`, `bot-status`,
-//!   `proxy-status`.
-//! - **Frontend → backend**: returned from `#[tauri::command]` handlers in
-//!   `crate::ipc::commands`.
-//!
-//! All types are `Serialize + Deserialize` so they round-trip through Tauri's
-//! JSON bridge and through the in-process broadcast buses in
-//! `crate::event_bus`. Variants are tagged so the wire shape stays stable
-//! when new states are added — frontends can match on `state` / `level` /
-//! `stage` without positional surprises.
+//! These travel on the buses in `crate::event_bus` and, as part of the monitor
+//! snapshot, to the shell's interface. Variants are tagged so the wire shape
+//! stays stable when a state is added — the interface matches on `state` /
+//! `level` / `stage` without positional surprises.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 // ---------- Notification ----------
 
-/// Severity for a frontend toast / notification box.
+/// How much a notice matters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum NotifyLevel {
@@ -124,120 +117,27 @@ pub enum BotStatus {
 
 // ---------- CaptureStatus ----------
 
-/// Discriminant of the active capture transport. Mirrors
-/// [`crate::capture::CaptureKind`] for IPC payloads — re-exported here so
-/// `schema::*` is a self-contained surface for frontend type generation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CaptureKind {
-    Mitm,
-    Chromium,
-}
-
-/// Lifecycle of the active capture backend.
+/// How capture from the game view stands.
 ///
-/// `descriptor` carries a human-readable label (proxy listen addr for
-/// MITM, executable path for Chromium) — surface in UI, do not parse.
+/// `descriptor` is where capture reaches the view — the local DevTools
+/// address. For showing; not to be parsed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum CaptureStatus {
     Stopped,
-    Starting {
-        kind: CaptureKind,
-        descriptor: String,
-    },
     Running {
-        kind: CaptureKind,
         descriptor: String,
     },
     Error {
-        kind: CaptureKind,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         descriptor: Option<String>,
         error: String,
     },
 }
 
-// ---------- HoraScoreInfo ----------
-
-/// Bot's hora-decision score breakdown, computed on demand by
-/// `commands::compute_bot_hora_score`. Returned as `Option<Self>` —
-/// `None` when no game is in progress, the actor's hand isn't a valid
-/// agari shape, or the winning tile can't be inferred from the live state.
-///
-/// `points` is the actor's *received* total: for ron, the discarder's pay;
-/// for tsumo, the sum across all paying seats. Honba/riichi-stick payouts
-/// are NOT folded in (those depend on platform settlement).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HoraScoreInfo {
-    pub points: u32,
-    pub han: u32,
-    pub fu: u32,
-    pub yakuman: bool,
-    /// mjai tile string (e.g. `"5mr"`, `"C"`) — the tile the actor wins on.
-    /// For ron this is the most recent discard; for tsumo the most recent draw.
-    pub win_tile: String,
-}
-
-// ---------- Snapshot / BotInfo ----------
-//
-// Returned by `commands::get_status` and `commands::list_bots`. These
-// types pull in `AppConfig` (one direction only — schema doesn't cycle
-// back into config). Keep these stable; the React side keys off field
-// names.
-
-use crate::config::AppConfig;
-use std::collections::HashMap;
-use std::path::PathBuf;
-
-/// One discovered bot, IPC-shaped (separate from `bot::BotEntry` so the
-/// wire contract can evolve independently of the registry internals).
-///
-/// `manifest` carries the bot's settings schema (rendered as a form on
-/// the frontend). Bots without a `manifest.toml` have it set to `None`
-/// and the UI hides the settings panel for them.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BotInfo {
-    pub name: String,
-    pub dir: String,
-    pub has_pyproject: bool,
-    /// `true` when the bot's Python environment is already installed (no
-    /// `pyproject.toml`, or its venv + sync stamp are up to date). The UI
-    /// blocks activating a bot whose env isn't ready so a game never picks
-    /// a bot that would need a slow first-spawn `uv sync`.
-    #[serde(default)]
-    pub env_ready: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub manifest: Option<crate::bot::manifest::Manifest>,
-}
-
-/// Returned by the `get_bot_settings` command. `values` is the result of
-/// merging defaults from `manifest` with whatever lives in the bot's
-/// `settings.toml`. Frontend should treat `manifest.settings` as the form
-/// schema and `values` as the form's current state.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BotSettings {
-    pub manifest: crate::bot::manifest::Manifest,
-    pub values: std::collections::BTreeMap<String, serde_json::Value>,
-}
-
-/// One-shot dump of everything the UI needs on startup. Cheap to clone
-/// (config + two enums + a path).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Snapshot {
-    pub config: AppConfig,
-    pub bot_status: BotStatus,
-    pub capture_status: CaptureStatus,
-    pub log_dir: PathBuf,
-}
-
 // ---------- Logs ----------
 //
-// One canonical shape for an emitted tracing event: written to disk as a
-// line of `all.jsonl` AND broadcast to the frontend log viewer over a
-// `tauri::ipc::Channel`. Keeping disk and wire shapes identical means the
-// initial-load reader and the live-tail subscriber feed the same UI rows
-// without a translation step.
+// One canonical shape for an emitted tracing event: a line of `all.jsonl`.
 
 /// One log event. `ts_ms` is millisecond Unix time (local clock at emit).
 /// `fields` carries the structured fields recorded via `tracing` (the
@@ -254,79 +154,6 @@ pub struct LogEntry {
     pub message: String,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub fields: HashMap<String, serde_json::Value>,
-}
-
-/// Metadata for one log session directory under `<log_root>/`. Sorted
-/// newest-first by `name` (timestamp). `is_active` marks the session
-/// owned by the running process — the UI uses this to enable live tail.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LogSessionInfo {
-    pub name: String,
-    pub path: PathBuf,
-    pub size_bytes: u64,
-    pub mtime_ms: i64,
-    pub is_active: bool,
-}
-
-/// Filtered, paginated read against a single session's `all.jsonl`.
-/// `limit` is capped server-side at 2000 to bound payload size.
-/// `levels`/`targets`/`search` are AND-ed; within each, multiple entries
-/// are OR-ed (level in set; any target prefix matches; substring on
-/// `message` is case-insensitive).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ReadLogRequest {
-    pub session: String,
-    #[serde(default)]
-    pub offset: usize,
-    #[serde(default)]
-    pub limit: usize,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub levels: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub targets: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub search: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReadLogResponse {
-    pub entries: Vec<LogEntry>,
-    pub has_more: bool,
-    pub skipped_malformed: u32,
-}
-
-// ---------- Inspector ----------
-//
-// Mirrors the on-disk `<session>/inspector.jsonl` shape for past-session
-// reads. Same `kind` filtering / pagination model as `ReadLogRequest`.
-
-/// Filtered, paginated read against a session's `inspector.jsonl`.
-/// `kinds` accepts `"ws_frame"`, `"mjai_event"`, `"bot_reaction"`.
-/// `actor` filters records that reference an actor (mjai events with an
-/// `actor` field; bot reactions by `actor_id`); ws frames are
-/// always included regardless of actor unless `kinds` excludes them.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ReadInspectorRequest {
-    pub session: String,
-    #[serde(default)]
-    pub offset: usize,
-    #[serde(default)]
-    pub limit: usize,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub kinds: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub actor: Option<u8>,
-    /// Case-insensitive substring on the entry's text representation
-    /// (frame raw text, mjai event JSON, bot action JSON).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub search: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReadInspectorResponse {
-    pub entries: Vec<crate::schema::InspectorEntry>,
-    pub has_more: bool,
-    pub skipped_malformed: u32,
 }
 
 #[cfg(test)]
@@ -394,41 +221,23 @@ mod tests {
     #[test]
     fn capture_status_running_round_trips() {
         let s = CaptureStatus::Running {
-            kind: CaptureKind::Mitm,
-            descriptor: "127.0.0.1:23410".into(),
+            descriptor: "127.0.0.1:58129".into(),
         };
         let j = serde_json::to_string(&s).unwrap();
         let back: CaptureStatus = serde_json::from_str(&j).unwrap();
         assert_eq!(back, s);
-        assert!(j.contains(r#""state":"running""#));
-        assert!(j.contains(r#""kind":"mitm""#));
-        assert!(j.contains(r#""descriptor":"127.0.0.1:23410""#));
-    }
-
-    #[test]
-    fn capture_status_chromium_running() {
-        let s = CaptureStatus::Running {
-            kind: CaptureKind::Chromium,
-            descriptor: "/usr/bin/google-chrome".into(),
-        };
-        let j = serde_json::to_string(&s).unwrap();
-        assert!(j.contains(r#""kind":"chromium""#));
-        let back: CaptureStatus = serde_json::from_str(&j).unwrap();
-        assert_eq!(back, s);
+        assert_eq!(j, r#"{"state":"running","descriptor":"127.0.0.1:58129"}"#);
     }
 
     #[test]
     fn capture_status_error_omits_null_descriptor() {
         let s = CaptureStatus::Error {
-            kind: CaptureKind::Chromium,
             descriptor: None,
-            error: "spawn failed".into(),
+            error: "connection refused".into(),
         };
         let j = serde_json::to_string(&s).unwrap();
-        assert!(j.contains(r#""state":"error""#));
-        assert!(j.contains(r#""kind":"chromium""#));
         // skip_serializing_if = Option::is_none → no descriptor key
-        assert!(!j.contains("descriptor"), "got: {j}");
+        assert_eq!(j, r#"{"state":"error","error":"connection refused"}"#);
     }
 
     #[test]

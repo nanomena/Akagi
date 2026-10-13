@@ -1,6 +1,6 @@
 # scripts/
 
-Build / release / protocol-update tooling. Each script is invoked from
+Runtime-fetch and protocol-update tooling. Each script is invoked from
 the repo root.
 
 ## `fetch-runtime.sh`
@@ -17,43 +17,14 @@ scripts/fetch-runtime.sh x86_64-pc-windows-msvc  # cross-target
 
 Versions come from env vars (`PYTHON_VERSION`, `PBS_RELEASE`,
 `UV_VERSION`) with built-in defaults. CI sets them via the `env:` block
-at the top of `.github/workflows/release.yml`.
+at the top of `.github/workflows/desktop.yml`.
+
+`desktop/scripts/package.mjs` puts the fetched tree beside the core in the
+packaged application; `src/bot/runtime.rs` finds it there.
 
 The `runtime/` tree is gitignored. Each per-triple subtree caches under
 the same key in CI (`Cache bundled runtime` step), so a second run on
 the same target hits the cache and skips network entirely.
-
-## `package-zip.sh`
-
-Stages a portable zip in `dist/akagi-<version>-<os>-<arch>.zip` from a
-prebuilt binary plus the fetched runtime tree.
-
-```sh
-scripts/package-zip.sh x86_64-unknown-linux-gnu
-```
-
-Prerequisites:
-
-- The binary exists at `target/<triple>/release/akagi[.exe]`. Produce it
-  with `cargo tauri build --no-bundle --target <triple>` (or plain
-  `cargo build --release --target <triple>` if you already ran the
-  frontend build separately).
-- `runtime/python/<triple>/` and `runtime/uv/<triple>/` are populated by
-  `fetch-runtime.sh`.
-
-Outputs a single zip named `akagi-<version>-<os>-<arch>.zip` containing
-a top-level folder of the same name with the binary, `runtime/`,
-`LICENSE.txt`, `NOTICE`, and a generated `README.txt` with
-platform-specific quick-start notes (Gatekeeper xattr on macOS,
-SmartScreen on Windows, WebKit2GTK package names on Linux).
-
-The version is parsed from the first `version = "..."` line of
-`Cargo.toml` (the `[package]` table is the first table, so this is
-unambiguous).
-
-Symlink preservation matters: `python-build-standalone` ships internal
-symlinks (`bin/python3.12 → bin/python`). `cp -RP` and `zip -y` are
-used so the zip stays small (~half the size of a flattened copy).
 
 ## `extract_liqi.py`
 
@@ -80,7 +51,6 @@ python scripts/extract_liqi.py --from-raw <dir-with-lua-and-proto_config>
 
 ## CI integration
 
-`.github/workflows/release.yml` ties `fetch-runtime.sh` and
-`package-zip.sh` together: fetch → `cargo tauri build --no-bundle` →
-package → upload `dist/*.zip`. One zip per target (linux-x64,
-macos-arm64, windows-x64).
+`.github/workflows/desktop.yml` ties it together: build the core, build the
+interface, `fetch-runtime.sh`, then `desktop/scripts/package.mjs`, and upload
+one application folder per target (linux-x64, macos-arm64, windows-x64).
