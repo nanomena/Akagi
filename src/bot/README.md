@@ -349,6 +349,11 @@ words, and the window shows the words as written:
 - **`caption`** and **`hint`** on the `meta.show` card — what the rows' values
   are, in a word or two, and a sentence about them. Without a caption the
   values stand unexplained.
+- **`position`** on the `meta.show` card — where this decision falls in the
+  game by the bot's own count, as a short string in its own words
+  (`"step 187"`; ten characters at most). The window numbers the decision by
+  it. Without one, the decision goes by its place among the game's decisions,
+  `#1` onwards, which starts again with every game.
 - The window is named after the active bot's `display` in its manifest.
 
 Card rows are read by their `label`: `Discard`, `Riichi`, `Chi`, `Pon`, `Kan`,

@@ -40,7 +40,13 @@ pub struct MonitorEvent {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Decision {
+    /// Which decision this is, for as long as the process runs: what a reply
+    /// is matched to. Never shown.
     pub id: u64,
+    /// Its place among the decisions of its game, from one. What the monitor
+    /// numbers it by when the bot's reply gives no position of its own
+    /// (`meta.show.position`).
+    pub number: u64,
     pub context: DecisionContext,
     pub started_ms: i64,
     pub completed_ms: Option<i64>,
@@ -165,6 +171,8 @@ impl Default for MonitorSnapshot {
 struct Inner {
     snapshot: MonitorSnapshot,
     next_decision: u64,
+    /// Decisions begun in the current game.
+    game_decisions: u64,
 }
 
 #[derive(Clone)]
@@ -181,6 +189,7 @@ impl Default for MonitorHandle {
             inner: Arc::new(Mutex::new(Inner {
                 snapshot,
                 next_decision: 0,
+                game_decisions: 0,
             })),
             updates,
         }
@@ -211,6 +220,9 @@ impl MonitorHandle {
         error: Option<String>,
     ) -> DecisionContext {
         self.update(|inner| {
+            if matches!(event, MjaiEvent::StartGame { .. }) {
+                inner.game_decisions = 0;
+            }
             let s = &mut inner.snapshot;
             s.context.event_seq += 1;
             let now = chrono::Local::now().timestamp_millis();
@@ -386,10 +398,12 @@ impl MonitorHandle {
                 return None;
             }
             inner.next_decision += 1;
+            inner.game_decisions += 1;
             expire(&mut s.decision);
             s.previous_decision = s.decision.take().or(s.previous_decision.take());
             s.decision = Some(Decision {
                 id: inner.next_decision,
+                number: inner.game_decisions,
                 context,
                 bot: bot.into(),
                 trigger: trigger.clone(),
@@ -649,6 +663,25 @@ mod tests {
     }
     fn response(json: &str) -> BotResponse {
         serde_json::from_str(json).unwrap()
+    }
+    #[test]
+    fn decisions_are_numbered_from_one_in_every_game() {
+        let m = MonitorHandle::default();
+        let number = |m: &MonitorHandle| m.snapshot().decision.map(|d| (d.id, d.number));
+        let context = hand(&m);
+        m.begin(context, "demo", &MjaiEvent::None).unwrap();
+        m.begin(context, "demo", &MjaiEvent::None).unwrap();
+        assert_eq!(number(&m), Some((2, 2)));
+
+        // A new round of the same game goes on counting.
+        let context = m.game_event(&event(r#"{"type":"start_kyoku","bakaze":"E","dora_marker":"1m","kyoku":2,"honba":0,"kyotaku":0,"oya":1,"scores":[25000,25000,25000,25000],"tehais":[[],[],[],[]]}"#), None, None);
+        m.begin(context, "demo", &MjaiEvent::None).unwrap();
+        assert_eq!(number(&m), Some((3, 3)));
+
+        // A new game starts again from one; what a reply is matched to does not.
+        let context = hand(&m);
+        m.begin(context, "demo", &MjaiEvent::None).unwrap();
+        assert_eq!(number(&m), Some((4, 1)));
     }
     #[test]
     fn stale_round_reply_is_not_current() {
