@@ -75,6 +75,26 @@ npm run check   # type-check the JavaScript (JSDoc types, no build step)
 npm test        # the window's geometry, and the shell's end of the protocol against a stand-in core
 ```
 
+## Packaging
+
+```sh
+bash ../scripts/fetch-runtime.sh   # python + uv for this machine -> runtime/
+npm run package                    # -> dist/desktop/Akagi-<platform>-<arch>/
+```
+
+`scripts/package.mjs` puts Electron, the shell, the core with its Python
+runtime, and the interface into one folder that runs from wherever it is put.
+The `Desktop` workflow does this on Linux, macOS and Windows and uploads each
+as an artifact. Nothing is signed:
+
+- **macOS** quarantines an unsigned application that was downloaded. Clear it
+  once after unpacking: `xattr -dr com.apple.quarantine Akagi.app`.
+- **Linux** distributions that restrict unprivileged user namespaces
+  (Ubuntu 24.04 and later) refuse Chromium's sandbox from an unpacked folder.
+  Either give the helper its permissions —
+  `sudo chown root chrome-sandbox && sudo chmod 4755 chrome-sandbox` — or start
+  the application with `--no-sandbox`.
+
 ## Things to know
 
 - **The DevTools port is local and unauthenticated.** It is bound to

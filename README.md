@@ -491,6 +491,7 @@ Tenhou, whose client protocol is plain enough to speak directly.
 │   ├── event_bus.rs   Broadcast channels between subsystems
 │   ├── game_state/    riichienv-driven mirror, snapshot, mahgen view
 │   ├── github/        GitHub Releases client (bot install, self-update)
+│   ├── headless/      The core without a window, for the desktop shell: boot + JSON-lines protocol
 │   ├── history/       Game replay storage + index
 │   ├── inspector/     Frame / event / bot-reaction broadcaster
 │   ├── ipc/           Tauri commands, app state, capture supervisor
@@ -502,6 +503,7 @@ Tenhou, whose client protocol is plain enough to speak directly.
 ├── native_bot/        Built-in bot crate: obs/action codec, candle CNN, embedded weights
 ├── mjai_bot/
 │   └── example/       Rule-based shanten optimizer (ships in tree)
+├── desktop/           Electron shell: one window, the game and the monitor's dock (see desktop/README.md)
 ├── frontend/          React + Vite + Tailwind + shadcn UI
 │   └── src/
 │       ├── routes/    Overview / GameDashboard / Bots / History / Logs / Settings / Setup / InspectorView / DiagnosticView
@@ -594,6 +596,25 @@ bash scripts/package-zip.sh <target-triple>
 # Frontend dev only (Vite on :1420)
 cd frontend && npm ci && npm run dev
 ```
+
+**Desktop shell (one window on every platform)**
+
+The monitor window — the game with the dock under it — needs a Chromium for
+the game view, which the Tauri application only has on Windows. `desktop/` is
+an Electron shell that brings one, and runs the rest of Akagi as `akagi-core`,
+this crate built without Tauri. It needs none of the Tauri system deps above.
+
+```bash
+cargo build --release --no-default-features --bin akagi-core
+(cd frontend && npm ci && npm run build)
+cd desktop && npm ci && node node_modules/electron/install.js && npm start
+
+# Package it for this machine (Electron + shell + core + runtime + interface)
+bash ../scripts/fetch-runtime.sh
+npm run package                           # → dist/desktop/Akagi-<platform>-<arch>/
+```
+
+See [`desktop/README.md`](./desktop/README.md) for how the parts fit together.
 
 **Bundled runtime**
 
