@@ -1,29 +1,28 @@
-//! In-process broadcast buses connecting Akagi's subsystems.
+//! In-process broadcast buses connecting the core's subsystems.
 //!
-//! Five buses, all `tokio::sync::broadcast::Sender`-typed:
+//! All `tokio::sync::broadcast::Sender`-typed:
 //!
-//! - [`MjaiBus`]: every `MjaiEvent` parsed by a platform bridge is fanned
-//!   out here. Producers: bridge → proxy handler. Consumers: `BotManager`,
-//!   `ipc` forwarder, future HUD/storage/WS server.
+//! - [`MjaiBus`]: every `MjaiEvent` a platform bridge parses out of the
+//!   captured frames. Consumers: the game tracker, the history recorder, the
+//!   inspector timeline.
+//! - [`PostTrackerBus`]: the same events once the tracker has applied them.
+//!   Consumer: the bot manager.
 //! - [`BotResponseBus`]: every `BotResponse` from the active `BotRunner`.
-//!   Producer: `BotManager`. Consumers: `ipc` forwarder, future HUD /
-//!   external WS / replay recorder.
+//!   Producer: `BotManager`. Consumer: autoplay.
 //! - [`BotStatusBus`]: lifecycle of the active bot subprocess
 //!   (`Idle/Loading/Ready/Error/Stopped`). Producer: `BotManager`.
-//!   Consumer: `ipc` forwarder (UI loading spinner).
-//! - [`CaptureStatusBus`]: lifecycle of the active capture backend
-//!   (`Stopped/Starting/Running/Error` × `kind: Mitm | Chromium`).
-//!   Producer: `ipc::commands` / capture supervisor. Consumer: `ipc`
-//!   forwarder.
-//! - [`NotifyBus`]: ad-hoc toast notifications. Any subsystem may push;
-//!   `ipc` forwards to the frontend as `notify` events.
+//!   Consumer: the monitor.
+//! - [`CaptureStatusBus`]: how capture stands (`Stopped/Running/Error`).
+//!   Producer: `capture::supervisor`. Consumer: the monitor.
+//! - [`NotifyBus`]: things the core has to say to the user. Any subsystem may
+//!   push; the monitor shows them.
+//! - [`HistoryBus`]: a finished game written to the history store.
 //!
 //! Channel capacity is fixed-size — slow consumers see `RecvError::Lagged`
 //! rather than blocking the producer. That's the right trade-off for a
-//! real-time analyzer: if the HUD falls behind, drop and resync rather
-//! than stall the proxy.
+//! real-time analyzer: if a consumer falls behind, drop and resync rather
+//! than stall capture.
 
-use crate::analysis::result::AnalysisResult;
 use crate::bot::BotResponse;
 use crate::schema::{BotStatus, CaptureStatus, HistoryEvent, MjaiEvent, Notification};
 use tokio::sync::broadcast;
@@ -42,10 +41,6 @@ pub type CaptureStatusBus = broadcast::Sender<CaptureStatus>;
 
 /// Fan-out for transient `Notification`s pushed at the user.
 pub type NotifyBus = broadcast::Sender<Notification>;
-
-/// Fan-out for `AnalysisResult`s produced after each game-state update.
-/// Producer: `analysis::runner`. Consumers: `ipc` forwarder, future HUD.
-pub type AnalysisBus = broadcast::Sender<AnalysisResult>;
 
 /// One `MjaiEvent` as re-emitted after the `GameTracker` applied it.
 ///
@@ -121,11 +116,6 @@ pub fn capture_status_bus() -> CaptureStatusBus {
 
 pub fn notify_bus() -> NotifyBus {
     let (tx, _rx) = broadcast::channel(STATUS_CAPACITY);
-    tx
-}
-
-pub fn analysis_bus() -> AnalysisBus {
-    let (tx, _rx) = broadcast::channel(DEFAULT_CAPACITY);
     tx
 }
 

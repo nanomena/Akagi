@@ -1,7 +1,7 @@
 # `src/history/` — Game History Recorder
 
-This module persists every cleanly-ended mjai game to a stable, frontend-readable
-store. The on-disk shape (under `<config_root>/history/`) is:
+This module persists every cleanly-ended mjai game to a stable
+store. The on-disk shape (under `<home>/history/`) is:
 
 ```
 history/
@@ -22,7 +22,7 @@ time — lexicographically sortable by start time, doubles as the filename stem.
                     └──────────────┘
                             │
                             ▼
-                       HistoryBus  ──▶  ipc forwarder  ──▶  "history-recorded" Tauri event
+                       HistoryBus  (nothing listens yet: the records are the product)
 ```
 
 A `RecorderState` machine buffers events between `StartGame` and a confirmed
@@ -59,9 +59,7 @@ When a non-Majsoul bridge lands (Tenhou, RiichiCity, ...):
 1. Add the field to `crate::schema::history::GameStats` (default-initialised
    to keep deserialisation backward-compatible with old index lines).
 2. Update `aggregator.rs` to populate it.
-3. Mirror in the frontend `types/history.ts`, `lib/ptCalc.ts` (if it affects
-   PT), and `components/history/StatsTable.tsx` (display).
-4. Older `index.jsonl` lines will deserialise with the new field defaulting;
+3. Older `index.jsonl` lines will deserialise with the new field defaulting;
    no migration step is required so long as the new field has a `Default`.
 
 ## Match identity (`GameRecord.match_info`)
@@ -74,19 +72,17 @@ inference API never see it) and the aggregator copies it into the record.
 
 Rules of the road:
 
-- Store **raw platform values**; label mapping lives in the frontend
-  (`frontend/src/lib/matchInfo.ts` + `history.room.*` locale keys) so an
-  unknown id shows as a number instead of a wrong name.
+- Store **raw platform values**, not names for them: an unknown id then
+  reads as a number instead of a wrong name.
 - Every field is `Option` + `#[serde(default)]` — bridges fill what their
   wire carried, old index lines deserialise with `match_info: None`.
 - To extend: add fields/variants in `schema/history.rs`, fill them in the
-  bridge's StartGame emission, mirror in `frontend/src/types.ts`.
+  bridge's StartGame emission.
 
 ## Adding a filter dimension
 
 1. Add the field to `HistoryFilter` (in `schema/history.rs`).
 2. Update `HistoryFilter::matches`.
-3. Add the corresponding form control in `frontend/src/routes/History.tsx`.
 
 ## Don't
 

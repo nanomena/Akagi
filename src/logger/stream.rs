@@ -3,7 +3,7 @@
 //! - serialized as one JSON line into `<session>/all.jsonl` (the canonical
 //!   on-disk machine-readable log)
 //! - cloned onto a `tokio::sync::broadcast` channel that the IPC layer
-//!   forwards to the frontend log viewer over a `tauri::ipc::Channel`
+//!   offers to subscribers, should anything want a live tail
 //!
 //! The point of doing both inside one layer is that the frontend's
 //! initial-load reader (`read_log_session`) and the live tail use a

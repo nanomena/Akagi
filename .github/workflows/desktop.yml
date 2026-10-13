@@ -1,7 +1,8 @@
 name: Desktop
 
-# The desktop shell (desktop/) and the core it runs (akagi-core, the crate built
-# without Tauri): their checks, and the packaged application for each platform.
+# The desktop shell (desktop/): its checks, and the application packaged for
+# each platform with the core (akagi-core) and the interface. The core's own
+# lint and tests are ci.yml's.
 #
 # Each platform packages on its own runner. Electron and the Python runtime are
 # per-platform downloads, and a macOS bundle has to be made — and ad-hoc signed
@@ -56,7 +57,6 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-          components: clippy
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -75,19 +75,8 @@ jobs:
         with:
           node-version: '22'
 
-      # The core is the crate without its default features. ci.yml lints and
-      # tests the crate with them; this is the other configuration, and nothing
-      # there would notice a Tauri type creeping back into the core.
-      - name: Core — clippy
-        if: runner.os == 'Linux'
-        run: cargo clippy --locked --no-default-features --lib --bin akagi-core --tests -- -D warnings
-
-      - name: Core — test
-        if: runner.os == 'Linux'
-        run: cargo test --locked --no-default-features --lib
-
       - name: Core — build
-        run: cargo build --release --locked --no-default-features --bin akagi-core --target "${{ matrix.target }}"
+        run: cargo build --release --locked --bin akagi-core --target "${{ matrix.target }}"
 
       - name: Interface — build
         working-directory: frontend

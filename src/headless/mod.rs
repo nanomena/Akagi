@@ -21,7 +21,6 @@
 //! | Method                 | Params               | Result                  |
 //! |------------------------|----------------------|-------------------------|
 //! | `get_monitor`          | —                    | `MonitorSnapshot`       |
-//! | `get_config`           | —                    | `AppConfig`             |
 //! | `set_monitor_pinned`   | `{pinned}`           | `MonitorConfig`         |
 //! | `set_monitor_autoplay` | `{enabled}`          | `null`                  |
 //! | `open_game`            | `{port, target}`     | `null`                  |
@@ -38,11 +37,12 @@
 //! reason, the core stops capture and exits, and the bot's processes — which
 //! hang on the core in the same way — follow.
 
-use crate::capture::chromium::cdp::EmbeddedPage;
-use crate::capture::embedded::{self, EmbeddedBackend};
+use crate::capture::cdp::EmbeddedPage;
+use crate::capture::embedded::{self, EmbeddedGame};
+use crate::capture::supervisor;
 use crate::config::{self, AppConfig, MonitorConfig, Platform};
-use crate::ipc::{capture_supervisor, AppState};
 use crate::monitor::MonitorSnapshot;
+use crate::state::AppState;
 use crate::{autoplay, bot, event_bus, game_state, history, logger, monitor, schema, util};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
@@ -117,11 +117,9 @@ pub fn run() -> anyhow::Result<()> {
     std::fs::create_dir_all(&home)?;
     util::set_home(home.clone());
 
-    let (cfg, config_path) = config::load_config(Some(&home.join("config.toml")));
-    let targets = [
-        logger::LogTarget::new("proxy", "akagi::proxy"),
-        logger::LogTarget::new("bot", "akagi::bot"),
-    ];
+    let config_path = home.join("config.toml");
+    let cfg = config::load_config(&config_path);
+    let targets = [logger::LogTarget::new("bot", "akagi::bot")];
     let session = Arc::new(logger::init(
         &util::resolve_dir(&cfg.logging.dir),
         &cfg.logging.level,
@@ -173,24 +171,18 @@ async fn serve(
         history::recorder::shared_platform(schema::Platform::from(cfg.platform.kind));
 
     let mjai_bus = event_bus::mjai_bus();
+    // What the tracker has applied is what the bot is asked about.
     let post_tracker_bus = event_bus::post_tracker_bus();
     let state = AppState::new(
         cfg,
         config_path,
         session,
         mjai_bus.clone(),
-        post_tracker_bus.clone(),
         event_bus::bot_response_bus(),
         event_bus::bot_status_bus(),
         event_bus::capture_status_bus(),
         event_bus::notify_bus(),
-        event_bus::analysis_bus(),
-        event_bus::history_bus(),
         game_state::tracker::new_handle(),
-        Arc::new(tokio::sync::RwLock::new(None)),
-        history_store.clone(),
-        history_platform.clone(),
-        runtime.clone(),
     );
     state.monitor.set_brand(ready.brand.clone());
     state.monitor.set_autoplay(autoplay_enabled);
@@ -204,7 +196,7 @@ async fn serve(
     ));
     tokio::spawn(history::recorder::drive_loop(
         history_store,
-        state.history_bus.clone(),
+        event_bus::history_bus(),
         history_platform,
         mjai_bus.subscribe(),
     ));
@@ -213,7 +205,9 @@ async fn serve(
         state.log_session.inspector(),
     ));
     if bot_enabled {
-        state.bot_manager_started.store(true, Ordering::SeqCst);
+        // A bot's environment is installed by whichever of the two needs it
+        // first, the manager or the service; this keeps them from doing it at once.
+        let syncs_in_flight = Arc::new(tokio::sync::Mutex::new(std::collections::HashSet::new()));
         let manager = bot::run_bot_manager(
             state.config.clone(),
             post_tracker_bus,
@@ -222,7 +216,7 @@ async fn serve(
             state.notify_bus.clone(),
             state.log_session.inspector(),
             runtime.clone(),
-            state.syncs_in_flight.clone(),
+            syncs_in_flight.clone(),
             Some(state.monitor.clone()),
         );
         tokio::spawn(async move {
@@ -235,7 +229,7 @@ async fn serve(
         tokio::spawn(bot::service::run(
             state.config.clone(),
             runtime,
-            state.syncs_in_flight.clone(),
+            syncs_in_flight,
             state.monitor.clone(),
         ));
     }
@@ -274,7 +268,7 @@ async fn serve(
     }
 
     info!("the shell has gone; stopping");
-    capture_supervisor::stop_and_wait(&state, LAST_WORDS).await;
+    supervisor::stop_and_wait(&state, LAST_WORDS).await;
     std::process::exit(0);
 }
 
@@ -282,7 +276,6 @@ async fn serve(
 async fn answer(state: &AppState, method: &str, params: Value) -> Result<Value, String> {
     match method {
         "get_monitor" => reply(state.monitor.snapshot()),
-        "get_config" => reply(&*state.config.read().await),
         "set_monitor_pinned" => {
             let Pinned { pinned } = parse(params)?;
             let config = state
@@ -320,26 +313,26 @@ async fn open_game(state: &AppState, game: Game) -> Result<(), String> {
     if config.platform.kind != Platform::Majsoul {
         return Err("内置雀魂需要雀魂平台。".into());
     }
-    let url = embedded::game_url(&config.capture.chromium.start_url)?;
+    let url = embedded::game_url(&config.capture.url)?;
     let endpoint = embedded::discover_endpoint(game.port)
         .await
         .map_err(|e| format!("{e:#}"))?;
 
-    capture_supervisor::stop_and_wait(state, CAPTURE_STOP).await;
+    supervisor::stop_and_wait(state, CAPTURE_STOP).await;
     if matches!(
         state.capture_control.lock().await.status,
         schema::CaptureStatus::Running { .. }
     ) {
         return Err("采集仍在停止，请稍后重试。".into());
     }
-    *state.embedded_game.lock().await = Some(EmbeddedBackend {
+    *state.embedded_game.lock().await = Some(EmbeddedGame {
         endpoint,
         page: EmbeddedPage {
             url: url.to_string(),
             target: Some(game.target),
         },
     });
-    capture_supervisor::spawn_capture_supervisor(state.clone())
+    supervisor::start(state.clone())
         .await
         .map_err(|e| e.to_string())
 }
@@ -375,18 +368,15 @@ fn start_autoplay(state: &AppState, enabled: bool) {
     });
 }
 
-/// Keep the monitor, and the state's own copies, in step with the bot's and
-/// capture's status and with what the application has to say.
+/// Keep the monitor in step with the bot's and capture's status and with what
+/// the core has to say, and the capture control's copy of its status with it.
 fn mirror_statuses(state: &AppState) {
     let mut bots = state.bot_status_bus.subscribe();
-    let (monitor, latest) = (state.monitor.clone(), state.bot_status.clone());
+    let monitor = state.monitor.clone();
     tokio::spawn(async move {
         loop {
             match bots.recv().await {
-                Ok(status) => {
-                    monitor.set_bot(status.clone());
-                    *latest.write().await = status;
-                }
+                Ok(status) => monitor.set_bot(status),
                 Err(broadcast::error::RecvError::Lagged(_)) => {}
                 Err(broadcast::error::RecvError::Closed) => return,
             }

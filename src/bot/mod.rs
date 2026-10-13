@@ -8,11 +8,9 @@
 //! See `README.md` in this directory for the contributor-facing how-to.
 
 pub mod api;
-pub mod install;
 pub mod manager;
 pub mod manifest;
 pub mod native;
-pub mod purchase;
 pub mod registry;
 pub mod runner;
 pub mod runtime;
@@ -23,7 +21,6 @@ pub mod sync_guard;
 pub mod test_http;
 pub mod types;
 
-pub use install::{install_from_github_release, GithubInstallSpec};
 pub use manager::BotManager;
 pub use manifest::{BotSource, FieldKind, FieldSpec, Manifest, ManifestBot, ServiceSpec};
 pub use registry::{BotEntry, BotRegistry};
