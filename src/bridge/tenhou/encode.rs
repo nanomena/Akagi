@@ -498,6 +498,9 @@ mod tests {
             target: 1,
             deltas: None,
             ura_markers: None,
+            pai: None,
+            tehai: None,
+            scores: None,
         };
         assert_eq!(
             encode(&tsumo, view(&[], &[])).unwrap(),
@@ -508,6 +511,9 @@ mod tests {
             target: 2,
             deltas: None,
             ura_markers: None,
+            pai: None,
+            tehai: None,
+            scores: None,
         };
         assert_eq!(
             encode(&ron, view(&[], &[])).unwrap(),
@@ -529,7 +535,16 @@ mod tests {
             r#"{"tag":"REACH"}"#
         );
         assert_eq!(
-            encode(&MjaiEvent::Ryukyoku { deltas: None }, view(&[], &[])).unwrap(),
+            encode(
+                &MjaiEvent::Ryukyoku {
+                    deltas: None,
+                    tehais: None,
+                    scores: None,
+                    reason: None
+                },
+                view(&[], &[])
+            )
+            .unwrap(),
             r#"{"tag":"N","type":9}"#
         );
         assert_eq!(

@@ -248,7 +248,7 @@ pub fn aggregate(input: AggregateInput<'_>) -> Option<GameRecord> {
                 }
             }
 
-            MjaiEvent::Ryukyoku { deltas } => {
+            MjaiEvent::Ryukyoku { deltas, .. } => {
                 let Some(deltas) = deltas else {
                     continue;
                 };
@@ -491,6 +491,9 @@ mod tests {
                 target: 1,
                 deltas: Some(vec![8000, -8000, 0, 0]),
                 ura_markers: None,
+                pai: None,
+                tehai: None,
+                scores: None,
             },
             MjaiEvent::EndKyoku,
             MjaiEvent::end_game(),
@@ -540,6 +543,9 @@ mod tests {
                 target: 2,
                 deltas: Some(vec![8000, 0, -8000, 0]),
                 ura_markers: None,
+                pai: None,
+                tehai: None,
+                scores: None,
             },
             MjaiEvent::EndKyoku,
             MjaiEvent::end_game(),
@@ -681,6 +687,9 @@ mod tests {
                 target: 1,
                 deltas: Some(vec![8000, -8000, 0, 0]),
                 ura_markers: None,
+                pai: None,
+                tehai: None,
+                scores: None,
             },
             MjaiEvent::end_game(),
         ];
@@ -726,6 +735,9 @@ mod tests {
                 target: 1,
                 deltas: Some(vec![5000, -5000, 0]),
                 ura_markers: None,
+                pai: None,
+                tehai: None,
+                scores: None,
             },
             MjaiEvent::end_game(),
         ];
@@ -757,6 +769,9 @@ mod tests {
             MjaiEvent::ReachAccepted { actor: 0 }, // -1000 to seat 0
             MjaiEvent::Ryukyoku {
                 deltas: Some(vec![1500, -1500, 0, 0]),
+                tehais: None,
+                scores: None,
+                reason: None,
             },
             MjaiEvent::end_game(),
         ];
@@ -783,6 +798,9 @@ mod tests {
                 target: 1,
                 deltas: Some(vec![8000, -8000, 0, 0]),
                 ura_markers: None,
+                pai: None,
+                tehai: None,
+                scores: None,
             },
             MjaiEvent::EndKyoku,
             MjaiEvent::confirmed_game(

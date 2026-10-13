@@ -641,6 +641,9 @@ impl RiichiCityBridge {
             // deltas already carry tenpai/noten payments and riichi-stick moves.
             events.push(MjaiEvent::Ryukyoku {
                 deltas: Some(deltas),
+                tehais: None,
+                scores: None,
+                reason: None,
             });
         } else {
             // One hora per winner (multiple for double/triple ron).
@@ -673,6 +676,9 @@ impl RiichiCityBridge {
                     target,
                     deltas: Some(deltas.clone()),
                     ura_markers: ura,
+                    pai: None,
+                    tehai: None,
+                    scores: None,
                 });
             }
         }
@@ -1556,6 +1562,7 @@ mod tests {
                 target,
                 deltas,
                 ura_markers,
+                ..
             } => {
                 assert_eq!(*actor, 0);
                 assert_eq!(*target, 2, "ron target is the last discarder");
@@ -1597,6 +1604,7 @@ mod tests {
                 target,
                 deltas,
                 ura_markers,
+                ..
             } => {
                 assert_eq!(*actor, 2);
                 assert_eq!(*target, 2, "tsumo target == winner");
@@ -1631,7 +1639,7 @@ mod tests {
         );
         assert_eq!(e.len(), 2);
         match &e[0] {
-            MjaiEvent::Ryukyoku { deltas } => {
+            MjaiEvent::Ryukyoku { deltas, .. } => {
                 assert_eq!(deltas.as_ref().unwrap(), &vec![0, 0, 0, 0]);
             }
             other => panic!("expected Ryukyoku, got {other:?}"),
@@ -1671,7 +1679,7 @@ mod tests {
         );
         assert_eq!(e.len(), 2, "exactly one ryukyoku + end_kyoku, no hora");
         match &e[0] {
-            MjaiEvent::Ryukyoku { deltas } => {
+            MjaiEvent::Ryukyoku { deltas, .. } => {
                 assert_eq!(
                     deltas.as_ref().unwrap(),
                     &vec![-1500, 1500, -1500, 1500],

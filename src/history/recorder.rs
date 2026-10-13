@@ -338,6 +338,9 @@ mod tests {
             target: 1,
             deltas: Some(vec![8000, -8000, 0, 0]),
             ura_markers: None,
+            pai: None,
+            tehai: None,
+            scores: None,
         })
         .unwrap();
         tx.send(MjaiEvent::EndKyoku).unwrap();
@@ -381,6 +384,9 @@ mod tests {
             target: 1,
             deltas: Some(vec![8000, -8000, 0, 0]),
             ura_markers: None,
+            pai: None,
+            tehai: None,
+            scores: None,
         })
         .unwrap();
         // Channel closes without an EndGame.
@@ -422,6 +428,9 @@ mod tests {
             target: 1,
             deltas: Some(vec![8000, -8000, 0, 0]),
             ura_markers: None,
+            pai: None,
+            tehai: None,
+            scores: None,
         })
         .unwrap();
         tx.send(MjaiEvent::end_game()).unwrap();
@@ -449,6 +458,9 @@ mod tests {
                 target: 1,
                 deltas: Some(vec![8000, -8000, 0, 0]),
                 ura_markers: None,
+                pai: None,
+                tehai: None,
+                scores: None,
             },
             &store,
             &history_tx,
@@ -480,6 +492,9 @@ mod tests {
         state.handle(
             MjaiEvent::Ryukyoku {
                 deltas: Some(vec![0, 0, 0, 0]),
+                tehais: None,
+                scores: None,
+                reason: None,
             },
             &store,
             &history_tx,
