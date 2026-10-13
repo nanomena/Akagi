@@ -313,7 +313,7 @@ pub fn encode_action_with(
         // (`deltas: None`, how `BotAction::Kyushu` maps) is encodable: a
         // Ryukyoku carrying deltas is an exhaustive draw observed on the
         // wire, never a decision we can send.
-        MjaiEvent::Ryukyoku { deltas: None } => json!({ "action": action::NINE_CARDS }),
+        MjaiEvent::Ryukyoku { deltas: None, .. } => json!({ "action": action::NINE_CARDS }),
         _ => return None,
     };
     Some(action_frame(&data))
@@ -447,12 +447,18 @@ mod tests {
                 target: 0,
                 deltas: None,
                 ura_markers: None,
+                pai: None,
+                tehai: None,
+                scores: None,
             },
             MjaiEvent::Hora {
                 actor: 0,
                 target: 1,
                 deltas: None,
                 ura_markers: None,
+                pai: None,
+                tehai: None,
+                scores: None,
             },
             MjaiEvent::None,
         ];
@@ -663,6 +669,9 @@ mod tests {
             target: 2,
             deltas: None,
             ura_markers: None,
+            pai: None,
+            tehai: None,
+            scores: None,
         };
         let pkt =
             &WPacket::parse_frame(&encode_action_with(&ron, None, Some("7s"), None).unwrap())[0];
@@ -679,9 +688,15 @@ mod tests {
     /// auto-discarded ~27s later.
     #[test]
     fn kyuushu_is_a_bare_twelve() {
-        let pkt =
-            &WPacket::parse_frame(&encode_action(&MjaiEvent::Ryukyoku { deltas: None }).unwrap())
-                [0];
+        let pkt = &WPacket::parse_frame(
+            &encode_action(&MjaiEvent::Ryukyoku {
+                deltas: None,
+                tehais: None,
+                scores: None,
+                reason: None,
+            })
+            .unwrap(),
+        )[0];
         assert_eq!(pkt.body["cmd"], CMD_GAME_ACTION);
         assert_eq!(pkt.body["data"]["action"], 12);
         assert_eq!(
@@ -697,6 +712,9 @@ mod tests {
     fn an_observed_draw_is_not_an_action() {
         assert!(encode_action(&MjaiEvent::Ryukyoku {
             deltas: Some(vec![1000, -1000, 1000, -1000]),
+            tehais: None,
+            scores: None,
+            reason: None
         })
         .is_none());
     }
@@ -710,6 +728,9 @@ mod tests {
             target: 3,
             deltas: None,
             ura_markers: None,
+            pai: None,
+            tehai: None,
+            scores: None,
         };
         let pkt =
             &WPacket::parse_frame(&encode_action_with(&tsumo, Some("6p"), None, None).unwrap())[0];

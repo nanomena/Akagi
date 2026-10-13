@@ -191,6 +191,9 @@ mod tests {
             target: 3,
             deltas: Some(vec![0, 0, 2300, -1300]),
             ura_markers: Some(vec!["C".into()]),
+            pai: None,
+            tehai: None,
+            scores: None,
         };
         let out = to_riichienv(&ev).unwrap().unwrap();
         match out {

@@ -1024,8 +1024,16 @@ fn bot_action_to_mjai(a: BotAction, actor: u8) -> MjaiEvent {
             target,
             deltas: None,
             ura_markers: None,
+            pai: None,
+            tehai: None,
+            scores: None,
         },
-        BotAction::Kyushu => MjaiEvent::Ryukyoku { deltas: None },
+        BotAction::Kyushu => MjaiEvent::Ryukyoku {
+            deltas: None,
+            tehais: None,
+            scores: None,
+            reason: None,
+        },
         BotAction::Kita => MjaiEvent::Kita {
             actor,
             pai: Some("N".into()),

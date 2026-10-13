@@ -72,7 +72,7 @@ fn is_our_decision(ev: &MjaiEvent, our_seat: u8) -> bool {
         // `None` is the bot declining *our* call window — ours to send.
         // `Ryukyoku` (kyuushu, `deltas: None`) is the bot declaring on
         // *our* first-turn draw — no actor field, inherently ours.
-        MjaiEvent::None | MjaiEvent::Ryukyoku { deltas: None } => None,
+        MjaiEvent::None | MjaiEvent::Ryukyoku { deltas: None, .. } => None,
         _ => return false,
     };
     actor.is_none_or(|a| a == our_seat)
@@ -258,7 +258,12 @@ mod tests {
     /// countdown had to auto-discard for us.
     #[test]
     fn kyuushu_declaration_plans_a_frame() {
-        let ev = MjaiEvent::Ryukyoku { deltas: None };
+        let ev = MjaiEvent::Ryukyoku {
+            deltas: None,
+            tehais: None,
+            scores: None,
+            reason: None,
+        };
         let f = CtxFixture::new();
         let plan = RiichiCityAutoplay::new().plan(&f.ctx(&ev));
         assert_eq!(plan.steps.len(), 2, "sleep then frame");
@@ -275,6 +280,9 @@ mod tests {
     fn observed_draw_does_not_plan() {
         let ev = MjaiEvent::Ryukyoku {
             deltas: Some(vec![1500, -500, -500, -500]),
+            tehais: None,
+            scores: None,
+            reason: None,
         };
         let f = CtxFixture::new();
         assert!(RiichiCityAutoplay::new().plan(&f.ctx(&ev)).steps.is_empty());

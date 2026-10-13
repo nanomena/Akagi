@@ -946,6 +946,9 @@ impl TenhouBridge {
             target,
             deltas: Some(deltas_abs),
             ura_markers,
+            pai: None,
+            tehai: None,
+            scores: None,
         }];
         events.push(MjaiEvent::EndKyoku);
         if msg.get("owari").is_some() {
@@ -971,6 +974,9 @@ impl TenhouBridge {
         let mut events = vec![
             MjaiEvent::Ryukyoku {
                 deltas: Some(deltas_abs),
+                tehais: None,
+                scores: None,
+                reason: None,
             },
             MjaiEvent::EndKyoku,
         ];
@@ -1819,7 +1825,7 @@ mod tests {
         );
         assert_eq!(events.len(), 2);
         match &events[0] {
-            MjaiEvent::Ryukyoku { deltas } => {
+            MjaiEvent::Ryukyoku { deltas, .. } => {
                 let d = deltas.as_ref().unwrap();
                 assert_eq!(d.len(), 4);
                 assert_eq!(d[0], 1500);
@@ -1871,6 +1877,7 @@ mod tests {
                     target,
                     deltas,
                     ura_markers,
+                    ..
                 } => Some((*actor, *target, deltas.clone(), ura_markers.clone())),
                 _ => None,
             })

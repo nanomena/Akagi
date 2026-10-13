@@ -13,8 +13,8 @@ export type MjaiEvent =
   | { type: 'dora'; dora_marker: string }
   | { type: 'reach'; actor: number; pai?: string }
   | { type: 'reach_accepted'; actor: number }
-  | { type: 'hora'; actor: number; target: number; deltas?: number[]; ura_markers?: string[] }
-  | { type: 'ryukyoku'; deltas?: number[] }
+  | { type: 'hora'; actor: number; target: number; deltas?: number[]; ura_markers?: string[]; pai?: string; tehai?: string[]; scores?: number[] }
+  | { type: 'ryukyoku'; deltas?: number[]; tehais?: (string[] | null)[]; scores?: number[]; reason?: string }
   | { type: 'kita'; actor: number; pai?: string }
   | { type: 'end_kyoku' }
   | { type: 'end_game' }
