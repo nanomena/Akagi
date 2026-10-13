@@ -1,0 +1,148 @@
+name: Desktop
+
+# The desktop shell (desktop/) and the core it runs (akagi-core, the crate built
+# without Tauri): their checks, and the packaged application for each platform.
+#
+# Each platform packages on its own runner. Electron and the Python runtime are
+# per-platform downloads, and a macOS bundle has to be made — and ad-hoc signed
+# — on macOS.
+#
+# The application comes out as a workflow artifact, a folder that runs from
+# wherever it is unpacked. Nothing here publishes a release.
+
+on:
+  pull_request:
+    branches: [v3]
+  push:
+    branches: [v3]
+  workflow_dispatch:
+
+# A newer push to the same ref cancels the in-flight run.
+concurrency:
+  group: desktop-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: '3.12.13'
+  PBS_RELEASE: '20260414'
+  UV_VERSION: '0.11.8'
+
+jobs:
+  package:
+    name: Package (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            archive: akagi-desktop-linux-x64.tar.gz
+          - os: macos-14
+            target: aarch64-apple-darwin
+            archive: akagi-desktop-macos-arm64.zip
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: akagi-desktop-windows-x64.zip
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+          components: clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: desktop-${{ matrix.target }}
+
+      # build.rs runs prost-build on liqi.proto and needs protoc on PATH.
+      - name: Setup protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Electron's packages want Node 22.12 or later.
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # The core is the crate without its default features. ci.yml lints and
+      # tests the crate with them; this is the other configuration, and nothing
+      # there would notice a Tauri type creeping back into the core.
+      - name: Core — clippy
+        if: runner.os == 'Linux'
+        run: cargo clippy --locked --no-default-features --lib --bin akagi-core --tests -- -D warnings
+
+      - name: Core — test
+        if: runner.os == 'Linux'
+        run: cargo test --locked --no-default-features --lib
+
+      - name: Core — build
+        run: cargo build --release --locked --no-default-features --bin akagi-core --target "${{ matrix.target }}"
+
+      - name: Interface — build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Shell — check and test
+        working-directory: desktop
+        run: |
+          npm ci
+          npm run check
+          npm test
+
+      - name: Restore bundled runtime cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            runtime/python/${{ matrix.target }}
+            runtime/uv/${{ matrix.target }}
+          key: runtime-${{ matrix.target }}-py${{ env.PYTHON_VERSION }}-pbs${{ env.PBS_RELEASE }}-uv${{ env.UV_VERSION }}
+
+      - name: Fetch python+uv
+        shell: bash
+        run: bash scripts/fetch-runtime.sh "${{ matrix.target }}"
+
+      # The npm package fetches Electron itself on first use; do it here, where
+      # a failed download reads as one.
+      - name: Fetch Electron
+        working-directory: desktop
+        run: node node_modules/electron/install.js
+
+      - name: Package
+        working-directory: desktop
+        run: node scripts/package.mjs
+
+      # Archived here rather than by upload-artifact, which drops the file
+      # modes and the links a macOS bundle and a Python tree are made of.
+      - name: Archive (Linux)
+        if: runner.os == 'Linux'
+        run: tar -C dist/desktop -czf "dist/${{ matrix.archive }}" Akagi-linux-x64
+
+      - name: Archive (macOS)
+        if: runner.os == 'macOS'
+        run: ditto -c -k --keepParent dist/desktop/Akagi-darwin-arm64 "dist/${{ matrix.archive }}"
+
+      - name: Archive (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path dist/desktop/Akagi-win32-x64 -DestinationPath "dist/${{ matrix.archive }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: akagi-desktop-${{ matrix.target }}
+          path: dist/${{ matrix.archive }}
+          if-no-files-found: error
+          retention-days: 14
