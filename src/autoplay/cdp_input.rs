@@ -101,6 +101,42 @@ pub async fn dispatch_click_shaped(
     Ok(())
 }
 
+/// Move the pointer from `from` to `to` (CSS pixels) over `duration_ms`,
+/// along the leg [`crate::autoplay::pointer::along`] describes, as a run of
+/// `mouseMoved` events with no button held.
+///
+/// Paced by the clock and not by a count of events: a page that answers
+/// slowly gets fewer points of the same path, and the pointer still arrives
+/// when it was meant to. The last event is always exactly `to`, so a
+/// duration of zero is the plain jump this replaces.
+pub async fn travel(
+    page: &Page,
+    from: (f64, f64),
+    to: (f64, f64),
+    duration_ms: u32,
+    bend: f64,
+) -> Result<()> {
+    const FRAME: Duration = Duration::from_millis(14);
+    let total = Duration::from_millis(u64::from(duration_ms));
+    let started = tokio::time::Instant::now();
+    loop {
+        let elapsed = started.elapsed();
+        if elapsed >= total {
+            break;
+        }
+        let t = elapsed.as_secs_f64() / total.as_secs_f64();
+        let (x, y) = crate::autoplay::pointer::along(from, to, bend, t);
+        page.move_mouse(Point::new(x, y))
+            .await
+            .context("CDP move_mouse")?;
+        tokio::time::sleep(FRAME.min(total.saturating_sub(started.elapsed()))).await;
+    }
+    page.move_mouse(Point::new(to.0, to.1))
+        .await
+        .context("CDP move_mouse")?;
+    Ok(())
+}
+
 /// Read the game canvas's `getBoundingClientRect()` via `Runtime.evaluate`.
 ///
 /// Majsoul renders into the first `<canvas>` element on the page; Tenhou

@@ -51,7 +51,10 @@ impl PlatformAutoplay for RiichiCityAutoplay {
             },
             Step::SendFrame(frame),
         ];
-        PlanResult { steps }
+        PlanResult {
+            steps,
+            hesitate: false,
+        }
     }
 }
 

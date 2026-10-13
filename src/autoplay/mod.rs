@@ -65,6 +65,7 @@ pub mod inject;
 pub mod majsoul;
 pub mod manager;
 pub mod platform;
+pub mod pointer;
 pub mod riichi_city;
 pub mod tenhou;
 pub mod tenhou_state;

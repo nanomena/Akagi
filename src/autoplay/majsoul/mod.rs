@@ -68,7 +68,7 @@ impl PlatformAutoplay for MajsoulAutoplay {
                 // The dealer-opening hand-sort animation wait (clicks
                 // issued during it are dropped) is folded into the delay
                 // model as the `opening_animation` functional floor.
-                push_pre_delay(&mut result.steps, ctx, DecisionKind::Dahai, 0);
+                result.hesitate = push_pre_delay(&mut result.steps, ctx, DecisionKind::Dahai, 0);
                 if let Some(click) = plan_dahai_click(pai, ctx) {
                     result.steps.push(click);
                 }
@@ -248,12 +248,14 @@ impl PlatformAutoplay for MajsoulAutoplay {
 /// `extra_clicks` is how many clicks follow the *first* one in this plan
 /// (candidate disambiguation, riichi tile). It sizes the click-sequence
 /// overhead the budget layer must reserve.
+///
+/// Returns whether the delay model asked for a look at the runner-up.
 fn push_pre_delay(
     steps: &mut Vec<Step>,
     ctx: &ActionContext,
     kind: DecisionKind,
     extra_clicks: u32,
-) {
+) -> bool {
     let cfg = ctx.cfg;
     let per_click = cfg.hover_delay_ms + cfg.click_hold_ms;
     let click_overhead_ms = per_click + extra_clicks * (per_click + cfg.inter_click_delay_ms);
@@ -356,6 +358,16 @@ fn push_pre_delay(
     let elapsed = ctx.budget.map_or(0, |b| b.elapsed_ms);
     let sleep = sleep.max(delay::functional_floor(&input).saturating_sub(elapsed));
     steps.push(Step::Sleep { duration_ms: sleep });
+    decision.hesitate
+}
+
+/// Where `pai` sits in our hand, as a normalised 16:9 point — the place a
+/// discard of it would be pressed.
+pub fn discard_point(pai: &str, ctx: &ActionContext) -> Option<(f64, f64)> {
+    match plan_dahai_click(pai, ctx)? {
+        Step::Click { x_norm, y_norm } => Some((x_norm, y_norm)),
+        _ => None,
+    }
 }
 
 /// Plan a hand-tile click for a discard or riichi-declaring discard.

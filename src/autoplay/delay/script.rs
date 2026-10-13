@@ -4,7 +4,7 @@
 //!
 //! ```lua
 //! function decide_delay(ctx)
-//!   return { delay_ms = 2300, allow_bank = false }
+//!   return { delay_ms = 2300, allow_bank = false, hesitate = false }
 //! end
 //! ```
 //!
@@ -74,6 +74,10 @@ const SUPERSEDED_DEFAULT_SCRIPTS: &[&str] = &[
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/assets/delay_default_superseded/2e5d892.lua"
+    )),
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/assets/delay_default_superseded/68bb28c.lua"
     )),
 ];
 
@@ -211,7 +215,7 @@ impl DelayScript {
         self.lua.remove_hook();
 
         match result {
-            Ok((target_ms, allow_bank)) => {
+            Ok((target_ms, allow_bank, hesitate)) => {
                 if let Ok(mut g) = self.last_error.lock() {
                     *g = None;
                 }
@@ -222,6 +226,7 @@ impl DelayScript {
                 Some(DelayDecision {
                     total_target_ms: target,
                     allow_bank,
+                    hesitate,
                 })
             }
             Err(e) => {
@@ -237,7 +242,7 @@ impl DelayScript {
         }
     }
 
-    fn call(&self, input: &DelayInput) -> mlua::Result<(u32, bool)> {
+    fn call(&self, input: &DelayInput) -> mlua::Result<(u32, bool, bool)> {
         let ctx = self.build_ctx(input)?;
         let ret: Value = self.func.call(ctx)?;
         let Value::Table(t) = ret else {
@@ -253,19 +258,17 @@ impl DelayScript {
                 "decide_delay returned out-of-range delay_ms {delay_ms}"
             )));
         }
-        // Strict boolean: Lua truthiness would read `allow_bank = 0`
+        // Strict booleans: Lua truthiness would read `allow_bank = 0`
         // (C-style false) as *true* and silently unlock bank spending.
-        let allow_bank = match t.get::<Value>("allow_bank") {
-            Ok(Value::Nil) | Err(_) => false,
-            Ok(Value::Boolean(b)) => b,
-            Ok(other) => {
-                return Err(mlua::Error::RuntimeError(format!(
-                    "decide_delay `allow_bank` must be a boolean or nil, got {}",
-                    other.type_name()
-                )));
-            }
+        let flag = |name: &str| match t.get::<Value>(name) {
+            Ok(Value::Nil) | Err(_) => Ok(false),
+            Ok(Value::Boolean(b)) => Ok(b),
+            Ok(other) => Err(mlua::Error::RuntimeError(format!(
+                "decide_delay `{name}` must be a boolean or nil, got {}",
+                other.type_name()
+            ))),
         };
-        Ok((delay_ms as u32, allow_bank))
+        Ok((delay_ms as u32, flag("allow_bank")?, flag("hesitate")?))
     }
 
     /// Build the read-only `ctx` table the script receives.
@@ -288,6 +291,7 @@ impl DelayScript {
         ctx.set("legal_count", input.legal_action_count)?;
         if let Some(p) = input.probs {
             ctx.set("top_prob", p.top)?;
+            ctx.set("entropy", p.entropy)?;
             if let Some(second) = p.second {
                 ctx.set("second_prob", second)?;
             }
@@ -556,6 +560,58 @@ mod tests {
         let dec = s.try_decide(&i).unwrap();
         assert_eq!(dec.total_target_ms, 1250);
         assert!(dec.allow_bank);
+    }
+
+    /// What a script needs to pace a decision by how close it was: the
+    /// spread of the bot's candidates in, and a wish for a look at the
+    /// runner-up out.
+    #[test]
+    fn script_reads_the_spread_and_asks_for_a_look() {
+        let s = DelayScript::compile(
+            r#"
+            function decide_delay(ctx)
+              if ctx.entropy == nil then return { delay_ms = 1000 } end
+              return { delay_ms = 1000 + 2000 * ctx.entropy, hesitate = ctx.margin < 0.2 }
+            end
+            "#,
+            "test",
+        )
+        .unwrap();
+        let cfg = MajsoulAutoplayConfig::default();
+        let d = DelayModelConfig::default();
+        let mut i = base_input(&cfg, &d);
+        // A bot that reports no probabilities: nothing to read, nothing asked.
+        let dec = s.try_decide(&i).unwrap();
+        assert_eq!((dec.total_target_ms, dec.hesitate), (1000, false));
+
+        i.probs = Some(crate::autoplay::delay::DecisionProbs {
+            top: 0.45,
+            second: Some(0.40),
+            entropy: 1.0,
+        });
+        let dec = s.try_decide(&i).unwrap();
+        assert_eq!((dec.total_target_ms, dec.hesitate), (3000, true));
+
+        i.probs = Some(crate::autoplay::delay::DecisionProbs {
+            top: 0.97,
+            second: Some(0.02),
+            entropy: 0.25,
+        });
+        let dec = s.try_decide(&i).unwrap();
+        assert_eq!((dec.total_target_ms, dec.hesitate), (1500, false));
+    }
+
+    /// Lua's truthiness would read `hesitate = 0` as a yes.
+    #[test]
+    fn a_wish_that_is_not_a_boolean_is_a_script_error() {
+        let s = DelayScript::compile(
+            "function decide_delay(ctx) return { delay_ms = 2300, hesitate = 0 } end",
+            "test",
+        )
+        .unwrap();
+        let cfg = MajsoulAutoplayConfig::default();
+        let d = DelayModelConfig::default();
+        assert!(s.try_decide(&base_input(&cfg, &d)).is_none());
     }
 
     #[test]
@@ -853,6 +909,7 @@ mod tests {
                 i.probs = Some(crate::autoplay::delay::DecisionProbs {
                     top: 0.40,
                     second: Some(0.399),
+                    entropy: 0.0,
                 });
                 s.try_decide(&i).unwrap().total_target_ms
             })
@@ -912,6 +969,7 @@ mod tests {
         let flat = fast_fraction(Some(crate::autoplay::delay::DecisionProbs {
             top: 0.11,
             second: Some(0.105),
+            entropy: 0.0,
         }));
         assert!(
             flat > 0.27,

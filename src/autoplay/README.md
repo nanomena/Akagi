@@ -30,6 +30,7 @@ bot answers is the most obvious tell there is.
 | `tenhou_state.rs` | `TenhouState` — the hand at Tenhou tile-index resolution plus the current decision window (the server's `t` bitmask). Written by the Tenhou bridge, read here. Without it an mjai tile *string* cannot be resolved to the physical copy Tenhou wants. |
 | `budget.rs` | `TimeBudget` — the server's per-decision-window time grant (`OptionalOperationList.time_fixed/time_add`, ms). Written by the Majsoul bridge, read here. Never locally accounted; always the server's own value. |
 | `delay/` | The pre-click "thinking time" model. See below. |
+| `pointer.rs` | Where the pointer is between presses, Majsoul only: the *approach* (it travels to the first press of a plan instead of appearing on it, and may rest on the runner-up first) and the *rest* (once the press has registered it leaves the hand). Pure arithmetic on points and milliseconds; see "The pointer between presses" below. |
 | `context.rs` | `AutoplayContext` — shared slots between the capture backend, the bridge and the manager (`page`, `canvas_rect`, `time_budget`, `input_watch`, `tenhou_state`). |
 | `cdp_input.rs` | chromiumoxide wrappers: hover → press → hold → release click sequence (optionally with a mid-press cursor jiggle for retries), canvas rect query, and the Tenhou route's DOM helpers — action-button selectors, the readiness probe, and the call into the injected discard handler. |
 | `verify.rs` | Majsoul only. `InputWatch` — counts the client's own uplink input commands (`inputOperation` / `inputChiPengGang`, bumped by the Majsoul bridge). The manager takes a ticket before pressing; if the count never moves, the click was swallowed and the plan is pressed again (bounded by `click_retries`, gated on the decision window still being live). Repeated dead decisions trigger a page reload (`reload_after_failures`), which reconnects into the hand via the bridge's `GameRestore` path. |
@@ -203,8 +204,10 @@ Layers, in order:
    (`delay/probs.rs`: native-bot `show.items[].prob` raw, Mortal-style
    `q_values` softmaxed — never feed raw Q values to a probability
    threshold) are still exposed to user Lua scripts as
-   `ctx.top_prob`/`ctx.second_prob`/`ctx.margin` for custom rules tuned
-   to a specific bot.
+   `ctx.top_prob`/`ctx.second_prob`/`ctx.margin`/`ctx.entropy` for
+   custom rules tuned to a specific bot. `entropy` is over the
+   candidates the bot listed, with whatever they leave short of 1
+   counted as one more: a floor on the true figure.
 2. **Budget caps** (`budget_cap`) — `soft = time_fixed - safety_margin -
    click_overhead`; `hard = soft + bounded bank spend`, bank only when
    the policy returned `allow_bank`. Unconditional: overrunning the
@@ -250,6 +253,46 @@ click still lands after the UI is ready.
   changes.
 - The script decides *when*, never *what*: it gets no coordinates, no
   action choice, and its output is clamped by caps and floors.
+- `hesitate = true` in its answer is a wish, not a step: see below.
+
+## The pointer between presses (`pointer.rs`)
+
+A press needs the pointer on its target and nothing else, and the client
+draws what is under a pointer: the tile it is over lifts. A pointer that
+only ever appears on its target therefore shows — a tile lifting with
+nothing having reached for it, and staying lifted for the rest of the
+round because the pointer never left. Two things are done about it, for
+plans made of canvas clicks (Majsoul):
+
+- **The approach.** The pointer travels to a plan's first press along a
+  shallow eased arc (`cdp_input::travel`, `mouseMoved` events with no
+  button held). If the delay script answered `hesitate = true`, and the
+  bot's two likeliest candidates are discards of two different tiles,
+  it first rests on the runner-up — or goes to the choice, over to the
+  runner-up and back. What the candidates are comes from the bot:
+  `show.items[]` with `prob` and `type` (the mjai event the candidate
+  stands for). Without `type` nothing is assumed and there is no look.
+- **The rest.** Once the press has registered (`verify.rs`), the pointer
+  moves to a random point above the hand, where nothing is drawn under
+  it.
+
+Invariants:
+
+- **The approach is inside the thinking time.** The plan's leading
+  `Sleep` gives up exactly what the approach takes
+  (`Approach::total_ms` equals the pause it replaced, tested), so the
+  press lands at the instant it would have without it, and no cap,
+  floor or budget moves. What does not fit is dropped — the look first,
+  then the travel is shortened.
+- **Moves never press.** Only the plan's own `Click` steps do, at the
+  plan's own coordinates; the pointer's path decides nothing about the
+  action. The stale-window check stays immediately before the press,
+  after the walk.
+- **Later presses of one plan are unchanged** (candidate row, riichi
+  tile): they follow the first by `inter_click_delay_ms` as before.
+- The rest runs inline after verification, so it delays the handling
+  of the next bot response by its own length (well under a second);
+  the next decision's `elapsed_ms` accounts for it.
 
 ## Time budget flow
 
