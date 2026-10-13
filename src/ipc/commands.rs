@@ -56,6 +56,44 @@ fn claim_autoplay_manager_spawn(
             .is_ok()
 }
 
+/// Start the autoplay manager the first time autoplay is switched on in this
+/// process. It then runs for the life of the process and reads
+/// `autoplay.enabled` afresh for every bot response, so switching it off needs
+/// nothing more than the config change.
+pub(crate) fn start_autoplay_manager(autoplay_enabled: bool, state: &AppState) {
+    if !claim_autoplay_manager_spawn(autoplay_enabled, &state.autoplay_manager_started) {
+        return;
+    }
+    let cfg_for_ap = state.config.clone();
+    let ctx_for_ap = state.autoplay_context.clone();
+    let tracker_for_ap = state.game_tracker.clone();
+    let mjai_for_ap = state.mjai_bus.clone();
+    let resp_for_ap = state.bot_response_bus.clone();
+    let notify_for_ap = state.notify_bus.clone();
+    let config_dir_for_ap = state
+        .config_path
+        .parent()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_default();
+    let started_flag = state.autoplay_manager_started.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = crate::autoplay::run_autoplay_manager(
+            cfg_for_ap,
+            ctx_for_ap,
+            tracker_for_ap,
+            mjai_for_ap,
+            resp_for_ap,
+            notify_for_ap,
+            config_dir_for_ap,
+        )
+        .await
+        {
+            tracing::error!("Autoplay manager failed: {e:#}");
+            started_flag.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
+    });
+}
+
 fn entry_to_info(e: &BotEntry) -> BotInfo {
     BotInfo {
         name: e.name.clone(),
@@ -103,10 +141,13 @@ pub async fn update_config(
     let bot_now_enabled = new_config.bot.enabled;
     let autoplay_now_enabled = new_config.autoplay.enabled;
     let new_overlay = new_config.overlay.clone();
+    let new_monitor = new_config.monitor.clone();
     *state.config.write().await = new_config;
 
     // Open / close / retune the overlay window to match what was just saved.
     overlay::reconcile(&app, &new_overlay);
+    crate::ipc::monitor::reconcile(&app, &new_monitor);
+    state.monitor.set_autoplay(autoplay_now_enabled);
 
     // Sync the history recorder's platform tag immediately. Subsequent
     // finalised games are stamped with the new tag; the in-flight buffer
@@ -157,11 +198,21 @@ pub async fn update_config(
         let inspector = state.log_session.inspector();
         let rt = state.runtime.clone();
         let syncs = state.syncs_in_flight.clone();
+        let monitor = state.monitor.clone();
         let started_flag = state.bot_manager_started.clone();
         tauri::async_runtime::spawn(async move {
-            if let Err(e) =
-                crate::bot::run_bot_manager(cfg_for_bot, events, resp, bs, nb, inspector, rt, syncs)
-                    .await
+            if let Err(e) = crate::bot::run_bot_manager(
+                cfg_for_bot,
+                events,
+                resp,
+                bs,
+                nb,
+                inspector,
+                rt,
+                syncs,
+                Some(monitor),
+            )
+            .await
             {
                 tracing::error!("Bot manager failed: {e:#}");
                 // Setup failure: clear the flag so a follow-up
@@ -172,36 +223,7 @@ pub async fn update_config(
         });
     }
 
-    if claim_autoplay_manager_spawn(autoplay_now_enabled, &state.autoplay_manager_started) {
-        let cfg_for_ap = state.config.clone();
-        let ctx_for_ap = state.autoplay_context.clone();
-        let tracker_for_ap = state.game_tracker.clone();
-        let mjai_for_ap = state.mjai_bus.clone();
-        let resp_for_ap = state.bot_response_bus.clone();
-        let notify_for_ap = state.notify_bus.clone();
-        let config_dir_for_ap = state
-            .config_path
-            .parent()
-            .map(std::path::Path::to_path_buf)
-            .unwrap_or_default();
-        let started_flag = state.autoplay_manager_started.clone();
-        tauri::async_runtime::spawn(async move {
-            if let Err(e) = crate::autoplay::run_autoplay_manager(
-                cfg_for_ap,
-                ctx_for_ap,
-                tracker_for_ap,
-                mjai_for_ap,
-                resp_for_ap,
-                notify_for_ap,
-                config_dir_for_ap,
-            )
-            .await
-            {
-                tracing::error!("Autoplay manager failed: {e:#}");
-                started_flag.store(false, std::sync::atomic::Ordering::SeqCst);
-            }
-        });
-    }
+    start_autoplay_manager(autoplay_now_enabled, &state);
     Ok(())
 }
 
@@ -1743,6 +1765,11 @@ macro_rules! ipc_handlers {
             $crate::ipc::commands::get_config,
             $crate::ipc::commands::update_config,
             $crate::ipc::commands::set_overlay_enabled,
+            $crate::ipc::monitor::get_monitor,
+            $crate::ipc::monitor::set_monitor_pinned,
+            $crate::ipc::monitor::set_monitor_autoplay,
+            $crate::ipc::monitor::open_monitor_game,
+            $crate::ipc::monitor::resize_monitor_game,
             $crate::ipc::commands::list_bots,
             $crate::ipc::commands::set_active_bot,
             $crate::ipc::commands::get_bot_settings,
