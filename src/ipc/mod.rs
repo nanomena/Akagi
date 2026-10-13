@@ -42,6 +42,7 @@
 
 pub mod capture_supervisor;
 pub mod commands;
+pub mod monitor;
 pub mod overlay;
 pub mod state;
 
@@ -61,13 +62,30 @@ pub fn install<R: Runtime>(app: &AppHandle<R>, state: AppState) -> Result<()> {
 }
 
 fn spawn_forwarders<R: Runtime>(app: AppHandle<R>, state: AppState) {
+    monitor::forward(app.clone(), state.monitor.clone());
     forward(app.clone(), state.mjai_bus.subscribe(), "mjai-event");
     forward(
         app.clone(),
         state.bot_response_bus.subscribe(),
         "bot-response",
     );
-    forward(app.clone(), state.notify_bus.subscribe(), "notify");
+    let mut notices = state.notify_bus.subscribe();
+    let monitor = state.monitor.clone();
+    let notice_app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            match notices.recv().await {
+                Ok(notice) => {
+                    monitor.notification(&notice);
+                    let _ = notice_app.emit("notify", &notice);
+                }
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    monitor.gap(format!("Missed {n} status notices."))
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
     forward(
         app.clone(),
         state.analysis_bus.subscribe(),
@@ -111,10 +129,12 @@ where
 fn spawn_bot_status_forwarder<R: Runtime>(app: AppHandle<R>, state: AppState) {
     let mut rx = state.bot_status_bus.subscribe();
     let snapshot = state.bot_status.clone();
+    let monitor = state.monitor.clone();
     tauri::async_runtime::spawn(async move {
         loop {
             match rx.recv().await {
                 Ok(s) => {
+                    monitor.set_bot(s.clone());
                     *snapshot.write().await = s.clone();
                     if let Err(e) = app.emit("bot-status", &s) {
                         warn!("ipc emit bot-status failed: {e}");
@@ -132,10 +152,12 @@ fn spawn_bot_status_forwarder<R: Runtime>(app: AppHandle<R>, state: AppState) {
 fn spawn_capture_status_forwarder<R: Runtime>(app: AppHandle<R>, state: AppState) {
     let mut rx = state.capture_status_bus.subscribe();
     let control = state.capture_control.clone();
+    let monitor = state.monitor.clone();
     tauri::async_runtime::spawn(async move {
         loop {
             match rx.recv().await {
                 Ok(s) => {
+                    monitor.set_capture(s.clone());
                     control.lock().await.status = s.clone();
                     if let Err(e) = app.emit("capture-status", &s) {
                         warn!("ipc emit capture-status failed: {e}");

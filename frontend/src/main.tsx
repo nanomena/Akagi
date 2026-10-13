@@ -15,8 +15,9 @@ import { Logs } from '@/routes/Logs'
 import { Settings } from '@/routes/Settings'
 import { Setup } from '@/routes/Setup'
 import { Overlay } from '@/routes/Overlay'
+import { Monitor } from '@/routes/Monitor'
 import { HAS_TAURI, invoke } from '@/lib/tauri'
-import { isOverlayWindow } from '@/lib/window'
+import { isOverlayWindow, currentWindowLabel, MONITOR_LABEL } from '@/lib/window'
 import type { AppConfig } from '@/types'
 
 // Loader on the protected branch: bounce to /setup when first_run_completed
@@ -57,7 +58,9 @@ const router = createHashRouter([
 // and a hash route would only invite the sidebar/statusbar layout to tag along.
 const root = createRoot(document.getElementById('root')!)
 
-if (isOverlayWindow()) {
+if (currentWindowLabel() === MONITOR_LABEL || (!HAS_TAURI && new URLSearchParams(location.search).get('view') === 'monitor')) {
+  root.render(<StrictMode><Monitor /></StrictMode>)
+} else if (isOverlayWindow()) {
   // Lets index.css punch the page background out to transparent, so only the
   // overlay's own card is drawn over the game.
   document.documentElement.classList.add('overlay-window')

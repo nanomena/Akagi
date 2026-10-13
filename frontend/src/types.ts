@@ -44,6 +44,10 @@ export type ShowItem = {
 export type ShowMeta = {
   /** Optional title; falls back to the tile's default title. */
   title?: string
+  /** What the values on the rows are, in a word or two ("Win rate"). */
+  caption?: string
+  /** A sentence about them, shown on demand. */
+  hint?: string
   items: ShowItem[]
 }
 
@@ -210,6 +214,7 @@ export type AppConfig = {
   capture: CaptureConfig
   autoplay: AutoplayConfig
   overlay: OverlayConfig
+  monitor: import('@/lib/monitor').MonitorConfig
   network: NetworkConfig
 }
 
@@ -482,6 +487,8 @@ export type PlayerSnapshot = {
   riichi_declaration_index: number | null
   /** 3p only: north tiles set aside via kita / nukidora. Empty in 4p. */
   kita_tiles: string[]
+  /** The just-drawn tile, if any. Populated for the active player only. */
+  drawn_tile?: string | null
 }
 
 export type GameStateSnapshot = {

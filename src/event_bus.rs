@@ -58,6 +58,8 @@ pub type AnalysisBus = broadcast::Sender<AnalysisResult>;
 #[derive(Debug, Clone)]
 pub struct TrackedEvent {
     pub event: MjaiEvent,
+    /// Exact tracker generation and sequence for a monitor decision.
+    pub context: Option<crate::monitor::DecisionContext>,
     /// Whether the riichi engine offers our seat a choice in the state this
     /// event produced — its own turn, or a claim on someone's discard.
     ///

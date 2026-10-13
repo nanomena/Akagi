@@ -52,6 +52,18 @@ use tracing::{debug, info, warn};
 
 const PAGE_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
+struct OwnedTask<T>(JoinHandle<T>);
+impl<T> Drop for OwnedTask<T> {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+impl<T> OwnedTask<T> {
+    fn abort(&self) {
+        self.0.abort();
+    }
+}
+
 /// Per-flow key for `FlowBridges`. `target` is the page that owns the
 /// WebSocket; `request` is the CDP request id that the page assigned to
 /// `new WebSocket(...)`. The pair is unique across the browser session
@@ -154,6 +166,7 @@ pub async fn run(
     autoplay: Option<Arc<AutoplayContext>>,
     http_cfg: HttpCaptureConfig,
     notify: NotifyBus,
+    mut initial_url: Option<String>,
 ) -> Result<()> {
     info!("CDP connecting to {endpoint}");
     let (browser_owned, mut handler) = Browser::connect(endpoint)
@@ -167,16 +180,16 @@ pub async fn run(
     // `WS Invalid message` warnings when Chrome sends events
     // chromiumoxide doesn't have a typed binding for; those are
     // non-fatal noise and the stream keeps running.
-    let pump = tokio::spawn(async move {
+    let mut pump = OwnedTask(tokio::spawn(async move {
         while let Some(ev) = handler.next().await {
             if let Err(e) = ev {
                 debug!("chromiumoxide handler event error: {e:?}");
             }
         }
-    });
+    }));
 
     // Per-page subscription registry. Key: TargetId stringified.
-    let mut subscribed: HashMap<String, JoinHandle<()>> = HashMap::new();
+    let mut subscribed: HashMap<String, OwnedTask<()>> = HashMap::new();
 
     let poll_loop = async {
         loop {
@@ -245,7 +258,17 @@ pub async fn run(
                 {
                     Ok(handle) => {
                         info!("CDP: attached to page target {id}");
-                        subscribed.insert(id, handle);
+                        subscribed.insert(id, OwnedTask(handle));
+                        // The embedded game starts blank. Navigate only after
+                        // all WS listeners are attached, so the initial socket
+                        // and start_game cannot be missed.
+                        if let Some(url) = initial_url.take() {
+                            if page.url().await?.as_deref() == Some("about:blank") {
+                                page.goto(url)
+                                    .await
+                                    .context("opening embedded Mahjong Soul")?;
+                            }
+                        }
                     }
                     Err(e) => {
                         warn!("CDP: failed to attach to target {id}: {e:#}");
@@ -257,12 +280,12 @@ pub async fn run(
         }
         // unreachable, but type-check the future as `()` for select arm
         #[allow(unreachable_code)]
-        ()
+        Ok::<(), anyhow::Error>(())
     };
 
     tokio::select! {
-        _ = pump => info!("CDP handler pump exited"),
-        _ = poll_loop => info!("CDP page poll exited"),
+        _ = &mut pump.0 => info!("CDP handler pump exited"),
+        result = poll_loop => { result?; info!("CDP page poll exited"); },
     }
     // Abort any still-live page subscriptions before tearing down.
     for (_id, h) in subscribed {

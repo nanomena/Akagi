@@ -1,0 +1,6 @@
+{
+  "identifier": "monitor",
+  "description": "Local monitoring UI only. The remote game child has no native permissions.",
+  "webviews": ["monitor"],
+  "permissions": ["core:default", "core:event:default", "core:window:default"]
+}
