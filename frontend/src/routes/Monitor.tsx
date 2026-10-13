@@ -69,8 +69,9 @@ type Model = {
   now: number
 }
 
+/** Four chips, each in a place of its own: a link that needs a word gets it without moving its neighbours. */
 function StatusChips({ health }: { health: Health[] }) {
-  return <>{health.map(h => <span key={h.key} className="mchip" data-tone={h.tone} title={`${h.name}：${h.state}`}><i className="mdot" data-tone={h.tone} />{h.name}{h.tone !== 'ok' && <b>{h.state}</b>}</span>)}</>
+  return <>{health.map(h => <span key={h.key} className="mchip" data-tone={h.tone} title={`${h.name}：${h.state}`}><i className="mdot" data-tone={h.tone} />{h.name}<b>{h.tone !== 'ok' && h.state}</b></span>)}</>
 }
 
 function Round({ s }: { s: MonitorSnapshot | null }) {
@@ -78,9 +79,9 @@ function Round({ s }: { s: MonitorSnapshot | null }) {
   return <div className="mround">
     {game ? <>
       <strong>{roundLabel(game)}</strong>
-      {game.our_seat != null && <em>{seatWind(game.our_seat, game)}家{game.our_seat === game.oya ? ' · 庄' : ''}</em>}
-      <span>{game.honba} 本场 · 供托 {game.kyotaku}</span>
-    </> : <><strong>{s?.brand ?? ''}</strong><span>{s?.game_ended === false ? '等待牌局数据' : '等待对局'}</span></>}
+      <span className="mround-seat">{game.our_seat != null && <em>{seatWind(game.our_seat, game)}家{game.our_seat === game.oya ? ' · 庄' : ''}</em>}</span>
+      <span className="mround-count">{game.honba} 本场 · 供托 {game.kyotaku}</span>
+    </> : <span className="mround-idle"><strong>{s?.brand ?? ''}</strong><span>{s?.game_ended === false ? '等待牌局数据' : '等待对局'}</span></span>}
   </div>
 }
 
@@ -102,10 +103,11 @@ function Dock({ m, tab, setTab, tools, onAutoplay }: { m: Model; tab: Tab; setTa
   return <aside className="md">
     <header className="md-bar">
       <Round s={s} />
-      {game && game.dora_markers.length > 0 && <span className="mdora">宝牌指示<Faces faces={game.dora_markers.map(tile => ({ tile }))} /></span>}
+      {/* Room for five indicators, the most a hand can turn over. */}
+      <span className="mdora" title="宝牌指示牌">{game && game.dora_markers.length > 0 && <>宝牌<Faces faces={game.dora_markers.map(tile => ({ tile }))} /></>}</span>
       <nav className="md-tabs" role="tablist" aria-label="监视内容">
         {TABS.map(([key, label]) => <button key={key} role="tab" aria-selected={tab === key} onClick={() => setTab(key)}>
-          {label}{key === 'link' && faulty && <i className="mdot" data-tone="bad" />}
+          {label}{key === 'link' && faulty && <i className="mdot md-tab-flag" data-tone="bad" />}
         </button>)}
       </nav>
       <button className="md-health" onClick={() => setTab('link')} title="查看连接详情" aria-label="连接状态"><StatusChips health={m.health} /></button>

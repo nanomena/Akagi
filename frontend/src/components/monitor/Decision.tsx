@@ -7,16 +7,17 @@ const BADGE_ICON: Record<Tone, typeof Check> = { ok: Check, wait: Hourglass, bus
 const STEPS = ['请求', '建议', '确认'] as const
 const STEP_MARK: Partial<Record<StepState, typeof Check>> = { done: Check, bad: X }
 
-/** Tiles and words for one action. `data-faces` lets a row of three or four
- *  tiles take a smaller tile height and still fit the slot it was given. */
+/** Tiles and words for one action. The tiles stand in a well of one size, so
+ *  the words begin at the same place whether the action shows one tile, four
+ *  or none; `data-faces` picks the tile height that fits the well. */
 function ActionLine({ action, size }: { action: ActionView; size: 'hero' | 'versus' }) {
   return <div className={`mact mact--${size}`} data-tone={action.tone} data-faces={action.faces.length}>
-    <Faces faces={action.faces} />
+    <span className="mact-well"><Faces faces={action.faces} /></span>
     <span className="mact-text">
       <strong>{action.verb}</strong>
       {action.object && <span>{action.object}</span>}
-      {size === 'hero' && action.note && <em>{action.note}</em>}
     </span>
+    {size === 'hero' && <em className="mact-note">{action.note}</em>}
   </div>
 }
 
@@ -59,7 +60,7 @@ export function DecisionCard({ view, decision: d, elapsed, past }: CardProps) {
       </div>
         : view.action ? <ActionLine action={view.action} size="hero" />
         : thinking ? <div className="mact mact--hero mact--pending">
-            <span className="mfaces"><span className="mt mt--skeleton" /></span>
+            <span className="mact-well"><span className="mfaces"><span className="mt mt--skeleton" /></span></span>
             <span className="mact-text"><strong>推理中</strong><span className="mdec-clock">{(elapsed / 1000).toFixed(1)} s</span></span>
           </div>
         : <p className="mdec-empty">{view.message}</p>}
@@ -105,11 +106,11 @@ export function CandidateList({ rows, state, empty, loading, caption, hint }: Li
     {rows.length > 0 ? <ol className="mcand-list">
       {rows.map((row, i) => <li key={i} className="mcand" data-tone={row.tone} data-chosen={row.chosen || undefined} data-taken={row.taken || undefined}
         style={{ '--share': row.share == null ? '0%' : `${(row.share * 100).toFixed(1)}%` } as CSSProperties}>
+        {/* Five columns, the same in every row: a longer word or a fourth tile moves nothing. */}
         <span className="mcand-rank">{i + 1}</span>
         <span className="mcand-verb">{row.verb}</span>
-        <Faces faces={row.faces} />
-        {row.chosen && <span className="mcand-mark">{state === 'done' ? '已执行' : '模型选择'}</span>}
-        {row.taken && <span className="mcand-mark">雀魂实际</span>}
+        <span className="mcand-faces"><Faces faces={row.faces} /></span>
+        <span className="mcand-mark">{row.chosen ? (state === 'done' ? '已执行' : '模型选择') : row.taken ? '雀魂实际' : ''}</span>
         <span className="mcand-val">{row.value}</span>
       </li>)}
     </ol>

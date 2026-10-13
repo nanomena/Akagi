@@ -55,6 +55,18 @@ export function tileLabel(tile: string): string {
   if (HONOR[tile]) return HONOR[tile]
   return `${tile.endsWith('r') ? '赤' : ''}${tile[0]}${SUIT[tile[1]] ?? ''}`
 }
+/** A tile lying on its side, in upright-tile widths. */
+export const SIDE = 92 / 70
+/** A pon or chi, and an open kan (the widest meld there is), in tile-widths. */
+const PON = 2 + SIDE
+const KAN = 3 + SIDE
+/** The room a hand is given, in tile-widths: thirteen tiles and the draw
+ *  standing a little apart, with four sets called away — three pons and a kan.
+ *  Every hand that comes up in play fits it, so its tiles are one size. */
+export const HAND_ROOM = 13 + 1.3 - 4 * 3 + 3 * (PON + 0.3) + (KAN + 0.3)
+/** The room `n` melds in a row are given: pons, one of them a kan. */
+export const meldsRoom = (n: number) => n * (PON + 0.3) - 0.3 + (KAN - PON)
+
 /** Red fives are a distinct identity everywhere except "is this the same kind of tile". */
 const plain = (tile: string) => tile.replace(/r$/, '')
 const rank = (tile: string) => (HONOR[tile] ? 40 + 'ESWNPFC'.indexOf(tile) : 'mps'.indexOf(tile[1]) * 10 + Number(tile[0])) + (tile.endsWith('r') ? 0.5 : 0)
@@ -302,7 +314,7 @@ export function healthOf(s: MonitorSnapshot | null): Health[] {
     // not being up comes first; once it is, what the bot reports decides.
     { key: 'service', name: '模型', detail: server.state === 'failed' ? server.error : service === 'error' ? s?.service_error ?? null : null,
       ...(server.state === 'failed' ? { tone: 'bad', state: '未运行' } as const
-        : server.state === 'installing' ? { tone: 'busy', state: '安装环境' } as const
+        : server.state === 'installing' ? { tone: 'busy', state: '安装中' } as const
         : server.state === 'starting' ? { tone: 'busy', state: '加载中' } as const
         : service === 'connected' ? { tone: 'ok', state: '已连接' } as const
         : service === 'error' ? { tone: 'bad', state: '断开' } as const
