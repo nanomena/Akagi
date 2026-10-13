@@ -13,13 +13,13 @@
 // Each can also be given as AKAGI_DATA, AKAGI_CORE, AKAGI_DOCK, AKAGI_CDP_PORT.
 
 import { BaseWindow, Menu, WebContentsView, app, dialog, ipcMain, net, protocol, screen } from 'electron'
-import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import { createServer } from 'node:net'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Core } from './core.js'
 import { MIN, RATIO, conform, framedRatio, gameBounds, openingSize, restoredBounds, settle } from './layout.js'
+import { policyFor } from './policy.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 /** The interface's address. A scheme of its own, so the page has an origin and absolute paths. */
@@ -30,9 +30,6 @@ const GAME_PARTITION = 'persist:game'
 const BACKGROUND = '#ece9e4'
 /** What the game may ask for. It copies room numbers and pastes them; nothing else is its to have. */
 const GAME_PERMISSIONS = new Set(['clipboard-read', 'clipboard-sanitized-write'])
-/** The interface loads nothing from anywhere but its own files. */
-const DOCK_POLICY = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
-
 /** @param {string} name */
 const option = name => app.commandLine.getSwitchValue(name) || process.env[`AKAGI_${name.toUpperCase().replaceAll('-', '_')}`] || ''
 const CORE_NAME = process.platform === 'win32' ? 'akagi-core.exe' : 'akagi-core'
@@ -71,19 +68,8 @@ function fail(/** @type {string} */ title, /** @type {string} */ detail) {
 
 /** The end of what the core wrote to stderr, as plain text. */
 function lastWords() {
-  // eslint-disable-next-line no-control-regex
+  // The core colours its console output; a dialog would show the codes.
   return (core?.stderr ?? '').replace(/\x1b\[[0-9;]*m/g, '').trim().split('\n').slice(-12).join('\n')
-}
-
-/**
- * The policy a page of the interface is served with: `DOCK_POLICY`, and the
- * scripts written into that page itself, each allowed by its hash.
- * @param {string} html
- */
-function policyFor(html) {
-  const written = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)]
-    .map(([, script]) => `'sha256-${createHash('sha256').update(script).digest('base64')}'`)
-  return DOCK_POLICY.replace("script-src 'self'", ["script-src 'self'", ...written].join(' '))
 }
 
 /** Serve the built interface, and nothing outside its folder. */

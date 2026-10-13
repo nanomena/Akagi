@@ -1,0 +1,140 @@
+// @ts-check
+// The shell, for real: Electron, the built interface and a stand-in core, looked
+// at from outside over the shell's own DevTools port. It is here for what the
+// unit tests cannot see — whether the page, served the way the shell serves it,
+// still draws. A content policy that is one directive short breaks nothing
+// loudly: the tiles just turn into text.
+//
+//   node tests/smoke.mjs [--dock=<dir>]      (default: ../frontend/dist)
+//
+// Needs a display; on a machine without one, `xvfb-run -a node tests/smoke.mjs`.
+// Linux and macOS only: the stand-in core is started through a shell script.
+
+import { spawn } from 'node:child_process'
+import fs from 'node:fs'
+import { createRequire } from 'node:module'
+import net from 'node:net'
+import os from 'node:os'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const HERE = path.dirname(fileURLToPath(import.meta.url))
+const DESKTOP = path.dirname(HERE)
+const electron = /** @type {string} */ (/** @type {unknown} */ (createRequire(import.meta.url)('electron')))
+const dock = path.resolve(process.argv.find(arg => arg.startsWith('--dock='))?.slice(7) ?? path.join(DESKTOP, '..', 'frontend', 'dist'))
+if (!fs.existsSync(path.join(dock, 'index.html'))) throw new Error(`No built interface at ${dock}: run "npm run build" in frontend/ first.`)
+
+const sleep = (/** @type {number} */ ms) => new Promise(done => setTimeout(done, ms))
+const work = fs.mkdtempSync(path.join(os.tmpdir(), 'akagi-smoke-'))
+const core = path.join(work, 'core.sh')
+fs.writeFileSync(core, `#!/bin/sh\nexec "${process.execPath}" "${path.join(HERE, 'stand-in-core.js')}" --mode monitor "$@"\n`, { mode: 0o755 })
+const port = await new Promise(done => {
+  const probe = net.createServer().listen(0, '127.0.0.1', () => { const { port } = /** @type {net.AddressInfo} */ (probe.address()); probe.close(() => done(port)) })
+})
+
+const shell = spawn(electron, [DESKTOP, '--no-sandbox', `--data=${path.join(work, 'data')}`, `--core=${core}`, `--dock=${dock}`, `--cdp-port=${port}`], { stdio: ['ignore', 'pipe', 'pipe'] })
+let said = ''
+shell.stdout.on('data', text => { said += text })
+shell.stderr.on('data', text => { said += text })
+/** @type {number | string | null} */
+let exited = null
+shell.on('exit', (code, signal) => { exited = signal ?? code })
+
+/** @type {string[]} */
+const failures = []
+const check = (/** @type {string} */ name, /** @type {unknown} */ ok, detail = '') => {
+  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${detail ? ` — ${detail}` : ''}`)
+  if (!ok) failures.push(name)
+}
+
+try {
+  /** @type {any} */
+  let version
+  for (let i = 0; i < 150 && exited === null && !version; i++) {
+    version = await fetch(`http://127.0.0.1:${port}/json/version`).then(reply => reply.json(), () => null)
+    if (!version) await sleep(200)
+  }
+  if (!version) throw new Error(`The shell did not open its DevTools port (exit: ${exited}).\n${said.slice(-2000)}`)
+
+  const socket = new WebSocket(version.webSocketDebuggerUrl)
+  await new Promise((done, fail) => { socket.onopen = done; socket.onerror = () => fail(new Error('DevTools socket')) })
+  let next = 0
+  /** @type {Map<number, { done: (value: any) => void, fail: (reason: Error) => void }>} */
+  const waiting = new Map()
+  /** @type {any[]} */
+  const events = []
+  socket.onmessage = message => {
+    const data = JSON.parse(String(message.data))
+    const asked = waiting.get(data.id)
+    if (asked) {
+      waiting.delete(data.id)
+      if (data.error) asked.fail(new Error(JSON.stringify(data.error)))
+      else asked.done(data.result)
+    } else if (data.method) events.push(data)
+  }
+  const send = (/** @type {string} */ method, params = {}, /** @type {string | undefined} */ sessionId = undefined) => new Promise((done, fail) => {
+    const id = ++next
+    waiting.set(id, { done, fail })
+    socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }))
+  })
+  const pages = async () => (await send('Target.getTargets')).targetInfos.filter((/** @type {any} */ t) => t.type === 'page')
+
+  /** @type {any} */
+  let page
+  for (let i = 0; i < 100 && !page; i++) {
+    page = (await pages()).find((/** @type {any} */ t) => t.url.startsWith('app://dock/'))
+    if (!page) await sleep(200)
+  }
+  check('the interface is served from app://dock/', page)
+  if (!page) throw new Error(`No interface page (exit: ${exited}).\n${said.slice(-2000)}`)
+  const { sessionId } = await send('Target.attachToTarget', { targetId: page.targetId, flatten: true })
+  await send('Runtime.enable', {}, sessionId)
+  await send('Log.enable', {}, sessionId)
+  const evaluate = async (/** @type {string} */ expression) => {
+    const reply = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }, sessionId)
+    if (reply.exceptionDetails) throw new Error(reply.exceptionDetails.exception?.description ?? reply.exceptionDetails.text)
+    return reply.result.value
+  }
+
+  // The page draws itself from the core's snapshot, and opens the game.
+  /** @type {any} */
+  let seen = {}
+  for (let i = 0; i < 75; i++) {
+    seen = await evaluate(`(async () => ({
+      capture: (await window.akagi.invoke('get_monitor')).capture.state,
+      drawn: document.querySelectorAll('.mt img').length,
+      named: [...document.querySelectorAll('.mt .mt-ghost')].map(tile => tile.textContent).filter(Boolean),
+      stage: (r => r && [Math.round(r.width), Math.round(r.height)])(document.querySelector('.mon-stage')?.getBoundingClientRect()),
+      refused: await window.akagi.invoke('no_such_command').catch(error => String(error)),
+    }))()`).catch(error => ({ error: String(error) }))
+    if (seen.capture === 'running' && seen.drawn > 0 && seen.named?.length === 0) break
+    await sleep(200)
+  }
+  check('the page reaches the core through the shell', !seen.error, seen.error)
+  check('tiles are drawn as tiles', seen.drawn > 0 && seen.named?.length === 0, `${seen.drawn} drawn, ${seen.named?.length} left as text ${JSON.stringify(seen.named ?? [])}`)
+  check('the page had the game opened, and the core was told', seen.capture === 'running', seen.capture)
+  check('a command the shell does not know is refused by name', seen.refused === 'Unknown command: no_such_command', seen.refused)
+
+  const game = (await pages()).find((/** @type {any} */ t) => t.targetId !== page.targetId)
+  check('the game view is a page of its own, in a session of its own', game && game.browserContextId !== page.browserContextId)
+  if (game) {
+    const attached = await send('Target.attachToTarget', { targetId: game.targetId, flatten: true })
+    const size = (await send('Runtime.evaluate', { expression: '[innerWidth, innerHeight]', returnByValue: true }, attached.sessionId)).result.value
+    check('the game view is the size of the stage', seen.stage && Math.abs(size[0] - seen.stage[0]) <= 1 && Math.abs(size[1] - seen.stage[1]) <= 1, `${size.join('×')} on a stage of ${seen.stage?.join('×')}`)
+  }
+
+  const problems = events.filter(event => event.sessionId === sessionId)
+    .map(event => event.method === 'Runtime.exceptionThrown' ? String(event.params.exceptionDetails.exception?.description ?? event.params.exceptionDetails.text)
+      : event.method === 'Log.entryAdded' && event.params.entry.level === 'error' ? String(event.params.entry.text) : '')
+    .filter(Boolean)
+  check('the page logged no errors', problems.length === 0, problems.map(text => text.slice(0, 200)).join(' | '))
+  socket.close()
+} catch (error) {
+  check('the smoke test ran to its end', false, String(error instanceof Error ? error.stack : error))
+} finally {
+  shell.kill()
+  for (let i = 0; i < 50 && exited === null; i++) await sleep(100)
+  if (exited === null) shell.kill('SIGKILL')
+  fs.rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+}
+process.exit(failures.length ? 1 : 0)

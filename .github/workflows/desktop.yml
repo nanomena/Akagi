@@ -102,6 +102,20 @@ jobs:
           npm run check
           npm test
 
+      # The npm package fetches Electron itself on first use; do it here, where
+      # a failed download reads as one.
+      - name: Fetch Electron
+        working-directory: desktop
+        run: node node_modules/electron/install.js
+
+      # The shell for real, with a stand-in core, on a virtual display: the one
+      # check that sees whether the interface still draws the way the shell
+      # serves it.
+      - name: Shell — smoke
+        if: runner.os == 'Linux'
+        working-directory: desktop
+        run: xvfb-run -a npm run smoke
+
       - name: Restore bundled runtime cache
         uses: actions/cache@v4
         with:
@@ -113,12 +127,6 @@ jobs:
       - name: Fetch python+uv
         shell: bash
         run: bash scripts/fetch-runtime.sh "${{ matrix.target }}"
-
-      # The npm package fetches Electron itself on first use; do it here, where
-      # a failed download reads as one.
-      - name: Fetch Electron
-        working-directory: desktop
-        run: node node_modules/electron/install.js
 
       - name: Package
         working-directory: desktop
