@@ -1,4 +1,5 @@
-//! Shared state held by Tauri as `tauri::State<AppState>`.
+//! The application's shared state. The Tauri application holds it as
+//! `tauri::State<AppState>`; the headless core hands it to its request loop.
 //!
 //! `AppState` owns the long-lived handles every IPC command and forwarder
 //! needs: a clone of each `event_bus` `Sender`, the live `AppConfig`, the
@@ -64,8 +65,8 @@ impl Default for CaptureControl {
 #[derive(Clone)]
 pub struct AppState {
     pub monitor: crate::monitor::MonitorHandle,
-    /// An opt-in WebView2 CDP endpoint plus initial Mahjong Soul URL.
-    pub embedded_game: Arc<Mutex<Option<(String, String)>>>,
+    /// The game the application shows in a view of its own, once there is one.
+    pub embedded_game: Arc<Mutex<Option<crate::capture::embedded::EmbeddedBackend>>>,
     pub config: Arc<RwLock<AppConfig>>,
     pub config_path: Arc<PathBuf>,
     pub log_session: Arc<Session>,
@@ -184,5 +185,24 @@ impl AppState {
             updater_lock: Arc::new(Mutex::new(())),
             pending_update: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// Change the configuration and write it back to the file it was loaded
+    /// from, leaving everything else in that file as it is.
+    pub async fn save_config(
+        &self,
+        change: impl FnOnce(&mut AppConfig),
+    ) -> Result<AppConfig, String> {
+        let mut config = self.config.write().await;
+        let mut next = config.clone();
+        change(&mut next);
+        let saved = crate::config::merge_into(
+            &next,
+            &std::fs::read_to_string(&*self.config_path).unwrap_or_default(),
+        )
+        .map_err(|e| e.to_string())?;
+        std::fs::write(&*self.config_path, saved).map_err(|e| e.to_string())?;
+        *config = next.clone();
+        Ok(next)
     }
 }

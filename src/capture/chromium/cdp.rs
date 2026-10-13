@@ -33,6 +33,7 @@ use crate::schema::{
 };
 use anyhow::{anyhow, Context, Result};
 use base64::Engine;
+use chromiumoxide::handler::HandlerConfig;
 use chromiumoxide::page::Page;
 use chromiumoxide::{
     cdp::browser_protocol::network::{
@@ -139,6 +140,24 @@ pub fn page_handle_cleared_by_removal(owner: Option<&str>, removed: &[String]) -
     matches!(owner, Some(o) if removed.iter().any(|r| r == o))
 }
 
+/// The one page to watch when a host application shows the game in a view of
+/// its own, instead of every page of a browser launched for the purpose.
+#[derive(Debug, Clone)]
+pub struct EmbeddedPage {
+    /// Where the page is sent once its sockets are being listened to. It
+    /// starts blank, so the first socket and `start_game` cannot be missed.
+    pub url: String,
+    /// The page's DevTools target id, for an endpoint that serves other pages
+    /// as well — the host's own interface, a login popup. `None` watches them all.
+    pub target: Option<String>,
+}
+
+/// Whether the page-poll loop subscribes to `target`. Pure so the choice is
+/// unit-testable without a live browser.
+pub fn is_watched(only: Option<&str>, target: &str) -> bool {
+    only.is_none_or(|id| id == target)
+}
+
 /// Hosts whose WebSocket creation hands the page handle to autoplay.
 /// `maj-soul.com` covers en/cn/jp portals; `mahjongsoul.com` is the
 /// Yostar mirror. `tenhou.net` and `mjv.jp` are Tenhou's portal and its
@@ -158,6 +177,7 @@ fn is_autoplay_target_url(ws_url: &str) -> bool {
 /// feature is wired (`AppState.autoplay_context`). On Majsoul WS open
 /// we publish the page handle into it; autoplay reads it back to dispatch
 /// `Input.dispatchMouseEvent`. Passing `None` makes the loop bridge-only.
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     endpoint: &str,
     bridges: Arc<FlowBridges<FlowKey>>,
@@ -166,10 +186,21 @@ pub async fn run(
     autoplay: Option<Arc<AutoplayContext>>,
     http_cfg: HttpCaptureConfig,
     notify: NotifyBus,
-    mut initial_url: Option<String>,
+    embedded: Option<EmbeddedPage>,
 ) -> Result<()> {
+    let (mut initial_url, only) = match embedded {
+        Some(page) => (Some(page.url), page.target),
+        None => (None, None),
+    };
     info!("CDP connecting to {endpoint}");
-    let (browser_owned, mut handler) = Browser::connect(endpoint)
+    // Left to its default, chromiumoxide tells every page it attaches to
+    // ignore certificate errors. These are pages a player is signed in on: a
+    // certificate that does not verify has to stay an error.
+    let config = HandlerConfig {
+        ignore_https_errors: false,
+        ..Default::default()
+    };
+    let (browser_owned, mut handler) = Browser::connect_with_config(endpoint, config)
         .await
         .with_context(|| format!("CDP connect to {endpoint}"))?;
     // `Browser` is not `Clone`; share via Arc for the page-poll task.
@@ -201,6 +232,10 @@ pub async fn run(
                     continue;
                 }
             };
+            let pages: Vec<Page> = pages
+                .into_iter()
+                .filter(|p| is_watched(only.as_deref(), p.target_id().inner()))
+                .collect();
             let current: HashSet<String> = pages
                 .iter()
                 .map(|p| p.target_id().inner().clone())
@@ -871,6 +906,13 @@ mod tests {
         removes.sort();
         assert_eq!(adds, vec!["d"]);
         assert_eq!(removes, vec!["a"]);
+    }
+
+    #[test]
+    fn only_the_named_page_is_watched() {
+        assert!(is_watched(None, "game"));
+        assert!(is_watched(Some("game"), "game"));
+        assert!(!is_watched(Some("game"), "interface"));
     }
 
     #[test]

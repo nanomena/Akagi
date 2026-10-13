@@ -1,0 +1,22 @@
+{
+  "name": "akagi-desktop",
+  "productName": "Akagi",
+  "private": true,
+  "version": "3.7.1",
+  "description": "The window Akagi runs in: the game and the monitor's dock, on one Chromium.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "check": "tsc -p tsconfig.json",
+    "test": "node --test \"tests/*.test.js\"",
+    "smoke": "node tests/smoke.mjs",
+    "package": "node scripts/package.mjs"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "electron": "44.7.0",
+    "typescript": "~6.0.2"
+  }
+}

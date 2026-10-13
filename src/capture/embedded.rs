@@ -1,5 +1,6 @@
-//! Isolated WebView2 game capture using the same CDP route and autoplay Page
-//! as a controlled Chromium browser. No new model session is opened here.
+//! Capture from a game the application shows in a Chromium view of its own,
+//! over the same CDP route and with the same autoplay page as a browser
+//! launched for the purpose.
 use super::{CaptureBackend, CaptureCtx, CaptureDescriptor, CaptureKind, ShutdownToken};
 use crate::capture::chromium::cdp;
 use crate::capture::flow::FlowBridges;
@@ -8,10 +9,16 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use std::time::Duration;
 
+/// Where the embedded game is: the view's local DevTools endpoint, and the page
+/// in it to watch and send to the game.
+#[derive(Debug, Clone)]
 pub struct EmbeddedBackend {
     pub endpoint: String,
-    pub initial_url: String,
+    pub page: cdp::EmbeddedPage,
 }
+
+/// What the capture status calls this source.
+pub const LABEL: &str = "embedded";
 
 pub async fn discover_endpoint(port: u16) -> Result<String> {
     let client = reqwest::Client::builder()
@@ -27,8 +34,8 @@ pub async fn discover_endpoint(port: u16) -> Result<String> {
         {
             if let Ok(value) = response.json::<serde_json::Value>().await {
                 if let Some(endpoint) = value.get("webSocketDebuggerUrl").and_then(|v| v.as_str()) {
-                    let url: tauri::Url =
-                        endpoint.parse().context("invalid WebView2 CDP endpoint")?;
+                    let url: reqwest::Url =
+                        endpoint.parse().context("invalid local CDP endpoint")?;
                     if url.scheme() == "ws"
                         && matches!(url.host_str(), Some("127.0.0.1") | Some("localhost"))
                         && url.port() == Some(port)
@@ -40,7 +47,25 @@ pub async fn discover_endpoint(port: u16) -> Result<String> {
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
-    anyhow::bail!("WebView2 did not expose its local CDP endpoint")
+    anyhow::bail!("the game view did not expose its local CDP endpoint")
+}
+
+/// The address an embedded game may be opened at: Mahjong Soul's own site, over
+/// HTTPS. The game view is signed in to the player's account, so the
+/// configuration cannot be allowed to point it anywhere else.
+pub fn game_url(configured: &str) -> Result<reqwest::Url, String> {
+    let url: reqwest::Url = configured
+        .parse()
+        .map_err(|e| format!("Invalid game URL: {e}"))?;
+    let host = url.host_str().unwrap_or("");
+    if url.scheme() != "https"
+        || !["mahjongsoul.com", "maj-soul.com", "majsoul.com"]
+            .iter()
+            .any(|suffix| host == *suffix || host.ends_with(&format!(".{suffix}")))
+    {
+        return Err("内置游戏地址必须是雀魂的 HTTPS 网站。".into());
+    }
+    Ok(url)
 }
 
 #[async_trait]
@@ -65,14 +90,30 @@ impl CaptureBackend for EmbeddedBackend {
         ));
         tokio::select! {
             result = cdp::run(&self.endpoint, bridges, ctx.mjai_bus, ctx.session.inspector(), ctx.autoplay,
-                ctx.http, ctx.notify_bus, Some(self.initial_url)) => result,
+                ctx.http, ctx.notify_bus, Some(self.page)) => result,
             _ = shutdown.wait() => Ok(()),
         }
     }
     fn descriptor(&self) -> CaptureDescriptor {
         CaptureDescriptor {
             kind: CaptureKind::Chromium,
-            label: "embedded WebView2".into(),
+            label: LABEL.into(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::game_url;
+
+    #[test]
+    fn the_game_opens_only_at_its_own_site_over_https() {
+        assert!(game_url("https://game.maj-soul.com/1/").is_ok());
+        assert!(game_url("https://game.mahjongsoul.com/").is_ok());
+        assert!(game_url("http://game.maj-soul.com/1/").is_err());
+        assert!(game_url("https://maj-soul.com.example.org/").is_err());
+        assert!(game_url("https://notmaj-soul.com/").is_err());
+        assert!(game_url("file:///etc/passwd").is_err());
+        assert!(game_url("not a url").is_err());
     }
 }

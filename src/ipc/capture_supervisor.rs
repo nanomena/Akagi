@@ -33,7 +33,7 @@ fn schema_kind(k: RtCaptureKind) -> CaptureKind {
 /// Stop the running backend (if any) and wait briefly for the
 /// supervisor task to flip status to `Stopped` before returning. Used by
 /// `restart_capture` so the spawn that follows starts on a clean slate.
-pub(super) async fn stop_and_wait(state: &AppState, max_wait: Duration) {
+pub(crate) async fn stop_and_wait(state: &AppState, max_wait: Duration) {
     // Subscribe *before* signalling shutdown so we can't lose the
     // resulting status emission to a race.
     let mut rx = state.capture_status_bus.subscribe();
@@ -103,8 +103,12 @@ pub async fn spawn_capture_supervisor(state: AppState) -> Result<()> {
     let (shutdown_token, shutdown_notify) = ShutdownToken::new();
 
     // Build backend per mode.
-    let backend: Box<dyn CaptureBackend> = match mode {
-        CaptureMode::Mitm => {
+    // A game the application shows itself is the source whenever there is
+    // one; `capture.mode` chooses between the ways of reaching a game elsewhere.
+    let embedded = state.embedded_game.lock().await.clone();
+    let backend: Box<dyn CaptureBackend> = match (embedded, mode) {
+        (Some(embedded), _) => Box::new(embedded),
+        (None, CaptureMode::Mitm) => {
             let force_close = {
                 let ctl = state.capture_control.lock().await;
                 ctl.force_close.clone()
@@ -115,13 +119,7 @@ pub async fn spawn_capture_supervisor(state: AppState) -> Result<()> {
                 force_close,
             ))
         }
-        CaptureMode::Chromium => match state.embedded_game.lock().await.clone() {
-            Some((endpoint, initial_url)) => Box::new(crate::capture::embedded::EmbeddedBackend {
-                endpoint,
-                initial_url,
-            }),
-            None => Box::new(ChromiumBackend::new(chromium_cfg)),
-        },
+        (None, CaptureMode::Chromium) => Box::new(ChromiumBackend::new(chromium_cfg)),
     };
     let descriptor = backend.descriptor();
     let kind = schema_kind(descriptor.kind);

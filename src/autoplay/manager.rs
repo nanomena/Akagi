@@ -119,7 +119,7 @@ impl AutoplayManager {
         let advance_cfg = self.cfg.clone();
         let advance_inject = self.ctx.inject.clone();
         let advance_bus = self.mjai_bus.clone();
-        tauri::async_runtime::spawn(async move {
+        tokio::spawn(async move {
             crate::autoplay::riichi_city::round_advance::round_advance_watcher(
                 advance_cfg,
                 advance_inject,
@@ -333,7 +333,7 @@ impl AutoplayManager {
             let window_open_at_plan = inject.window_is_open();
             let window_at_plan = inject.window_opened_at();
             let plan_created = Instant::now();
-            tauri::async_runtime::spawn(async move {
+            tokio::spawn(async move {
                 execute_riichi_frame(
                     sleep_ms as u64,
                     frame,
@@ -1158,8 +1158,8 @@ async fn execute_riichi_frame(
     }
 }
 
-/// Spawn point for the autoplay loop. Wired by `crate::lib::run` so the
-/// `tauri::async_runtime` Tokio runtime is the host.
+/// Spawn point for the autoplay loop. Must be called on the Tokio runtime:
+/// the manager spawns its own helper tasks there.
 pub async fn run_autoplay_manager(
     cfg: Arc<RwLock<AppConfig>>,
     ctx: Arc<AutoplayContext>,

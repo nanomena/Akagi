@@ -62,6 +62,7 @@ const RESET_GRACE_MS: u64 = 500;
 ///
 /// Implementations own the transport (subprocess pipe, in-process Python,
 /// ...) and any per-game state. Calls are sequential — no internal queueing.
+#[allow(clippy::double_must_use)] // the attribute is `async_trait`'s own
 #[async_trait]
 pub trait BotRunner: Send {
     /// Push a batch of events; return the bot's reaction.
