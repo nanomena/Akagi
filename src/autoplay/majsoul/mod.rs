@@ -909,6 +909,9 @@ mod tests {
             target: 1,
             deltas: None,
             ura_markers: None,
+            pai: None,
+            tehai: None,
+            scores: None,
         };
         // What the tracker now offers on a robable kakan: the ron plus the
         // always-present pass.

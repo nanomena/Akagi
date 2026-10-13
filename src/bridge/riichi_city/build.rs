@@ -447,12 +447,18 @@ mod tests {
                 target: 0,
                 deltas: None,
                 ura_markers: None,
+                pai: None,
+                tehai: None,
+                scores: None,
             },
             MjaiEvent::Hora {
                 actor: 0,
                 target: 1,
                 deltas: None,
                 ura_markers: None,
+                pai: None,
+                tehai: None,
+                scores: None,
             },
             MjaiEvent::None,
         ];
@@ -663,6 +669,9 @@ mod tests {
             target: 2,
             deltas: None,
             ura_markers: None,
+            pai: None,
+            tehai: None,
+            scores: None,
         };
         let pkt =
             &WPacket::parse_frame(&encode_action_with(&ron, None, Some("7s"), None).unwrap())[0];
@@ -710,6 +719,9 @@ mod tests {
             target: 3,
             deltas: None,
             ura_markers: None,
+            pai: None,
+            tehai: None,
+            scores: None,
         };
         let pkt =
             &WPacket::parse_frame(&encode_action_with(&tsumo, Some("6p"), None, None).unwrap())[0];

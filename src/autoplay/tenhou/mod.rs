@@ -665,6 +665,9 @@ mod tests {
             target: 1,
             deltas: None,
             ura_markers: None,
+            pai: None,
+            tehai: None,
+            scores: None,
         };
         assert!(slots(&tsumo, &st)[0].contains("c22-0"));
         let ron = MjaiEvent::Hora {
@@ -672,6 +675,9 @@ mod tests {
             target: 2,
             deltas: None,
             ura_markers: None,
+            pai: None,
+            tehai: None,
+            scores: None,
         };
         assert!(slots(&ron, &st)[0].contains("c22-1"));
     }

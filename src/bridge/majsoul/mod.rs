@@ -962,6 +962,16 @@ impl MajsoulBridge {
             .map(|a| parse_deltas(a))
             .transpose()?;
 
+        let scores = data
+            .get("scores")
+            .map(|value| {
+                let scores = parse_deltas(value.as_array().context("scores is not an array")?)?;
+                if scores.len() != usize::from(self.num_players) {
+                    bail!("settlement score count differs from num_players");
+                }
+                Ok(scores)
+            })
+            .transpose()?;
         let mut events = Vec::with_capacity(hules.len() + 1);
         for hule in hules {
             let actor = hule
@@ -1001,11 +1011,39 @@ impl MajsoulBridge {
             } else {
                 None
             };
+            let pai = hule
+                .get("hu_tile")
+                .map(|value| {
+                    value
+                        .as_str()
+                        .context("hu_tile is not a string")
+                        .and_then(|tile| ms_to_mjai(tile).map(String::from))
+                })
+                .transpose()?;
+            let tehai = hule
+                .get("hand")
+                .map(|value| {
+                    value
+                        .as_array()
+                        .context("hand is not a tile array")?
+                        .iter()
+                        .map(|value| {
+                            value
+                                .as_str()
+                                .context("hand tile is not a string")
+                                .and_then(|tile| ms_to_mjai(tile).map(String::from))
+                        })
+                        .collect::<Result<Vec<_>>>()
+                })
+                .transpose()?;
             events.push(MjaiEvent::Hora {
                 actor,
                 target,
                 deltas: deltas.clone(),
                 ura_markers,
+                pai,
+                tehai,
+                scores: scores.clone(),
             });
         }
         events.push(MjaiEvent::EndKyoku);
@@ -3704,6 +3742,40 @@ mod tests {
         assert!(bridge.pending_reach_accepted.is_none());
     }
 
+    #[test]
+    fn action_hule_forwards_public_red_hands_tiles_and_shared_scores() {
+        let mut bridge = MajsoulBridge::new(None, None);
+        bridge.last_revealed_tile_actor = Some(0);
+        let data = json!({
+            "scores": [12000, 32000, 31000, 25000],
+            "delta_scores": [-13000, 7000, 6000, 0],
+            "hules": [
+                {"seat": 1, "zimo": false, "hu_tile": "0p", "hand": ["2m","3m","4m","6p","7p","8p","3s","4s","0s","6s","7s","8s","5p"]},
+                {"seat": 2, "zimo": false, "hu_tile": "0p", "hand": ["3m","4m","0m","6m","7m","8m","2p","3p","4p","4s","5s","6s","5p"]}
+            ]
+        });
+        let events = bridge.build_hule(&data).unwrap();
+        assert_eq!(events.len(), 3);
+        for event in &events[..2] {
+            let wire = serde_json::to_value(event).unwrap();
+            assert_eq!(wire["pai"], "5pr");
+            assert_eq!(wire["tehai"].as_array().unwrap().len(), 13);
+            assert_eq!(wire["scores"], data["scores"]);
+            assert_eq!(wire["target"], 0);
+        }
+        let first = serde_json::to_value(&events[0]).unwrap();
+        let second = serde_json::to_value(&events[1]).unwrap();
+        assert_eq!(first["tehai"][8], "5sr");
+        assert_eq!(second["tehai"][2], "5mr");
+        assert!(matches!(events[2], MjaiEvent::EndKyoku));
+        assert!(bridge
+            .build_hule(&json!({"scores": [25000], "hules": [{"seat": 1, "zimo": true}]}))
+            .is_err());
+        assert!(bridge
+            .build_hule(&json!({"hules": [{"seat": 1, "zimo": true, "hand": [0]}]}))
+            .is_err());
+    }
+
     /// Real ActionHule sample (single ron, non-riichi): seat 3 rons off
     /// seat 2's discard. Expected: `[Hora{actor:3, target:2, deltas, no
     /// ura}, EndKyoku]`.
@@ -3738,6 +3810,7 @@ mod tests {
                 target,
                 deltas,
                 ura_markers,
+                ..
             } => {
                 assert_eq!(*actor, 3);
                 assert_eq!(*target, 2);
@@ -3768,6 +3841,7 @@ mod tests {
                 target,
                 deltas,
                 ura_markers,
+                ..
             } => {
                 assert_eq!(*actor, 0);
                 assert_eq!(*target, 0);
@@ -4055,6 +4129,7 @@ mod tests {
                 target,
                 deltas,
                 ura_markers,
+                ..
             } => {
                 assert_eq!(*actor, 2);
                 assert_eq!(*target, 0);

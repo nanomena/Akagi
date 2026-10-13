@@ -498,6 +498,9 @@ mod tests {
             target: 1,
             deltas: None,
             ura_markers: None,
+            pai: None,
+            tehai: None,
+            scores: None,
         };
         assert_eq!(
             encode(&tsumo, view(&[], &[])).unwrap(),
@@ -508,6 +511,9 @@ mod tests {
             target: 2,
             deltas: None,
             ura_markers: None,
+            pai: None,
+            tehai: None,
+            scores: None,
         };
         assert_eq!(
             encode(&ron, view(&[], &[])).unwrap(),

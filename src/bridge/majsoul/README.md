@@ -5,6 +5,22 @@ every frame, and currently emits the first mjai event — `start_game` with
 the bot's own seat (`id`). Remaining mjai state-machine phases (kyoku, draws,
 discards, calls, agari/ryukyoku) are still TODO.
 
+## Public winning-hand input
+
+`ActionHule.hules[].hand` becomes optional `hora.tehai`, and `hu_tile` becomes
+`hora.pai`, using the same `ms_to_mjai` mapping as ordinary tiles. Red fives
+remain `5mr/5pr/5sr`. The hand excludes the winning tile for both ron and tsumo;
+public melds continue to arrive through their own events. `ActionHule.scores`
+becomes the shared post-settlement `hora.scores`, including for multi-ron and
+the final hand. Malformed tile data or score-vector shapes reject the frame.
+
+Native consumers can now populate their existing hand-end reveal fields and
+commit the final observation before `end_game`. Providers that omit these
+fields leave them absent. For offline verification, `cargo run --example
+replay_majsoul -- <inspector.jsonl>` replays a local capture through the actual
+bridge without connecting to a client or network; output is local MJAI events
+tagged by flow. Capture files can contain credentials and must stay local.
+
 ## Seat resolution & names
 
 `MajsoulBridge` watches the `.lq.FastTest.authGame` exchange:

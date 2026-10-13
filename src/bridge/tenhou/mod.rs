@@ -946,6 +946,9 @@ impl TenhouBridge {
             target,
             deltas: Some(deltas_abs),
             ura_markers,
+            pai: None,
+            tehai: None,
+            scores: None,
         }];
         events.push(MjaiEvent::EndKyoku);
         if msg.get("owari").is_some() {
@@ -1871,6 +1874,7 @@ mod tests {
                     target,
                     deltas,
                     ura_markers,
+                    ..
                 } => Some((*actor, *target, deltas.clone(), ura_markers.clone())),
                 _ => None,
             })

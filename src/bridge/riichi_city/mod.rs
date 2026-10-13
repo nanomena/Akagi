@@ -673,6 +673,9 @@ impl RiichiCityBridge {
                     target,
                     deltas: Some(deltas.clone()),
                     ura_markers: ura,
+                    pai: None,
+                    tehai: None,
+                    scores: None,
                 });
             }
         }
@@ -1556,6 +1559,7 @@ mod tests {
                 target,
                 deltas,
                 ura_markers,
+                ..
             } => {
                 assert_eq!(*actor, 0);
                 assert_eq!(*target, 2, "ron target is the last discarder");
@@ -1597,6 +1601,7 @@ mod tests {
                 target,
                 deltas,
                 ura_markers,
+                ..
             } => {
                 assert_eq!(*actor, 2);
                 assert_eq!(*target, 2, "tsumo target == winner");

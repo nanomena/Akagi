@@ -17,6 +17,13 @@ here so it isn't owned by a single subsystem.
   and `StartKyoku` carry `num_players: u8` (serde default `4` for
   backward-compat with pre-3p log lines).
 
+`hora` also carries optional public `pai`, `tehai` and `scores`. `pai` is the
+winning tile, retaining red-five identity. `tehai` contains only the revealed
+closed tiles, excluding `pai`; melds are already public. `scores` contains
+authoritative post-settlement point totals, one per player. Multi-ron events
+share the same score vector. Absent provider data stays absent. The frontend
+mirror declares these fields in `frontend/src/types.ts`.
+
 ## Adding a new schema
 
 1. Create `src/schema/<name>/mod.rs` (or `src/schema/<name>.rs`) with your
