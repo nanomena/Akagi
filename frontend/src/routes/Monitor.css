@@ -3,8 +3,8 @@
  * The application is one window and the window is a fixed canvas. Every size
  * in this file is in canvas pixels: the canvas is laid out once, at its design
  * size, and `zoom` scales it as one piece to whatever size the window is
- * (`--k`, set by Monitor.tsx). The window itself is held to the canvas's
- * aspect ratio natively, so nothing here ever has to reflow, wrap or scroll to
+ * (`--k`, set by Monitor.tsx). The shell holds the window itself to the
+ * canvas's aspect ratio, so nothing here ever has to reflow, wrap or scroll to
  * cope with an odd window.
  *
  *   1280 × 960 (4:3) — the game on a 16:9 stage, a 1280 × 240 dock under it
@@ -379,7 +379,7 @@
 .mscorestrip > div[data-self] { border-color: var(--m-line-strong); }
 .mscorestrip dt { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--m-ink2); white-space: nowrap; }
 /* The dealer, as the system's passive role chip. */
-.mscorestrip dt i, .mseat > header i, .mtable-seat i { padding: 0 4px; border-radius: 4px; font-size: 10px; line-height: 1.6; color: var(--m-ink2); background: rgb(0 0 0 / 0.06); }
+.mscorestrip dt i, .mseat > header i { padding: 0 4px; border-radius: 4px; font-size: 10px; line-height: 1.6; color: var(--m-ink2); background: rgb(0 0 0 / 0.06); }
 .mscorestrip dt em { margin-left: auto; font-size: 11px; font-weight: 600; color: var(--m-riichi); }
 .mscorestrip dd { font-size: 19px; font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums; }
 
@@ -431,41 +431,7 @@
 
 /* The same table drawn as a table, for the stage. `--u` is the tile height of
  * a three-row pond; a cell is one pond: six tiles and a riichi turn wide. */
-.mtable {
-  --u: 26px; --gap: calc(var(--u) * 0.31);
-  display: grid; grid-template-columns: repeat(3, calc(var(--u) * 4.42)); grid-template-rows: repeat(3, calc(var(--u) * 3));
-  gap: var(--gap); justify-content: center; font-size: calc(var(--u) * 0.3);
-}
-.mtable-pond { min-width: 0; min-height: 0; }
-.mtable-corner { display: flex; flex-direction: column; gap: calc(var(--u) * 0.12); min-width: 0; min-height: 0; }
-.mtable-corner[data-cell='tl'] { align-items: flex-end; justify-content: flex-end; }
-.mtable-corner[data-cell='tr'] { align-items: flex-start; justify-content: flex-end; }
-.mtable-corner[data-cell='bl'] { align-items: flex-end; justify-content: flex-start; }
-.mtable-corner[data-cell='br'] { align-items: flex-start; justify-content: flex-start; }
-.mtable-corner[data-cell$='l'] .mhand { justify-content: flex-end; }
-.mtable-corner small { font-size: 0.86em; color: var(--m-ink2); white-space: nowrap; }
-.mtable-seat { display: flex; align-items: center; gap: 0.4em; white-space: nowrap; }
-.mtable-seat > span:not(.mseat-tag) { font-weight: 600; }
-.mtable-seat b { margin-left: 0.2em; font-size: 1.2em; font-variant-numeric: tabular-nums; }
-.mtable-center {
-  position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: calc(var(--u) * 0.06); border-radius: 10px;
-  background: var(--m-panel); border: 1px solid hsl(35 30% 80%); --th: calc(var(--u) * 0.9);
-}
-.mtable-center strong { font: 500 1.5em/1.2 var(--m-display); }
-.mtable-center span:not(.mfaces) { font-size: 0.9em; color: var(--m-ink2); font-variant-numeric: tabular-nums; }
-.mtable-center .mfaces { margin-top: calc(var(--u) * 0.1); }
 /* Riichi sticks: white, one red dot, laid toward the seat that declared. */
-.mtable-stick { position: absolute; width: calc(var(--u) * 1.5); height: calc(var(--u) * 0.2); border-radius: 99px; background: radial-gradient(circle, #d6362c 0 22%, #fff 24%); box-shadow: 0 0 0 1px var(--m-line-strong); }
-.mtable-stick[data-side='t'] { top: calc(var(--u) * 0.14); left: 50%; translate: -50% 0; }
-.mtable-stick[data-side='b'] { bottom: calc(var(--u) * 0.14); left: 50%; translate: -50% 0; }
-.mtable-stick[data-side='l'] { left: calc(var(--u) * -0.5); top: 50%; translate: 0 -50%; rotate: 90deg; }
-.mtable-stick[data-side='r'] { right: calc(var(--u) * -0.5); top: 50%; translate: 0 -50%; rotate: 90deg; }
-
-.mlegend { display: flex; align-items: center; justify-content: center; gap: 28px; font-size: 13px; color: var(--m-ink2); white-space: nowrap; }
-.mlegend span { display: inline-flex; align-items: center; gap: 6px; }
-.mlegend i { display: inline-block; border-radius: 2px; border: 1px solid var(--m-line-strong); background: #fff; }
-.mlegend-side { width: 14px; height: 10px; }
-.mlegend .mlegend-dim { width: 10px; height: 14px; background: #b3afa7; }
 
 /* ------------------------------------------------------------ events ---- */
 
@@ -554,10 +520,6 @@
 .mon-start-card p { font-size: 13px; line-height: 1.5; color: var(--m-ink2); }
 .mon-stage-idle { gap: 14px; color: var(--m-ink2); font-size: 14px; }
 /* Note 40 · table 518 · legend 24, centred on the stage. */
-.mon-stage-board { position: absolute; inset: 0; display: grid; grid-template-rows: 40px 518px 24px; row-gap: 22px; align-content: center; justify-items: center; background: var(--m-table); }
-.mon-stage-note { display: flex; align-items: center; gap: 10px; padding: 0 18px; border-radius: 999px; background: var(--m-panel); border: 1px solid var(--m-line); font-size: 14px; color: var(--m-ink2); }
-.mon-stage-board .mtable { --u: 54px; --gap: 16px; }
-.mon-stage-board .mmelds { gap: 5px; }
 
 /* ------------------------------------------------------------- toast ---- */
 

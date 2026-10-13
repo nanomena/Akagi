@@ -8,12 +8,12 @@ const fixture = vi.hoisted(() => ({
   calls: [] as Array<[string, unknown]>,
 }))
 vi.mock('@/hooks/useMonitor', () => ({ useMonitor: () => ({ snapshot: fixture.snapshot, error: null }) }))
-vi.mock('@/lib/tauri', () => ({
-  listen: vi.fn(async () => () => {}),
+vi.mock('@/lib/host', () => ({
+  listen: vi.fn(() => () => {}),
   invoke: vi.fn(async (cmd: string, args?: unknown) => {
     fixture.calls.push([cmd, args])
     if (cmd === 'set_monitor_pinned') fixture.options = { always_on_top: (args as { pinned: boolean }).pinned }
-    return cmd === 'get_config' || cmd === 'set_monitor_pinned' ? (cmd === 'get_config' ? { monitor: fixture.options } : fixture.options) : undefined
+    return cmd === 'get_monitor_options' || cmd === 'set_monitor_pinned' ? fixture.options : undefined
   }),
 }))
 // No canvas under jsdom, so mahgen cannot draw. A tile is then an <img> whose
@@ -26,7 +26,7 @@ function state(): MonitorSnapshot {
   return {
     revision: 1, context, names: [], red_fives: true,
     game: null, view: null, round_ended: false, game_ended: false,
-    capture: { state: 'running', kind: 'chromium', descriptor: 'test' },
+    capture: { state: 'running', descriptor: 'test' },
     bot: { state: 'ready', bot: 'demo', actor_id: 0 }, service: 'connected', service_error: null, server: { state: 'none' }, sync_error: null,
     brand: 'Demo', facts: [], autoplay_enabled: true,
     previous_decision: null, result: null, previous_result: null, events: [], last_event_ms: null,
@@ -145,7 +145,7 @@ describe('monitor user states', () => {
   it('opens the game in the window by itself, once, when nothing is being played', async () => {
     const stage = { x: 0, y: 0, width: 960, height: 540 }
     const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ ...stage, top: 0, left: 0, right: 960, bottom: 540, toJSON: () => stage } as DOMRect)
-    fixture.snapshot = { ...state(), decision: null, game_ended: true, round_ended: true }
+    fixture.snapshot = { ...state(), decision: null, capture: { state: 'stopped' }, game_ended: true, round_ended: true }
     const { rerender } = render(<Monitor />)
     await waitFor(() => expect(fixture.calls.some(([cmd]) => cmd === 'open_monitor_game')).toBe(true))
     rerender(<Monitor />)
@@ -153,7 +153,7 @@ describe('monitor user states', () => {
     rect.mockRestore()
   })
 
-  it('does not open a second game while one is being played elsewhere', async () => {
+  it('does not open the game again when capture says its view is already there', async () => {
     render(<Monitor />)
     await waitFor(() => expect((screen.getByRole('button', { name: '置顶' }) as HTMLButtonElement).disabled).toBe(false))
     expect(fixture.calls.some(([cmd]) => cmd === 'open_monitor_game')).toBe(false)
@@ -194,7 +194,6 @@ describe('monitor user states', () => {
   })
 
   it('puts the game exactly where the stage is once it is open in this window', async () => {
-    fixture.snapshot!.capture = { state: 'running', kind: 'chromium', descriptor: 'chromium (embedded)' }
     const stage = { x: 0, y: 0, width: 960, height: 540 }
     const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       return (this.className === 'mon-stage' ? { ...stage, top: 0, left: 0, right: 960, bottom: 540, toJSON: () => stage } : { x: 0, y: 0, width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0, toJSON: () => ({}) }) as DOMRect

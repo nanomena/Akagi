@@ -1,7 +1,7 @@
 import { Faces, Hand, Melds, River } from '@/components/monitor/Tiles'
 import { fmtScore } from '@/lib/format'
 import {
-  REL_SHORT, HAND_ROOM, handMarks, handOutcome, meldView, ownHand, relOf, resultTitle, roundLabel, seatLabel, seatWind, signed, tableOf,
+  REL_SHORT, HAND_ROOM, handMarks, handOutcome, meldView, ownHand, relOf, resultTitle, seatLabel, seatWind, signed, tableOf,
   type MonitorSnapshot, type RoundResult, type Table,
 } from '@/lib/monitor'
 import type { GameStateSnapshot, MjaiEvent } from '@/types'
@@ -132,47 +132,4 @@ export function SeatColumns({ snapshot: s }: { snapshot: MonitorSnapshot }) {
       </section>
     })}
   </div>
-}
-
-/** The public table as the tracker holds it, drawn as a table: ponds on the
- *  four sides, each seat's score and melds in the corner to its right, the
- *  round in the middle. Other seats' concealed tiles are never part of it. */
-export function Board({ snapshot: s, size = 'panel' }: { snapshot: MonitorSnapshot; size?: 'panel' | 'stage' }) {
-  const game = s.game
-  if (!game) return <p className="mslot-empty">还没有牌局数据。对局开始后，这里显示公开的牌河、副露和点数。</p>
-  const table = tableOf(game)
-  const own = game.our_seat ?? 0
-  const at = (offset: number) => game.players[(own + offset) % game.num_players]
-  // Three-player tables have no seat across.
-  const [self, right, across, left] = game.num_players === 4 ? [at(0), at(1), at(2), at(3)] : [at(0), at(1), null, at(2)]
-  const corner = (p: typeof self | null, cell: string) => <div className="mtable-corner" data-cell={cell}>
-    {p && <>
-      <div className="mtable-seat" title={s.names[p.seat] || undefined}>
-        <SeatTag seat={p.seat} table={table} />
-        <span>{seatWind(p.seat, game)}</span>{p.seat === game.oya && <i>庄</i>}
-        <b>{fmtScore(p.score)}</b>
-      </div>
-      <Melds melds={p.melds} seat={p.seat} table={table} max={size === 'stage' ? 42 : 20} />
-      {/* Two rows of melds fill the corner; the count of what is left can be worked out. */}
-      {p.melds.length <= 2 && <small>{p.seat === game.our_seat ? `手牌 ${p.tehai.length} 张` : `暗手 ${p.tehai.length} 张`}</small>}
-    </>}
-  </div>
-  const pond = (p: typeof self | null, cell: string) => <div className="mtable-pond" data-cell={cell}>{p && <River river={p.river} />}</div>
-  return <div className="mtable">
-    {corner(across, 'tl')}{pond(across, 't')}{corner(right, 'tr')}
-    {pond(left, 'l')}
-    <div className="mtable-center">
-      <strong>{roundLabel(game)}</strong>
-      <span>{game.honba} 本场 · 供托 {game.kyotaku}</span>
-      {game.dora_markers.length > 0 && <Faces faces={game.dora_markers.map(tile => ({ tile }))} />}
-      {/* A riichi stick lies in the middle, on the side of the seat that declared. */}
-      {([[across, 't'], [left, 'l'], [right, 'r'], [self, 'b']] as const).map(([p, side]) => p?.riichi_declared && <i key={side} className="mtable-stick" data-side={side} title={`${seatLabel(p.seat, table)}立直`} />)}
-    </div>
-    {pond(right, 'r')}
-    {corner(left, 'bl')}{pond(self, 'b')}{corner(self, 'br')}
-  </div>
-}
-
-export function BoardLegend() {
-  return <p className="mlegend"><span><i className="mlegend-side" />横置：立直宣言牌</span><span><i className="mlegend-dim" />变暗：摸切</span><span>被鸣走的牌不在牌河</span></p>
 }
