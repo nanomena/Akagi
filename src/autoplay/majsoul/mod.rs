@@ -396,7 +396,7 @@ pub fn discard_point(pai: &str, ctx: &ActionContext) -> Option<(f64, f64)> {
 
 /// Where a tile of a hand at rest — between turns, nothing drawn — lies: the
 /// copy `pointer` is already on, else one of its copies at random. For the
-/// pointer's lean (`autoplay::lean`).
+/// pointer's lean (`autoplay::pointer::lean`).
 pub fn hand_point(
     pai: &str,
     tehai: &[String],

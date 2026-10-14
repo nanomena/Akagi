@@ -1,0 +1,206 @@
+//! Where the pointer is, and how it moves.
+//!
+//! A press needs the pointer on its target and nothing more, and for a long
+//! time that was all the pointer did: it appeared on a tile, pressed, and
+//! stayed there until the next press. On the table that reads as a tile
+//! which lifts with nothing reaching for it, and one which stays lifted for
+//! the rest of the round because the pointer never left.
+//!
+//! This module plans the rest of the pointer's life, all of it visible
+//! through what the client draws under a pointer:
+//!
+//! - [`approach`] — the way to a press: it travels there instead of
+//!   appearing, mostly settles on its target before pressing it, and may
+//!   first rest on the runner-up when the bot was torn between two discards;
+//! - [`leave`] — once the press has registered the pointer leaves the hand
+//!   for [`rest_point`], by the buttons;
+//! - [`lean`] — between the seat's turns it looks, at its own pace, at the
+//!   tiles the bot expects to throw next;
+//! - [`hand`] — the pointer's state over a game and the moves that send it
+//!   to the page.
+//!
+//! Everything outside [`hand`] is arithmetic on points and milliseconds;
+//! sending the moves is [`crate::autoplay::cdp_input::travel`]. The approach
+//! is made *inside* the thinking time the delay model chose, never after it:
+//! the press lands at the instant it would have without any of this, so no
+//! budget, floor or cap is affected.
+
+pub mod approach;
+pub mod hand;
+pub mod lean;
+
+pub use approach::{approach, runner_up, Approach, LOOK_MS, LOOK_REACH};
+pub use hand::Hand;
+
+use rand::Rng;
+use rand_distr::{Distribution, LogNormal};
+
+/// A point in CSS pixels.
+pub type Point = (f64, f64);
+
+/// One stretch of the pointer's way: travel to `to`, then stay for `dwell_ms`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Leg {
+    pub to: Point,
+    pub travel_ms: u32,
+    pub dwell_ms: u32,
+    /// How far the path leans off the straight line, as a fraction of its
+    /// length. Signed: which side it leans to.
+    pub bend: f64,
+}
+
+/// How long a hand takes to move the pointer `distance` pixels, on a canvas
+/// whose 16:9 unit is `unit` pixels. Grows with the square root of the
+/// distance: a neighbouring tile is not ten times quicker than the far end
+/// of the hand.
+pub fn travel_ms(distance: f64, unit: f64) -> u32 {
+    if !(distance.is_finite() && unit.is_finite()) || unit <= 0.0 || distance < 1.0 {
+        return 0;
+    }
+    (80.0 + 105.0 * (distance / unit).sqrt()).min(440.0) as u32
+}
+
+fn distance(a: Point, b: Point) -> f64 {
+    ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt()
+}
+
+/// The point `t` of the way (`0..=1` in time) along a leg from `from` to
+/// `to`: a shallow arc, started and ended gently.
+pub fn along(from: Point, to: Point, bend: f64, t: f64) -> Point {
+    let t = t.clamp(0.0, 1.0);
+    // Minimum-jerk easing: no speed and no acceleration at either end.
+    let s = t * t * t * (10.0 - 15.0 * t + 6.0 * t * t);
+    let (dx, dy) = (to.0 - from.0, to.1 - from.1);
+    // The arc's control point: the midpoint, pushed sideways.
+    let control = (
+        (from.0 + to.0) / 2.0 - dy * bend,
+        (from.1 + to.1) / 2.0 + dx * bend,
+    );
+    let a = (1.0 - s) * (1.0 - s);
+    let b = 2.0 * (1.0 - s) * s;
+    let c = s * s;
+    (
+        a * from.0 + b * control.0 + c * to.0,
+        a * from.1 + b * control.1 + c * to.1,
+    )
+}
+
+fn bend<R: Rng + ?Sized>(rng: &mut R) -> f64 {
+    rng.random_range(-0.12..0.12)
+}
+
+/// The pointer leaving a press for `to`: a wait first — a hand does not
+/// spring off the tile it has just let go, and how long it stays varies a
+/// great deal: mostly about half a second, now and then at once, now and
+/// then a second or two — given as the leg's dwell, which here comes
+/// *before* the travel.
+pub fn leave<R: Rng + ?Sized>(from: Point, to: Point, unit: f64, rng: &mut R) -> Leg {
+    Leg {
+        to,
+        travel_ms: travel_ms(distance(from, to), unit),
+        dwell_ms: linger_ms(rng),
+        bend: bend(rng),
+    }
+}
+
+/// How long a hand stays on what it pressed: log-normal around 550 ms.
+fn linger_ms<R: Rng + ?Sized>(rng: &mut R) -> u32 {
+    let wait = LogNormal::new(550f64.ln(), 0.6).map_or(550.0, |d| d.sample(rng));
+    wait.clamp(120.0, 2500.0) as u32
+}
+
+/// Where the pointer rests between presses, as a normalised 16:9 point:
+/// along the action buttons' row and the table above it, where a hand waits
+/// for the next thing it may have to answer — a wide band, more than half the
+/// width of the game, so that it is not the same spot every time. Off the
+/// hand, so no tile is left lifted.
+pub fn rest_point<R: Rng + ?Sized>(rng: &mut R) -> (f64, f64) {
+    let (x, y) = crate::autoplay::majsoul::coords::ACTIONS[0];
+    (
+        x + rng.random_range(-6.4..2.4),
+        y + rng.random_range(-1.1..0.25),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+
+    const UNIT: f64 = 100.0;
+
+    #[test]
+    fn a_leg_starts_and_ends_on_its_points_whatever_its_bend() {
+        let (from, to) = ((120.0, 840.0), (910.0, 655.0));
+        for bend in [-0.12, 0.0, 0.12] {
+            assert_eq!(along(from, to, bend, 0.0), from);
+            let end = along(from, to, bend, 1.0);
+            assert!((end.0 - to.0).abs() < 1e-9 && (end.1 - to.1).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn a_leg_never_strays_further_than_its_bend() {
+        let (from, to) = ((100.0, 800.0), (900.0, 800.0));
+        for i in 0..=100 {
+            let (x, y) = along(from, to, 0.12, f64::from(i) / 100.0);
+            assert!((100.0..=900.0).contains(&x), "x left the span: {x}");
+            // A quadratic arc peaks at half its control point's offset.
+            assert!(
+                (y - 800.0).abs() <= 800.0 * 0.12 / 2.0 + 1e-9,
+                "y strayed: {y}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_leg_only_moves_forward() {
+        let (from, to) = ((100.0, 800.0), (900.0, 700.0));
+        let mut last = from.0;
+        for i in 1..=200 {
+            let (x, _) = along(from, to, 0.0, f64::from(i) / 200.0);
+            assert!(x >= last, "went back at step {i}");
+            last = x;
+        }
+    }
+
+    #[test]
+    fn travel_time_grows_with_distance_and_is_bounded() {
+        assert_eq!(travel_ms(0.0, UNIT), 0);
+        let near = travel_ms(79.0, UNIT);
+        let far = travel_ms(900.0, UNIT);
+        assert!(near > 100 && near < far, "{near} {far}");
+        assert!(travel_ms(100_000.0, UNIT) <= 440);
+        assert_eq!(travel_ms(500.0, 0.0), 0);
+    }
+
+    #[test]
+    fn a_hand_stays_on_its_press_for_a_varying_while_before_it_leaves() {
+        let mut rng = StdRng::seed_from_u64(9);
+        let mut waits: Vec<u32> = (0..600)
+            .map(|_| leave((0.0, 0.0), (100.0, 0.0), UNIT, &mut rng).dwell_ms)
+            .collect();
+        waits.sort_unstable();
+        assert!(waits.iter().all(|w| (120..=2500).contains(w)));
+        let median = waits[waits.len() / 2];
+        assert!((420..=700).contains(&median), "median {median}");
+        // Now and then at once, now and then a second or more.
+        assert!(
+            waits[30] < 250 && waits[waits.len() - 30] > 1_100,
+            "{:?}",
+            (waits[30], waits[waits.len() - 30])
+        );
+    }
+
+    #[test]
+    fn the_pointer_rests_by_the_buttons_and_off_the_hand() {
+        let mut rng = StdRng::seed_from_u64(5);
+        for _ in 0..500 {
+            let (x, y) = rest_point(&mut rng);
+            assert!((4.4..13.3).contains(&x), "{x}");
+            // Above a lifted tile: on the buttons' row or over the table above it.
+            assert!((5.85..7.3).contains(&y), "{y}");
+        }
+    }
+}

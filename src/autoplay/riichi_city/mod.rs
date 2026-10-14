@@ -10,6 +10,7 @@ use crate::config::DelayMode;
 use crate::schema::MjaiEvent;
 
 pub mod round_advance;
+pub mod send;
 
 #[derive(Default)]
 pub struct RiichiCityAutoplay;
