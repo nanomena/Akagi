@@ -237,6 +237,8 @@ mod tests {
     fn mk_record(id: &str, offset_secs: i64) -> GameRecord {
         let now = Utc::now();
         GameRecord {
+            our_rank_points: None,
+            yaku: Default::default(),
             id: id.into(),
             started_at: now + Duration::seconds(offset_secs),
             ended_at: now + Duration::seconds(offset_secs + 600),

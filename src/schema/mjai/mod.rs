@@ -42,6 +42,19 @@ pub struct GameMeta {
 
 /// Why an in-process game-end event was emitted. The reason and standings are
 /// private metadata; every variant still serializes as `{"type":"end_game"}`.
+/// How a win was scored, as its provider reported it. Carried beside the
+/// event for the application's own records: it is not part of the mjai
+/// stream a bot is sent or a log is written in.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HandScore {
+    /// The hand's yaku as (the provider's id for it, its han); dora counts
+    /// are among them, as the provider lists them.
+    pub yaku: Vec<(u32, u32)>,
+    pub han: u32,
+    pub fu: u32,
+    pub yakuman: bool,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum GameEndReason {
     #[default]
@@ -163,6 +176,9 @@ pub enum MjaiEvent {
         tehai: Option<Vec<Tile>>,
         /// Authoritative post-settlement scores shared by all winners.
         scores: Option<Vec<i32>>,
+        /// How the hand was scored, when the provider says.
+        #[serde(skip, default)]
+        score: Option<HandScore>,
     },
     Ryukyoku {
         deltas: Option<Vec<i32>>,
@@ -191,6 +207,10 @@ pub enum MjaiEvent {
         final_scores: Option<Vec<i32>>,
         #[serde(skip, default)]
         final_ranks: Option<Vec<u8>>,
+        /// What the game did to each seat's rank points, by seat, when the
+        /// provider reports it.
+        #[serde(skip, default)]
+        rank_points: Option<Vec<i32>>,
     },
 
     /// Non-spec: bot's "no action this turn" reply.
@@ -208,6 +228,7 @@ impl MjaiEvent {
             reason: GameEndReason::Confirmed,
             final_scores: None,
             final_ranks: None,
+            rank_points: None,
         }
     }
 
@@ -216,7 +237,16 @@ impl MjaiEvent {
             reason: GameEndReason::Confirmed,
             final_scores,
             final_ranks,
+            rank_points: None,
         }
+    }
+
+    /// The same game end, with what it did to each seat's rank points.
+    pub fn with_rank_points(mut self, points: Option<Vec<i32>>) -> Self {
+        if let Self::EndGame { rank_points, .. } = &mut self {
+            *rank_points = points;
+        }
+        self
     }
 
     pub fn terminated_game() -> Self {
@@ -224,6 +254,7 @@ impl MjaiEvent {
             reason: GameEndReason::Terminated,
             final_scores: None,
             final_ranks: None,
+            rank_points: None,
         }
     }
 }
@@ -439,6 +470,7 @@ mod tests {
                 reason: GameEndReason::Confirmed,
                 final_scores: None,
                 final_ranks: None,
+                rank_points: None,
             }
         ));
     }

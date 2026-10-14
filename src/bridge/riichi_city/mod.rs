@@ -672,6 +672,7 @@ impl RiichiCityBridge {
                     })
                     .filter(|v| !v.is_empty());
                 events.push(MjaiEvent::Hora {
+                    score: None,
                     actor,
                     target,
                     deltas: Some(deltas.clone()),

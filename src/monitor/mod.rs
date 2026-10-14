@@ -348,6 +348,7 @@ impl MonitorHandle {
                     scores,
                     deltas,
                     ura_markers,
+                    ..
                 } => {
                     let result = s.result.get_or_insert_with(|| RoundResult {
                         kind: "hora".into(),

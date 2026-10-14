@@ -662,6 +662,7 @@ mod tests {
     fn hora_splits_tsumo_and_ron_buttons() {
         let st = hand(&[0]);
         let tsumo = MjaiEvent::Hora {
+            score: None,
             actor: 1,
             target: 1,
             deltas: None,
@@ -672,6 +673,7 @@ mod tests {
         };
         assert!(slots(&tsumo, &st)[0].contains("c22-0"));
         let ron = MjaiEvent::Hora {
+            score: None,
             actor: 1,
             target: 2,
             deltas: None,

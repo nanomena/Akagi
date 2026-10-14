@@ -232,6 +232,7 @@ mod tests {
             pai: None,
             tehai: None,
             scores: None,
+            score: None,
         };
         let out = to_riichienv(&ev).unwrap().unwrap();
         match out {

@@ -921,6 +921,7 @@ mod tests {
         );
         snap.phase = Phase::WaitResponse;
         let act = MjaiEvent::Hora {
+            score: None,
             actor: 0,
             target: 1,
             deltas: None,

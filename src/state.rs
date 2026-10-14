@@ -42,6 +42,8 @@ pub struct AppState {
     pub config: Arc<RwLock<AppConfig>>,
     pub config_path: Arc<PathBuf>,
     pub log_session: Arc<Session>,
+    /// The games that have been played, on disk.
+    pub history: Arc<crate::history::HistoryStore>,
 
     pub mjai_bus: MjaiBus,
     pub bot_response_bus: BotResponseBus,
@@ -69,6 +71,7 @@ impl AppState {
         config: AppConfig,
         config_path: PathBuf,
         log_session: Arc<Session>,
+        history: Arc<crate::history::HistoryStore>,
         mjai_bus: MjaiBus,
         bot_response_bus: BotResponseBus,
         bot_status_bus: BotStatusBus,
@@ -81,6 +84,7 @@ impl AppState {
             config: Arc::new(RwLock::new(config)),
             config_path: Arc::new(config_path),
             log_session,
+            history,
             mjai_bus,
             bot_response_bus,
             bot_status_bus,
