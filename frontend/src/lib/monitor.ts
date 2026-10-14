@@ -4,8 +4,8 @@ import type { BotResponse, BotStatus, CaptureStatus, GameStateSnapshot, MahgenVi
 import { localized, tr } from '@/lib/i18n'
 
 /** The window's own options, and which build it is (`version` comes from the shell). */
-export type MonitorConfig = { always_on_top: boolean; version?: string }
-export const MONITOR_DEFAULTS: MonitorConfig = { always_on_top: false }
+export type MonitorConfig = { always_on_top: boolean; pointer_trail?: boolean; version?: string }
+export const MONITOR_DEFAULTS: MonitorConfig = { always_on_top: false, pointer_trail: false }
 export type DecisionContext = { game: number; round: number; event_seq: number }
 export type MonitorDecision = {
   /** Which decision this is, for the life of the process; `number` is its place among its game's. */

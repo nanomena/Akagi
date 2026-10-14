@@ -12,13 +12,13 @@
 //   --cdp-port=<n>    the local DevTools port (default: any free port)
 // Each can also be given as AKAGI_DATA, AKAGI_CORE, AKAGI_DOCK, AKAGI_CDP_PORT.
 
-import { BaseWindow, Menu, WebContentsView, app, dialog, ipcMain, net, protocol, screen } from 'electron'
+import { BaseWindow, BrowserWindow, Menu, WebContentsView, app, dialog, ipcMain, net, protocol, screen } from 'electron'
 import fs from 'node:fs'
 import { createServer } from 'node:net'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Core } from './core.js'
-import { MIN, RATIO, conform, framedRatio, gameBounds, openingSize, restoredBounds, settle } from './layout.js'
+import { MIN, RATIO, conform, framedRatio, gameBounds, openingSize, restoredBounds, settle, trailBounds } from './layout.js'
 import { policyFor } from './policy.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -55,8 +55,14 @@ let dock = null
 let game = null
 /** @type {Core | null} */
 let core = null
+/** Autoplay's pointer, drawn over the game while the option is on. */
+/** @type {BrowserWindow | null} */
+let trail = null
+/** Where the game view is in the window's content, while it is shown. */
+/** @type {import('./layout.js').Rect | null} */
+let gameAt = null
 /** The window's options as the core last saved them. */
-/** @type {{ always_on_top: boolean, version?: string }} */
+/** @type {{ always_on_top: boolean, pointer_trail?: boolean, version?: string }} */
 let options = { always_on_top: false }
 let cdpPort = 0
 let quitting = false
@@ -171,6 +177,9 @@ function openWindow(ready) {
   const fill = () => view.setBounds({ x: 0, y: 0, ...contentSize(frame) })
   fill()
   frame.on('resize', fill)
+  // The trail is a window of its own over the game view, and has to follow it.
+  frame.on('move', placeTrail)
+  frame.on('resize', placeTrail)
 
   // The interface is one page of our own files: it goes nowhere and opens nothing.
   const page = view.webContents
@@ -191,7 +200,8 @@ function openWindow(ready) {
     // Views outlive the window they were in unless they are closed.
     game?.webContents.close()
     view.webContents.close()
-    window = dock = game = null
+    trail?.destroy()
+    window = dock = game = trail = null
     app.quit()
   })
 }
@@ -234,6 +244,56 @@ function placeGame(/** @type {unknown} */ value) {
   if (!game) return
   game.setVisible(bounds.visible)
   if (bounds.visible) game.setBounds({ x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height })
+  gameAt = bounds.visible ? { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height } : null
+  placeTrail()
+}
+
+/**
+ * The pointer's trail: a transparent window over the game view that takes no
+ * input — every click goes through to the game — and draws what the core says
+ * of autoplay's pointer. A window of the shell's own, so nothing is added to
+ * the game's page. It exists while the option is on, and shows while the game
+ * view does.
+ */
+function placeTrail() {
+  if (!options.pointer_trail || !window || !game) {
+    trail?.destroy()
+    trail = null
+    return
+  }
+  if (!gameAt) {
+    trail?.hide()
+    return
+  }
+  trail ??= createTrail(window)
+  trail.setBounds(trailBounds(window.getContentBounds(), gameAt))
+  if (!trail.isVisible()) trail.showInactive()
+}
+
+/** @param {BaseWindow} owner */
+function createTrail(owner) {
+  const view = new BrowserWindow({
+    parent: owner,
+    transparent: true,
+    backgroundColor: '#00000000',
+    frame: false,
+    hasShadow: false,
+    focusable: false,
+    skipTaskbar: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    show: false,
+    webPreferences: { preload: path.join(HERE, 'trail-preload.cjs'), sandbox: true, contextIsolation: true },
+  })
+  view.setIgnoreMouseEvents(true)
+  const page = view.webContents
+  page.setWindowOpenHandler(() => ({ action: 'deny' }))
+  page.on('will-navigate', event => event.preventDefault())
+  void view.loadFile(path.join(HERE, 'trail.html'))
+  return view
 }
 
 function running() {
@@ -253,6 +313,12 @@ const commands = {
   get_history: () => running().call('get_history'),
   get_monitor_options: async () => options,
   set_monitor_autoplay: ({ enabled }) => running().call('set_monitor_autoplay', { enabled: enabled === true }),
+  async set_monitor_trail({ enabled }) {
+    const saved = /** @type {{ pointer_trail: boolean }} */ (await running().call('set_monitor_trail', { enabled: enabled === true }))
+    options = { ...options, ...saved }
+    placeTrail()
+    return options
+  },
   async set_monitor_pinned({ pinned }) {
     const saved = /** @type {{ always_on_top: boolean }} */ (await running().call('set_monitor_pinned', { pinned: pinned === true }))
     options = { ...options, ...saved }
@@ -324,7 +390,11 @@ async function start() {
   serveDock()
 
   const child = core = new Core(CORE, ['--home', DATA], { cwd: DATA })
-  child.on('event', (name, payload) => dock?.webContents.send('akagi:event', name, payload))
+  child.on('event', (name, payload) => {
+    // The pointer's marks are the trail's alone, and come many a second.
+    if (name === 'pointer') trail?.webContents.send('trail:mark', payload)
+    else dock?.webContents.send('akagi:event', name, payload)
+  })
   child.on('exit', reason => fail('Akagi has stopped.', `${reason}\n\n${lastWords()}`))
   try {
     openWindow(await child.ready)

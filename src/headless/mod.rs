@@ -24,6 +24,7 @@
 //! | `get_hand_events`      | `{round}`            | `[MonitorEvent]`        |
 //! | `get_history`          | —                    | `[GameRecord]`          |
 //! | `set_monitor_pinned`   | `{pinned}`           | `MonitorConfig`         |
+//! | `set_monitor_trail`    | `{enabled}`          | `MonitorConfig`         |
 //! | `set_monitor_autoplay` | `{enabled}`          | `null`                  |
 //! | `open_game`            | `{port, target}`     | `null`                  |
 //!
@@ -31,6 +32,7 @@
 //! |-------------------|------------------------------------------------------|
 //! | `ready`           | `{brand, monitor, version}` — the first line written |
 //! | `monitor-updated` | `MonitorSnapshot`                                    |
+//! | `pointer`         | `{x, y, down}` — autoplay's pointer, while the trail is on |
 //!
 //! # Lifetime
 //!
@@ -50,7 +52,7 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -86,6 +88,9 @@ struct Ready {
     monitor: MonitorConfig,
     version: &'static str,
 }
+
+/// Whether the shell is drawing autoplay's pointer: its marks go out only then.
+static TRAIL: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Deserialize)]
 struct Pinned {
@@ -167,6 +172,7 @@ async fn serve(
         ),
     }
 
+    TRAIL.store(cfg.monitor.pointer_trail, Ordering::Relaxed);
     let ready = Ready {
         brand: monitor::brand(&cfg),
         monitor: cfg.monitor.clone(),
@@ -248,6 +254,7 @@ async fn serve(
     tokio::spawn(write_lines(lines));
     send(&out, &json!({ "event": "ready", "payload": ready }));
     tokio::spawn(forward_monitor(state.monitor.subscribe(), out.clone()));
+    tokio::spawn(forward_pointer(out.clone()));
 
     let mut requests = BufReader::new(tokio::io::stdin()).lines();
     loop {
@@ -298,6 +305,14 @@ async fn answer(state: &AppState, method: &str, params: Value) -> Result<Value, 
             let config = state
                 .save_config(|c| c.monitor.always_on_top = pinned)
                 .await?;
+            reply(config.monitor)
+        }
+        "set_monitor_trail" => {
+            let Enabled { enabled } = parse(params)?;
+            let config = state
+                .save_config(|c| c.monitor.pointer_trail = enabled)
+                .await?;
+            TRAIL.store(enabled, Ordering::Relaxed);
             reply(config.monitor)
         }
         "set_monitor_autoplay" => {
@@ -464,6 +479,22 @@ async fn forward_monitor(
     }
 }
 
+/// Send the shell where autoplay's pointer goes, while it draws it. Some
+/// seventy marks a second while the pointer moves, none while it rests; a
+/// lagging reader loses the oldest, which a fading trail can spare.
+async fn forward_pointer(out: mpsc::UnboundedSender<String>) {
+    let mut marks = autoplay::cdp_input::pointer_marks();
+    loop {
+        match marks.recv().await {
+            Ok(mark) if TRAIL.load(Ordering::Relaxed) => {
+                send(&out, &json!({ "event": "pointer", "payload": mark }));
+            }
+            Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
+            Err(broadcast::error::RecvError::Closed) => return,
+        }
+    }
+}
+
 fn send(out: &mpsc::UnboundedSender<String>, message: &Value) {
     // The writer only goes away with the process.
     let _ = out.send(message.to_string());
@@ -506,12 +537,13 @@ mod tests {
             brand: "Akagi".into(),
             monitor: MonitorConfig {
                 always_on_top: true,
+                pointer_trail: false,
             },
             version: "1.2.3",
         };
         assert_eq!(
             serde_json::to_value(ready).unwrap(),
-            json!({ "brand": "Akagi", "monitor": { "always_on_top": true }, "version": "1.2.3" })
+            json!({ "brand": "Akagi", "monitor": { "always_on_top": true, "pointer_trail": false }, "version": "1.2.3" })
         );
     }
 }

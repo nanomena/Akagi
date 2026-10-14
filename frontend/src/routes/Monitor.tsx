@@ -95,8 +95,9 @@ type DockProps = {
   options: MonitorConfig
   onAutoplay: ((enabled: boolean) => void) | null
   onPin: ((pinned: boolean) => void) | null
+  onTrail: ((enabled: boolean) => void) | null
 }
-function Dock({ m, tab, setTab, tools, options, onAutoplay, onPin }: DockProps) {
+function Dock({ m, tab, setTab, tools, options, onAutoplay, onPin, onTrail }: DockProps) {
   const { s, view } = m
   const game = s?.game ?? null
   const link = linkOf(m.health)
@@ -137,7 +138,7 @@ function Dock({ m, tab, setTab, tools, options, onAutoplay, onPin }: DockProps) 
       {/* The record can change when a game starts or ends, and at no other time. */}
       {tab === 'stats' && <Statistics refresh={`${s?.context.game ?? 0}:${s?.game_ended ?? true}`} />}
       {tab === 'link' && <Diagnostics snapshot={s} health={m.health} now={m.now} />}
-      {tab === 'settings' && <Settings snapshot={s} options={options} now={m.now} onPin={onPin} onAutoplay={onAutoplay} />}
+      {tab === 'settings' && <Settings snapshot={s} options={options} now={m.now} onPin={onPin} onAutoplay={onAutoplay} onTrail={onTrail} />}
     </div>
   </aside>
 }
@@ -191,6 +192,12 @@ export function Monitor() {
   const pin = async (pinned: boolean) => {
     setBusy(true); setUiError(null)
     try { setOptions(await invoke<MonitorConfig>('set_monitor_pinned', { pinned })) }
+    catch (e) { setUiError(String(e)) }
+    finally { setBusy(false) }
+  }
+  const trail = async (enabled: boolean) => {
+    setBusy(true); setUiError(null)
+    try { setOptions(await invoke<MonitorConfig>('set_monitor_trail', { enabled })) }
     catch (e) { setUiError(String(e)) }
     finally { setBusy(false) }
   }
@@ -268,7 +275,8 @@ export function Monitor() {
 
       <div className="mon-canvas mon-canvas--dock">
         <Dock key={lang} m={m} tab={tab} setTab={setTab} tools={tools} options={options}
-          onAutoplay={ready ? setAutoplay : null} onPin={ready && !busy ? pinned => void pin(pinned) : null} />
+          onAutoplay={ready ? setAutoplay : null} onPin={ready && !busy ? pinned => void pin(pinned) : null}
+          onTrail={ready && !busy ? enabled => void trail(enabled) : null} />
         {local.length > 0 && <div className="mtoast" role="alert">
           <div><strong>{local[0].title}</strong><p>{local[0].message}</p></div>
           {uiError && <button aria-label={tr('知道了')} onClick={() => setUiError(null)}><X size={13} /></button>}
