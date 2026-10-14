@@ -14,11 +14,13 @@ const STEP_MARK: Partial<Record<StepState, typeof Check>> = { done: Check, bad: 
 function ActionLine({ action, size }: { action: ActionView; size: 'hero' | 'versus' }) {
   return <div className={`mact mact--${size}`} data-tone={action.tone} data-faces={action.faces.length}>
     <span className="mact-well"><Faces faces={action.faces} /></span>
-    <span className="mact-text">
-      <strong>{action.verb}</strong>
-      {action.object && <span>{action.object}</span>}
+    <span className="mact-words">
+      <span className="mact-text">
+        <strong>{action.verb}</strong>
+        {action.object && <span>{action.object}</span>}
+      </span>
+      {size === 'hero' && <em className="mact-note">{action.note}</em>}
     </span>
-    {size === 'hero' && <em className="mact-note">{action.note}</em>}
   </div>
 }
 

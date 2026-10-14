@@ -87,7 +87,11 @@ impl PlatformAutoplay for MajsoulAutoplay {
             }
 
             // ----- Reach (立直) — declaration + tile in one plan ----------
-            MjaiEvent::Reach { actor, pai } if *actor == ctx.our_seat => {
+            MjaiEvent::Reach {
+                actor,
+                pai,
+                tsumogiri,
+            } if *actor == ctx.our_seat => {
                 // Majsoul fuses declaring + discarding into one action, so the
                 // tile must be known up front. It normally is — the bot fills
                 // `Reach.pai` (natively or via the manager's autoplay reach
@@ -113,8 +117,14 @@ impl PlatformAutoplay for MajsoulAutoplay {
                 result.steps.push(Step::Sleep {
                     duration_ms: ctx.cfg.inter_click_delay_ms,
                 });
-                // The reach names its tile but not which copy: see `Whence::Unsaid`.
-                if let Some(click) = plan_dahai_click(tile, Whence::Unsaid, ctx) {
+                // The copy the bot named, as for a discard; a bot that names
+                // none leaves it to `Whence::Unsaid`.
+                let whence = match tsumogiri {
+                    Some(true) => Whence::Drawn,
+                    Some(false) => Whence::Hand,
+                    None => Whence::Unsaid,
+                };
+                if let Some(click) = plan_dahai_click(tile, whence, ctx) {
                     result.steps.push(click);
                 }
             }
@@ -409,8 +419,8 @@ enum Whence {
     /// One already in the hand: a tedashi. The drawn tile only when the hand
     /// holds no other copy.
     Hand,
-    /// Not said (a reach names only its tile; a glance has no copy): the drawn
-    /// tile when it is that tile, else one from the hand.
+    /// Not said (a reach from a bot that names only its tile; a glance has
+    /// no copy): the drawn tile when it is that tile, else one from the hand.
     Unsaid,
 }
 
@@ -1445,6 +1455,7 @@ mod tests {
         let act = MjaiEvent::Reach {
             actor: 0,
             pai: Some("5p".into()),
+            tsumogiri: None,
         };
         let cfg_ref = cfg();
         // Reach must be in legal_actions for the button position to resolve.
@@ -1457,6 +1468,35 @@ mod tests {
         assert!(matches!(result.steps[3], Step::Click { .. }));
     }
 
+    #[test]
+    fn a_reach_presses_the_copy_it_names() {
+        let snap = doubled_hand();
+        let legal = vec![Action::new(ActionType::Riichi, None, vec![], Some(0))];
+        let cfg_ref = cfg();
+        let pressed = |tsumogiri: Option<bool>| {
+            let act = MjaiEvent::Reach {
+                actor: 0,
+                pai: Some("5p".into()),
+                tsumogiri,
+            };
+            let ctx = ctx_for(&act, &snap, &legal, Some("1m"), Some("5p"), false, &cfg_ref);
+            match MajsoulAutoplay::new().plan(&ctx).steps[3] {
+                Step::Click { x_norm, .. } => x_norm,
+                ref other => panic!("the fourth step should press the tile: {other:?}"),
+            }
+        };
+        let drawn = TILES[13].0 + TSUMO_SPACE;
+        assert!((pressed(Some(true)) - drawn).abs() < 1e-9);
+        let hand = [get_pai_coord(10, 13).0, get_pai_coord(11, 13).0];
+        let x = pressed(Some(false));
+        assert!(
+            hand.iter().any(|h| (x - h).abs() < 1e-9),
+            "{x} is not a hand 5p"
+        );
+        // A bot that does not say which keeps the drawn one.
+        assert!((pressed(None) - drawn).abs() < 1e-9);
+    }
+
     /// A reach that still names no tile (the manager's follow-up failed to
     /// resolve it, #257) declares nothing — pressing the button alone would
     /// leave the client owing a discard until timeout.
@@ -1466,6 +1506,7 @@ mod tests {
         let act = MjaiEvent::Reach {
             actor: 0,
             pai: None,
+            tsumogiri: None,
         };
         let cfg_ref = cfg();
         let legal = vec![Action::new(ActionType::Riichi, None, vec![], Some(0))];

@@ -410,6 +410,7 @@ mod tests {
             MjaiEvent::Reach {
                 actor: 0,
                 pai: Some("1p".into()),
+                tsumogiri: None,
             },
             MjaiEvent::Chi {
                 actor: 0,
@@ -762,6 +763,7 @@ mod tests {
         let riichi = MjaiEvent::Reach {
             actor: 3,
             pai: Some("7m".into()),
+            tsumogiri: None,
         };
         let pkt = &WPacket::parse_frame(&encode_action(&riichi).unwrap())[0];
         assert_eq!(pkt.body["data"]["action"], 11);
@@ -830,6 +832,7 @@ mod tests {
         let riichi = MjaiEvent::Reach {
             actor: 0,
             pai: Some("3m".into()),
+            tsumogiri: None,
         };
         let no_other_3m: Vec<String> = [
             "1m", "2m", "3m", "4p", "5p", "6s", "7s", "8s", "9s", "E", "S", "W", "N", "C",
@@ -873,7 +876,8 @@ mod tests {
         // as the Majsoul/Tenhou planners.
         assert!(encode_action(&MjaiEvent::Reach {
             actor: 0,
-            pai: None
+            pai: None,
+            tsumogiri: None
         })
         .is_none());
     }

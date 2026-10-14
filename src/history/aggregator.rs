@@ -551,6 +551,7 @@ mod tests {
             MjaiEvent::Reach {
                 actor: 2,
                 pai: None,
+                tsumogiri: None,
             },
             MjaiEvent::ReachAccepted { actor: 2 },
             MjaiEvent::Dahai {
@@ -788,6 +789,7 @@ mod tests {
             MjaiEvent::Reach {
                 actor: 0,
                 pai: None,
+                tsumogiri: None,
             },
             MjaiEvent::ReachAccepted { actor: 0 }, // -1000 to seat 0
             MjaiEvent::Ryukyoku {
