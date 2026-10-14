@@ -224,7 +224,8 @@ export function candidatesOf(d: MonitorDecision | null, t: Table, instead: MjaiE
 // -------------------------------------------------------------- decision ----
 
 export type Phase = 'idle' | 'thinking' | 'awaiting' | 'confirmed' | 'mismatch' | 'expired' | 'failed' | 'unavailable' | 'declined'
-export type Tone = 'ok' | 'wait' | 'busy' | 'bad' | 'idle'
+/** A state's colour: `done` is what the game carried out, `ok` a part that works, `wait` and `busy` what is still to come. */
+export type Tone = 'ok' | 'done' | 'wait' | 'busy' | 'bad' | 'idle'
 export type StepState = 'done' | 'active' | 'todo' | 'bad' | 'void'
 export type DecisionView = {
   phase: Phase; tone: Tone
@@ -307,7 +308,7 @@ export function decisionView(s: MonitorSnapshot | null): DecisionView {
       return { ...base, phase: 'awaiting', tone: 'wait', status: tr('待确认'), message: tr('等待雀魂的实际动作'), live, steps: ['done', 'done', 'active'] }
     }
     case 'confirmed':
-      return { ...base, phase: 'confirmed', tone: 'ok', status: tr('已确认'), message: tr('雀魂动作与建议一致'), actual: describeAction(move?.event, t), steps: ['done', 'done', 'done'] }
+      return { ...base, phase: 'confirmed', tone: 'done', status: tr('已确认'), message: tr('雀魂动作与建议一致'), actual: describeAction(move?.event, t), steps: ['done', 'done', 'done'] }
     case 'declined': {
       const live = !s.round_ended && !s.sync_error && s.service !== 'error'
       return { ...base, phase: 'declined', tone: 'idle', status: tr('不操作'), message: tr('建议过牌，无需确认'), live, steps: ['done', 'done', 'void'] }
