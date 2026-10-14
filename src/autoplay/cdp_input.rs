@@ -11,9 +11,43 @@ use chromiumoxide::cdp::browser_protocol::input::{
 use chromiumoxide::layout::Point;
 use chromiumoxide::page::Page;
 use serde::Serialize;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::sync::broadcast;
+
+/// Whether the user's own mouse is moving over the game, as the shell sees
+/// the system cursor (which input sent over CDP never moves). The page takes
+/// both kinds of input, and a press of ours made while the user's mouse moves
+/// can be read by the client as part of the user's drag, and come to nothing.
+static USER_HAND: AtomicBool = AtomicBool::new(false);
+
+/// How long a press waits, at most, for the user's mouse to rest.
+const USER_WAIT: Duration = Duration::from_millis(1500);
+
+pub fn set_user_active(active: bool) {
+    USER_HAND.store(active, Ordering::Relaxed);
+}
+
+pub fn user_active() -> bool {
+    USER_HAND.load(Ordering::Relaxed)
+}
+
+/// Wait, up to `USER_WAIT`, for the user's mouse to rest or leave the game.
+/// After that the press goes ahead: a turn's clock does not wait.
+async fn wait_for_user_hand() {
+    if !user_active() {
+        return;
+    }
+    let started = tokio::time::Instant::now();
+    while user_active() && started.elapsed() < USER_WAIT {
+        tokio::time::sleep(Duration::from_millis(30)).await;
+    }
+    tracing::info!(
+        "autoplay: waited {} ms for the user's mouse to rest before pressing",
+        started.elapsed().as_millis()
+    );
+}
 
 /// Where the pointer autoplay drives is, in the page's CSS pixels, and whether
 /// it is pressed. The page shows no cursor for input sent over CDP; these are
@@ -89,6 +123,7 @@ pub async fn dispatch_click_shaped(
     jiggle: bool,
 ) -> Result<()> {
     let pt = Point::new(x, y);
+    wait_for_user_hand().await;
     move_to(page, x, y).await?;
     if hover_delay_ms > 0 {
         tokio::time::sleep(Duration::from_millis(hover_delay_ms as u64)).await;

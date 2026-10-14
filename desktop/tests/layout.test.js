@@ -1,7 +1,7 @@
 // @ts-check
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { MIN, RATIO, SIZE, conform, framedRatio, gameBounds, openingSize, restoredBounds, settle, trailBounds } from '../src/layout.js'
+import { MIN, RATIO, SIZE, conform, framedRatio, gameBounds, handOnGame, openingSize, restoredBounds, settle, trailBounds } from '../src/layout.js'
 
 test('a fresh window opens at its own size, or as much of it as the display has room for', () => {
   assert.deepEqual(openingSize({ width: 2560, height: 1400 }), SIZE)
@@ -56,4 +56,13 @@ test('the pointer trail lies exactly over the game view, wherever the window is'
   const game = { x: 0, y: 0, width: 1200, height: 675 }
   assert.deepEqual(trailBounds({ x: 100, y: 50, width: 1200, height: 900 }, game), { x: 100, y: 50, width: 1200, height: 675 })
   assert.deepEqual(trailBounds({ x: -1800, y: 20, width: 1200, height: 900 }, { ...game, x: 8 }), { x: -1792, y: 20, width: 1200, height: 675 })
+})
+
+test("the user's hand is on the game while the cursor moves inside it, and off once it rests or leaves", () => {
+  const area = { x: 100, y: 50, width: 1200, height: 675 }
+  assert.equal(handOnGame({ x: 600, y: 300 }, area, 1000, 1200, 400), true)
+  assert.equal(handOnGame({ x: 600, y: 300 }, area, 1000, 1500, 400), false, 'rested')
+  assert.equal(handOnGame({ x: 50, y: 300 }, area, 1000, 1100, 400), false, 'beside the game')
+  assert.equal(handOnGame({ x: 600, y: 900 }, area, 1000, 1100, 400), false, 'over the dock')
+  assert.equal(handOnGame({ x: 600, y: 300 }, null, 1000, 1100, 400), false, 'no game shown')
 })

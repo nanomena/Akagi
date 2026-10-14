@@ -18,7 +18,7 @@ import { createServer } from 'node:net'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Core } from './core.js'
-import { MIN, RATIO, conform, framedRatio, gameBounds, openingSize, restoredBounds, settle, trailBounds } from './layout.js'
+import { MIN, RATIO, conform, framedRatio, gameBounds, handOnGame, openingSize, restoredBounds, settle, trailBounds } from './layout.js'
 import { policyFor } from './policy.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -58,6 +58,13 @@ let core = null
 /** Autoplay's pointer, drawn over the game while the option is on. */
 /** @type {BrowserWindow | null} */
 let trail = null
+/** The system cursor, as last read, when it last moved, and whether the user's hand is on the game. */
+/** @type {{ x: number, y: number } | null} */
+let cursorAt = null
+let cursorMovedAt = 0
+let userActive = false
+/** How long the cursor has to rest before the user's hand counts as off the mouse. */
+const USER_STILL_MS = 400
 /** Where the game view is in the window's content, while it is shown. */
 /** @type {import('./layout.js').Rect | null} */
 let gameAt = null
@@ -180,6 +187,10 @@ function openWindow(ready) {
   // The trail is a window of its own over the game view, and has to follow it.
   frame.on('move', placeTrail)
   frame.on('resize', placeTrail)
+  // The user's hand on the mouse over the game: autoplay holds its presses
+  // until it rests, so that the two do not get in each other's way.
+  const watch = setInterval(watchCursor, 50)
+  frame.on('closed', () => clearInterval(watch))
 
   // The interface is one page of our own files: it goes nowhere and opens nothing.
   const page = view.webContents
@@ -268,6 +279,22 @@ function placeTrail() {
   trail ??= createTrail(window)
   trail.setBounds(trailBounds(window.getContentBounds(), gameAt))
   if (!trail.isVisible()) trail.showInactive()
+}
+
+function watchCursor() {
+  if (!window || !core) return
+  const point = screen.getCursorScreenPoint()
+  const now = Date.now()
+  if (!cursorAt || point.x !== cursorAt.x || point.y !== cursorAt.y) {
+    cursorAt = point
+    cursorMovedAt = now
+  }
+  const area = gameAt && !window.isMinimized() ? trailBounds(window.getContentBounds(), gameAt) : null
+  const active = handOnGame(point, area, cursorMovedAt, now, USER_STILL_MS)
+  if (active !== userActive) {
+    userActive = active
+    core.call('set_user_pointer', { active }).catch(() => {})
+  }
 }
 
 /** @param {BaseWindow} owner */

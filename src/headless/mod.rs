@@ -26,6 +26,7 @@
 //! | `set_monitor_pinned`   | `{pinned}`           | `MonitorConfig`         |
 //! | `set_monitor_trail`    | `{enabled}`          | `MonitorConfig`         |
 //! | `set_monitor_lean`     | `{enabled}`          | `MonitorConfig`         |
+//! | `set_user_pointer`     | `{active}`           | `null`                  |
 //! | `set_monitor_autoplay` | `{enabled}`          | `null`                  |
 //! | `open_game`            | `{port, target}`     | `null`                  |
 //!
@@ -92,6 +93,11 @@ struct Ready {
 
 /// Whether the shell is drawing autoplay's pointer: its marks go out only then.
 static TRAIL: AtomicBool = AtomicBool::new(false);
+
+#[derive(Debug, Deserialize)]
+struct UserPointer {
+    active: bool,
+}
 
 #[derive(Debug, Deserialize)]
 struct Pinned {
@@ -315,6 +321,13 @@ async fn answer(state: &AppState, method: &str, params: Value) -> Result<Value, 
                 .await?;
             TRAIL.store(enabled, Ordering::Relaxed);
             reply(config.monitor)
+        }
+        // The shell watches the system cursor; autoplay holds its presses
+        // while the user's own mouse moves over the game.
+        "set_user_pointer" => {
+            let UserPointer { active } = parse(params)?;
+            autoplay::cdp_input::set_user_active(active);
+            Ok(Value::Null)
         }
         "set_monitor_lean" => {
             let Enabled { enabled } = parse(params)?;

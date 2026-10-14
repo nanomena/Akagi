@@ -91,6 +91,23 @@ export function trailBounds(content, game) {
 }
 
 /**
+ * Whether the user's own mouse is at work over the game: the system cursor
+ * is inside the game view and moved within the last `stillMs`. Input sent
+ * over DevTools never moves the system cursor, so this is the user alone.
+ * @param {{ x: number, y: number }} point the system cursor, on screen
+ * @param {Rect | null} area the game view, on screen
+ * @param {number} movedAt when the cursor last moved, in ms
+ * @param {number} now
+ * @param {number} stillMs
+ * @returns {boolean}
+ */
+export function handOnGame(point, area, movedAt, now, stillMs) {
+  if (!area) return false
+  const inside = point.x >= area.x && point.x < area.x + area.width && point.y >= area.y && point.y < area.y + area.height
+  return inside && now - movedAt < stillMs
+}
+
+/**
  * Where the page wants the game view. The page measures its stage element and
  * says so; nothing it says is trusted further than this.
  * @param {unknown} value
