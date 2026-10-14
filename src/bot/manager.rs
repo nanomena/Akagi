@@ -402,7 +402,21 @@ impl BotManager {
         }
         // MjaiEvent::None still goes on the bus — downstream consumers
         // decide whether to render. Centralizes the "skip" decision.
-        let _ = self.out_tx.send(resp);
+        // Except at a boundary: that batch is how the bot learns the hand or
+        // the game is over, its `none` answers nothing, and by then there may
+        // be nothing on screen to answer — a player who left the game is on
+        // another page. On the bus it read as a pass, and autoplay pressed
+        // where the pass button had been.
+        let boundary = matches!(
+            event,
+            MjaiEvent::Hora { .. }
+                | MjaiEvent::Ryukyoku { .. }
+                | MjaiEvent::EndKyoku
+                | MjaiEvent::EndGame { .. }
+        );
+        if !(boundary && matches!(resp.action, MjaiEvent::None)) {
+            let _ = self.out_tx.send(resp);
+        }
 
         if matches!(event, MjaiEvent::EndGame { .. }) {
             // Drain runner cleanly (writes end_game to stdin internally
@@ -1132,11 +1146,16 @@ mod tests {
     /// the runner is torn down.
     #[tokio::test]
     async fn boundaries_flush_even_though_nothing_can_be_acted_on() {
-        let (mut mgr, calls, _, _, _) = manager_with_mock(vec![]);
+        let (mut mgr, calls, mut resp_rx, _, _) = manager_with_mock(vec![]);
         mgr.handle_tracked(tracked(MjaiEvent::EndKyoku, Some(false)))
             .await
             .unwrap();
         assert_eq!(calls.lock().await.len(), 1, "end_kyoku still flushes");
+        // Its `none` is no pass for autoplay to press.
+        assert!(
+            resp_rx.try_recv().is_err(),
+            "a boundary's none stays off the bus"
+        );
     }
 
     #[tokio::test]
