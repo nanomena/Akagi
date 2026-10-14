@@ -103,21 +103,23 @@ function Dock({ m, tab, setTab, tools, options, onAutoplay, onPin }: DockProps) 
   return <aside className="md">
     <header className="md-bar">
       <Round s={s} />
-      {/* Room for five indicators, the most a hand can turn over. */}
-      <span className="mdora" title={tr('宝牌指示牌')}>{game && game.dora_markers.length > 0 && <>{tr('宝牌')}<Faces faces={game.dora_markers.map(tile => ({ tile }))} /></>}</span>
       <nav className="md-tabs" role="tablist" aria-label={tr('监视内容')}>
         {/* The links have one light, on their tab: everything behind it is run by this window. */}
         {TABS.map(([key, label]) => <button key={key} role="tab" aria-selected={tab === key} onClick={() => setTab(key)} title={key === 'link' ? tr('连接：{0}', link.summary) : undefined}>
           {label}{key === 'link' && <i className="mdot md-tab-dot" data-tone={link.tone} />}
         </button>)}
       </nav>
+      <div className="md-right">
+      {/* The tiles turned over are indicators — the dora is the tile after each. Room for five, the most a hand can turn over. */}
+      <span className="mdora" title={tr('宝牌指示牌')}>{game && game.dora_markers.length > 0 && <>{tr('宝牌指示')}<Faces faces={game.dora_markers.map(tile => ({ tile }))} /></>}</span>
+      <span className="md-model">{s?.server.state === 'ready' ? s.server.label ?? '' : ''}</span>
       {/* The switch is the setting, and says so: whether the model's actions may be carried out — not that one has been. */}
       <button className="mswitch" role="switch" aria-checked={!!s?.autoplay_enabled} disabled={!s || !onAutoplay} onClick={() => onAutoplay?.(!s?.autoplay_enabled)}
         title={s?.autoplay_enabled ? tr('已允许自动执行模型的动作。点击后停止自动执行，只显示建议。') : tr('只显示建议。点击后允许自动执行模型的动作。')}>
         {tr('自动操作')}<i aria-hidden /><b data-other={s?.autoplay_enabled ? tr('关') : tr('开')}>{s?.autoplay_enabled ? tr('开') : tr('关')}</b>
       </button>
-      <span className="md-model">{s?.server.state === 'ready' ? s.server.label ?? '' : ''}</span>
       <div className="mtools">{tools}</div>
+      </div>
     </header>
 
     <div className="md-body" role="tabpanel" data-tab={tab}>
