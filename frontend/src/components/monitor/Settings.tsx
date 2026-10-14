@@ -55,7 +55,8 @@ export function Settings({ snapshot: s, options, now, onPin, onAutoplay, onTrail
         <Line name="Bot" value={bot ?? tr('未启动')} />
         <Line name={tr('模型')} value={server.state === 'ready' ? server.label ?? '—' : '—'} />
         {/* Longer than its cell once the server is up: the whole of it is there on hover. */}
-        <Line name={tr('模型服务')} value={serverLine(s, now)} note={serverLine(s, now)} />
+        {/* The model's name is the line above. */}
+        <Line name={tr('模型服务')} value={serverLine(s, now, false)} note={serverLine(s, now, false)} />
         {factsOf(s, 12).map(fact => <Line key={fact.name} name={fact.name} value={fact.value} note={fact.note} />)}
       </dl>
     </section>

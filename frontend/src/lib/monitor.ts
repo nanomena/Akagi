@@ -403,14 +403,16 @@ export function alertsOf(s: MonitorSnapshot | null, local: { ui: string | null; 
 
 /** The bot's service in a sentence: what it is doing as a process the app
  *  runs, under the name it gave itself. */
-export function serverLine(s: MonitorSnapshot | null, now: number): string {
+/** The model service's state in words. `named`: with the model's name, for a
+ *  place that does not show it on a line of its own. */
+export function serverLine(s: MonitorSnapshot | null, now: number, named = true): string {
   const server: ServerStatus = s?.server ?? { state: 'none' }
   const seconds = (ms: number) => tr('{0} 秒', Math.max(0, Math.round(ms / 1000)))
   switch (server.state) {
     case 'installing': return tr('正在安装运行环境，首次需要下载依赖')
     case 'starting': return tr('已启动 {0}，正在加载', seconds(now - server.since_ms))
     case 'failed': return tr('{0}后重新启动', seconds(server.retry_at_ms - now))
-    case 'ready': return tr('{0} · 应用托管 · 启动 {1}', server.label ?? server.bot, seconds(server.startup_ms))
+    case 'ready': return named ? tr('{0} · 应用托管 · 启动 {1}', server.label ?? server.bot, seconds(server.startup_ms)) : tr('应用托管 · 启动 {0}', seconds(server.startup_ms))
     case 'none': return tr('收到第一份候选后确认，与 Bot 进程状态无关')
   }
 }
