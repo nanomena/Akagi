@@ -285,6 +285,7 @@ export const en: Record<string, string> = {
   '{0}后重新启动': 'Restarting in {0}',
   '{0} · 应用托管 · 启动 {1}': '{0} · run by the app · startup {1}',
   '应用托管 · 启动 {0}': 'run by the app · startup {0}',
+  '{0} · 对局开始时连接': '{0} · joins when a game starts',
   '收到第一份候选后确认，与 Bot 进程状态无关': 'Confirmed when the first candidates arrive; independent of the Bot process state',
   '荒牌流局': 'Exhaustive draw',
   '流局满贯': 'Nagashi mangan',
