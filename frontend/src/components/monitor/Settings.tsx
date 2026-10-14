@@ -8,6 +8,7 @@ type Props = {
   /** `null` while the window's own options have not been read, or are being written. */
   onPin: ((pinned: boolean) => void) | null
   onAutoplay: ((enabled: boolean) => void) | null
+  onTrail: ((enabled: boolean) => void) | null
 }
 
 function Row({ name, about, on, onChange }: { name: string; about: string; on: boolean; onChange: ((on: boolean) => void) | null }) {
@@ -25,7 +26,7 @@ const Line = ({ name, value, note }: { name: string; value: string; note?: strin
 /** What the window can be told, and what it runs. The switches are the ones the
  *  bar already has, with the words there is no room for up there; the model and
  *  its service are shown as they are, since both are the application's to run. */
-export function Settings({ snapshot: s, options, now, onPin, onAutoplay }: Props) {
+export function Settings({ snapshot: s, options, now, onPin, onAutoplay, onTrail }: Props) {
   const server = s?.server ?? { state: 'none' as const }
   const bot = s && 'bot' in s.bot ? s.bot.bot : null
   const lang = useLang()
@@ -35,6 +36,7 @@ export function Settings({ snapshot: s, options, now, onPin, onAutoplay }: Props
       <div className="mset-rows">
         <Row name={tr('窗口置顶')} about={tr('让这个窗口保持在其他窗口之上')} on={options.always_on_top} onChange={onPin} />
         <Row name={tr('自动操作')} about={tr('关掉后只显示建议，不替你操作')} on={!!s?.autoplay_enabled} onChange={s ? onAutoplay : null} />
+        <Row name={tr('光标轨迹')} about={tr('在游戏画面上画出自动操作的光标和点击')} on={!!options.pointer_trail} onChange={onTrail} />
         <div className="mset-row">
           <div><strong>{tr('界面语言')}</strong><small>{tr('只改变这个窗口里的文字')}</small></div>
           {/* Each language under its own name, whatever language is showing. */}

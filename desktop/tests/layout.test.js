@@ -1,7 +1,7 @@
 // @ts-check
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { MIN, RATIO, SIZE, conform, framedRatio, gameBounds, openingSize, restoredBounds, settle } from '../src/layout.js'
+import { MIN, RATIO, SIZE, conform, framedRatio, gameBounds, openingSize, restoredBounds, settle, trailBounds } from '../src/layout.js'
 
 test('a fresh window opens at its own size, or as much of it as the display has room for', () => {
   assert.deepEqual(openingSize({ width: 2560, height: 1400 }), SIZE)
@@ -50,4 +50,10 @@ test('the game view goes only where a sound rectangle says', () => {
   for (const bad of [null, {}, { x: -1, y: 0, width: 200, height: 200 }, { x: 0, y: 0, width: 99, height: 200 }, { x: 0, y: 0, width: 200, height: 20000 }, { x: 0, y: 0, width: Infinity, height: 200 }, { x: '0', y: 0, width: 200, height: 200 }]) {
     assert.throws(() => gameBounds(bad), /Invalid game view bounds/)
   }
+})
+
+test('the pointer trail lies exactly over the game view, wherever the window is', () => {
+  const game = { x: 0, y: 0, width: 1200, height: 675 }
+  assert.deepEqual(trailBounds({ x: 100, y: 50, width: 1200, height: 900 }, game), { x: 100, y: 50, width: 1200, height: 675 })
+  assert.deepEqual(trailBounds({ x: -1800, y: 20, width: 1200, height: 900 }, { ...game, x: 8 }), { x: -1792, y: 20, width: 1200, height: 675 })
 })

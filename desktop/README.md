@@ -33,6 +33,13 @@ shell. When the page opens it, the shell tells the core the DevTools port and
 the view's target id; the core attaches to that one page and sends it to the
 game.
 
+Input sent over DevTools shows no cursor, so autoplay's pointer can be drawn
+over the game when the settings ask for it (`pointer_trail`). The core then
+sends where the pointer goes (`pointer` events) and the shell draws them in a
+transparent window of its own over the game view (`src/trail.*`), which takes
+no input: clicks pass through it to the game. Nothing is added to the game's
+page.
+
 ## Running it from a checkout
 
 ```sh
