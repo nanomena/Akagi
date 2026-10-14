@@ -210,14 +210,16 @@
 /* The round, the seat and the counters each have a place; a dealer's mark or a
  * second digit moves nothing. Before a game the window's name and one line of
  * status stand there instead. */
-.mround { display: grid; grid-template-columns: 62px 64px 80px minmax(0, 1fr); align-items: baseline; align-content: center; column-gap: 8px; min-width: 0; height: 26px; white-space: nowrap; }
+/* One line, every piece centred on it: the name, the seat's pill, the indicators and the counts are
+ * of different sizes, and on a baseline the small ones float off the pill and the tiles. */
+.mround { display: grid; grid-template-columns: 50px 64px 80px minmax(0, 1fr); align-items: center; column-gap: 8px; min-width: 0; height: 26px; white-space: nowrap; }
 .mround > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.mround-idle { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 9px; }
-.mround-seat { align-self: center; display: flex; }
-.mround strong { font: 500 15px/1 var(--m-display); letter-spacing: 0.02em; }
+.mround-idle { grid-column: 1 / -1; display: flex; align-items: center; gap: 9px; }
+.mround-seat { display: flex; }
+.mround strong { font: 500 15px/20px var(--m-display); letter-spacing: 0.02em; }
 .mround-count { justify-self: end; text-align: right; }
-.mround span { font-size: 12.5px; color: var(--m-ink2); font-variant-numeric: tabular-nums; }
-.mround em { align-self: center; padding: 0 9px; border-radius: 999px; font-size: 12px; line-height: 20px; background: var(--m-panel); border: 1px solid var(--m-line); }
+.mround span { font-size: 12.5px; line-height: 20px; color: var(--m-ink2); font-variant-numeric: tabular-nums; }
+.mround em { padding: 0 9px; border-radius: 999px; font-size: 12px; line-height: 20px; background: var(--m-panel); border: 1px solid var(--m-line); }
 
 .mspin { animation: m-spin 0.9s linear infinite; }
 @keyframes m-spin { to { transform: rotate(360deg); } }
@@ -514,7 +516,7 @@
 /* The middle column ends with what the window may do: autoplay, and the tools. */
 .md-controls { display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; }
 /* The round's dora indicators: five fit, the most a hand turns over. */
-.mround .mdora { --th: 20px; align-self: center; height: 26px; }
+.mround .mdora { --th: 20px; height: 20px; }
 /* The segmented control: a grey well, the chosen segment a white pill. */
 .md-tabs { display: flex; justify-self: stretch; gap: 2px; padding: 3px; border-radius: 8px; background: var(--m-well); }
 .md-tabs button { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: 1 1 auto; white-space: nowrap; height: 22px; padding: 0 10px; border-radius: 6px; font-size: 12.5px; color: var(--m-ink2); }
