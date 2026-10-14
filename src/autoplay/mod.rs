@@ -57,6 +57,7 @@
 //!
 //! Entry point: [`manager::run_autoplay_manager`].
 
+pub mod advisor;
 pub mod budget;
 pub mod cdp_input;
 pub mod context;
@@ -65,7 +66,9 @@ pub mod inject;
 pub mod majsoul;
 pub mod manager;
 pub mod platform;
+pub mod pointer;
 pub mod riichi_city;
+pub mod table;
 pub mod tenhou;
 pub mod tenhou_state;
 pub mod verify;

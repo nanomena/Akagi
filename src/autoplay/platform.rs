@@ -103,6 +103,9 @@ pub struct ActionContext<'a> {
     /// Normalized bot confidence for this decision, if the bot's meta
     /// could be interpreted (see `autoplay::delay::probs`).
     pub probs: Option<DecisionProbs>,
+    /// Table facts and a second opinion on this decision (see
+    /// `autoplay::delay::Reading`). For the delay model only.
+    pub reading: crate::autoplay::delay::Reading,
     /// User Lua delay policy, when loaded. Consulted by the delay model;
     /// on any script failure the built-in policy runs instead.
     pub delay_script: Option<&'a crate::autoplay::delay::DelayScript>,
@@ -122,6 +125,14 @@ pub struct ActionContext<'a> {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct PlanResult {
     pub steps: Vec<Step>,
+    /// The delay model asked for a look at the runner-up before this
+    /// plan's press. Whether there is one to look at is the manager's to
+    /// work out (see `autoplay::pointer`); the steps are the same either
+    /// way.
+    pub hesitate: bool,
+    /// How long the pointer should rest on a tile it looks at, when the
+    /// delay model said.
+    pub look_ms: Option<u32>,
 }
 
 pub trait PlatformAutoplay: Send + Sync {

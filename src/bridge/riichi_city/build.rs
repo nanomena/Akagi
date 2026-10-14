@@ -443,6 +443,7 @@ mod tests {
                 pai: Some("N".into()),
             },
             MjaiEvent::Hora {
+                score: None,
                 actor: 0,
                 target: 0,
                 deltas: None,
@@ -452,6 +453,7 @@ mod tests {
                 scores: None,
             },
             MjaiEvent::Hora {
+                score: None,
                 actor: 0,
                 target: 1,
                 deltas: None,
@@ -665,6 +667,7 @@ mod tests {
     #[test]
     fn ron_names_the_claimed_discard() {
         let ron = MjaiEvent::Hora {
+            score: None,
             actor: 0,
             target: 2,
             deltas: None,
@@ -724,6 +727,7 @@ mod tests {
     #[test]
     fn tsumo_and_pass_match_the_recorded_shapes() {
         let tsumo = MjaiEvent::Hora {
+            score: None,
             actor: 3,
             target: 3,
             deltas: None,
@@ -862,6 +866,7 @@ mod tests {
             reason: Default::default(),
             final_scores: None,
             final_ranks: None,
+            rank_points: None,
         })
         .is_none());
         // A reach without its declaring tile cannot be sent — same contract

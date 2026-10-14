@@ -139,7 +139,7 @@
 /* ------------------------------------------------------------- atoms ---- */
 
 /* A panel: white, a hairline, a soft shadow. */
-.mdec, .mresult, .mlink, .mfacts, .mevents, .mscorestrip > div, .mscores > div, .mon-start-card {
+.mdec, .mresult, .mlink, .mfacts, .mevents, .mstat, .mscorestrip > div, .mscores > div, .mon-start-card {
   background: var(--m-panel); border: 1px solid var(--m-line); border-radius: 10px; box-shadow: var(--m-shadow);
 }
 
@@ -193,10 +193,6 @@
 .mtool { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 6px; color: var(--m-ink2); }
 .mtool:hover:not(:disabled) { color: var(--m-ink); background: hsl(35 20% 14% / 0.07); }
 .mtool[aria-pressed='true'] { color: var(--m-ink); background: var(--m-panel); box-shadow: var(--m-shadow); }
-
-.mchip { display: flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; white-space: nowrap; color: var(--m-ink2); }
-.mchip b { font-weight: 600; color: color-mix(in srgb, var(--tone, var(--m-ink)) 85%, var(--m-ink)); }
-.mchip[data-tone='idle'], .mchip[data-tone='idle'] b { color: var(--m-dim); }
 
 /* The system's switch: a grey track, a white knob; olive while what it allows is live. */
 .mswitch { display: inline-flex; align-items: center; gap: 7px; justify-self: start; height: 26px; padding: 0 6px; border-radius: 6px; font-size: 12px; color: var(--m-ink2); white-space: nowrap; }
@@ -389,6 +385,12 @@
  * a line on the left, the settled scores on the right. */
 .mresult { grid-column: 2 / -1; display: grid; grid-template: 22px minmax(0, 1fr) / minmax(0, 1fr) 248px; gap: 8px 16px; min-height: 0; padding: 10px 14px; }
 .mresult > .msec-head { grid-column: 1 / -1; }
+/* The way to the other hands of the game: two arrows and a count between them, each in a place of its own. */
+.mpager { display: grid; grid-template-columns: 22px 56px 22px; align-items: center; flex: none; height: 22px; font-size: 12px; color: var(--m-ink2); }
+.mpager b { text-align: center; font-weight: 500; font-variant-numeric: tabular-nums; }
+.mpager button { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; color: var(--m-ink2); }
+.mpager button:hover:not(:disabled) { color: var(--m-ink); background: hsl(35 20% 14% / 0.07); }
+.mpager button:disabled { color: var(--m-line-strong); }
 .mresult-hands { display: grid; grid-template-rows: repeat(4, minmax(0, 1fr)); row-gap: 4px; min-height: 0; }
 .mresult-hands > .mslot-empty { grid-row: 1 / -1; }
 /* A revealed hand: who and how, the hand, the ura markers — three columns the
@@ -442,6 +444,15 @@
   scroll-snap-type: y proximity; scrollbar-width: thin; scrollbar-color: var(--m-line-strong) transparent;
 }
 .mevent { --th: 20px; flex: none; display: grid; grid-template-columns: 64px 190px 150px 96px minmax(0, 1fr); align-items: center; column-gap: 10px; height: calc(190px / 7); padding: 0 8px; border-radius: 5px; font-size: 12.5px; scroll-snap-align: start; }
+/* A hand's own line: the same height as an event's, so folding one moves the others by whole lines. */
+/* It stays at the top of the list while its events pass under it, so what is being read has a name. */
+.mhandrow { position: sticky; top: 0; z-index: 1; flex: none; height: calc(190px / 7); background: var(--m-panel); scroll-snap-align: start; }
+.mhandrow button { display: grid; grid-template-columns: 16px 118px 150px minmax(0, 1fr); align-items: center; column-gap: 8px; width: 100%; height: 100%; padding: 0 8px; border-radius: 5px; font-size: 12.5px; text-align: left; color: var(--m-ink2); }
+.mhandrow button:hover:not(:disabled) { background: hsl(35 20% 14% / 0.06); }
+/* The hand in play is always open: its line is a heading, not something switched off. */
+.mhandrow button:disabled { opacity: 1; cursor: default; }
+.mhandrow strong { font: 500 13px/1 var(--m-display); color: var(--m-ink); white-space: nowrap; }
+.mhandrow small { font-size: 11.5px; color: var(--m-dim); font-variant-numeric: tabular-nums; }
 .mevent time { font-size: 11.5px; color: var(--m-dim); font-variant-numeric: tabular-nums; }
 .mevent-seat { display: flex; align-items: center; gap: 7px; min-width: 0; white-space: nowrap; }
 .mevent-seat small { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 11.5px; color: var(--m-dim); }
@@ -481,25 +492,21 @@
 .md { display: grid; grid-template: 36px minmax(0, 1fr) / minmax(0, 1fr); width: 1280px; height: 240px; border-top: 1px solid var(--m-line); }
 /* 1280 × 36, seven places of fixed width: round, dora, tabs, links, switch,
  * the service's name, tools. What one of them shows never moves another. */
-.md-bar { display: grid; grid-template-columns: 244px 122px 240px 336px 114px minmax(0, 1fr) 28px; align-items: center; column-gap: 8px; min-width: 0; padding: 0 9px 0 16px; }
+.md-bar { display: grid; grid-template-columns: 244px 122px 360px 114px minmax(0, 1fr) 28px; align-items: center; column-gap: 8px; min-width: 0; padding: 0 9px 0 16px; }
 .md-bar > .mround { grid-column: 1; }
 .md-bar > .mdora { grid-column: 2; }
 .md-bar > .md-tabs { grid-column: 3; }
-.md-bar > .md-health { grid-column: 4; }
-.md-bar > .mswitch { grid-column: 5; }
-.md-bar > .md-model { grid-column: 6; }
-.md-bar > .mtools { grid-column: 7; }
+.md-bar > .mswitch { grid-column: 4; }
+.md-bar > .md-model { grid-column: 5; }
+.md-bar > .mtools { grid-column: 6; }
 .md-bar .mdora { --th: 26px; }
 /* The segmented control: a grey well, the chosen segment a white pill. */
 .md-tabs { display: flex; justify-self: start; gap: 2px; padding: 3px; border-radius: 8px; background: var(--m-well); }
-.md-tabs button { position: relative; display: inline-flex; align-items: center; height: 22px; padding: 0 10px; border-radius: 6px; font-size: 12.5px; color: var(--m-ink2); }
-/* A fault on the links tab is flagged in its corner, where it takes no room. */
-.md-tab-flag { position: absolute; top: 1px; right: 1px; width: 6px; height: 6px; box-shadow: none; }
+.md-tabs button { position: relative; display: inline-flex; align-items: center; flex: none; white-space: nowrap; height: 22px; padding: 0 10px; border-radius: 6px; font-size: 12.5px; color: var(--m-ink2); }
+/* The links' one light sits after their tab's name, always there: it changes colour, not the tab's width. */
+.md-tab-dot { margin-left: 6px; }
 .md-tabs button:hover { color: var(--m-ink); }
 .md-tabs button[aria-selected='true'] { color: var(--m-ink); background: var(--m-panel); box-shadow: var(--m-shadow); }
-/* The status: quiet while everything runs, the first place a fault shows. */
-.md-health { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: center; column-gap: 4px; min-width: 0; height: 26px; padding: 0 6px; border-radius: 6px; font-size: 12px; text-align: left; }
-.md-health:hover { background: hsl(35 20% 14% / 0.06); }
 .md-model { min-width: 0; height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 18px; color: var(--m-dim); }
 
 /* Decision 384 · candidates 384 · hand and scores 456, 12 apart. The decision
@@ -553,3 +560,47 @@
 @media (prefers-reduced-motion: reduce) {
   .mon *, .mon *::before, .mon *::after { animation: none !important; transition: none !important; }
 }
+
+/* ---------------------------------------------------------- statistics ---- */
+
+/* 852 x 192, three panels that keep their places whatever is in them: rank
+ * points and placement, the usual figures, yaku. The last two scroll. */
+.mstats { grid-column: 2 / -1; display: grid; grid-template-columns: 272px minmax(0, 1fr) minmax(0, 1fr); column-gap: 12px; min-height: 0; }
+.mstat { display: grid; grid-template-rows: 22px minmax(0, 1fr); row-gap: 6px; min-width: 0; min-height: 0; padding: 10px 14px; }
+.mstat > .mslot-empty { align-self: center; }
+.mstat-rank { grid-template-rows: 22px 42px minmax(0, 1fr) 16px; }
+.mselect { flex: none; width: 118px; height: 22px; padding: 0 4px; border: 1px solid var(--m-line); border-radius: 6px; background: var(--m-panel); font: inherit; font-size: 12px; color: var(--m-ink2); }
+.mstat-points { display: grid; grid-template: 26px 16px / minmax(0, 1fr) 120px; column-gap: 10px; align-items: center; min-width: 0; }
+.mstat-points strong { font: 500 22px/1 var(--m-display); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mstat-points small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--m-dim); }
+.mstat-spark { grid-area: 1 / 2 / 3 / 3; width: 120px; height: 40px; overflow: visible; }
+.mstat-spark line { stroke: var(--m-line-strong); stroke-width: 1; stroke-dasharray: 2 3; vector-effect: non-scaling-stroke; }
+.mstat-spark polyline { fill: none; stroke: var(--m-live); stroke-width: 1.5; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.mstat-places { display: grid; grid-template-rows: repeat(4, minmax(0, 1fr)); min-height: 0; }
+.mstat-places li { display: grid; grid-template-columns: 32px minmax(0, 1fr) 30px 48px; align-items: center; column-gap: 8px; min-height: 0; font-size: 12px; color: var(--m-ink2); }
+.mstat-places i { height: 6px; border-radius: 3px; background: linear-gradient(to right, var(--m-live) calc(var(--share) * 100%), var(--m-well) 0); }
+.mstat-places b, .mstat-places small { text-align: right; font-variant-numeric: tabular-nums; }
+.mstat-places b { font-weight: 600; color: var(--m-ink); }
+.mstat-places small { font-size: 11.5px; color: var(--m-dim); }
+.mstat-rank footer { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--m-ink2); font-variant-numeric: tabular-nums; }
+.mstat-rank footer b { font-weight: 600; color: var(--m-ink); }
+.mstat-scroll { min-height: 0; overflow: hidden auto; scrollbar-width: thin; scrollbar-color: var(--m-line-strong) transparent; }
+.mstat-scroll > .mfact { height: 24px; }
+.mstat-yaku { display: grid; grid-template-columns: minmax(0, 1fr) 36px 52px; column-gap: 8px; font-size: 12.5px; }
+.mstat-yaku span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mstat-yaku b, .mstat-yaku small { text-align: right; font-variant-numeric: tabular-nums; }
+.mstat-yaku b { font-weight: 600; }
+.mstat-yaku small { font-size: 11.5px; color: var(--m-dim); }
+
+/* ------------------------------------------------------------ settings ---- */
+
+/* The same three panels as the record: what the window can be told, what it
+ * runs, and which build it is. */
+.msets { grid-template-columns: 300px minmax(0, 1fr) 232px; }
+.mset-rows { display: grid; grid-template-rows: repeat(3, minmax(0, 1fr)); min-height: 0; }
+.mset-row { display: grid; grid-template-columns: minmax(0, 1fr) 62px; align-items: center; column-gap: 10px; min-height: 0; }
+.mset-row + .mset-row { border-top: 1px solid var(--m-line); }
+.mset-row > div { display: grid; row-gap: 3px; min-width: 0; }
+.mset-row strong { font-size: 13px; font-weight: 500; }
+.mset-row small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--m-dim); }
+.mset-row .mswitch { justify-self: end; }

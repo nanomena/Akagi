@@ -83,6 +83,7 @@ pub fn aggregate(input: AggregateInput<'_>) -> Option<GameRecord> {
         _ => KyokuMode::EastOnly,
     };
 
+    let mut yaku = std::collections::BTreeMap::<u32, u32>::new();
     // Per-kyoku transient state. Only meaningful when our_seat is Some.
     let mut riichi_declared = false;
     let mut riichi_accepted = false;
@@ -183,8 +184,15 @@ pub fn aggregate(input: AggregateInput<'_>) -> Option<GameRecord> {
                 actor,
                 target,
                 deltas,
+                score,
                 ..
             } => {
+                // How our wins were made, whether or not the points are known.
+                if let (true, Some(score)) = (our_seat == Some(*actor), score) {
+                    for (id, _) in &score.yaku {
+                        *yaku.entry(*id).or_insert(0) += 1;
+                    }
+                }
                 let Some(deltas) = deltas else {
                     continue;
                 };
@@ -292,6 +300,7 @@ pub fn aggregate(input: AggregateInput<'_>) -> Option<GameRecord> {
             reason: GameEndReason::Confirmed,
             final_scores,
             final_ranks,
+            ..
         } => Some((final_scores.as_ref(), final_ranks.as_ref())),
         _ => None,
     });
@@ -334,6 +343,14 @@ pub fn aggregate(input: AggregateInput<'_>) -> Option<GameRecord> {
     let our_rank = our_seat.map(|seat| final_ranks[seat as usize]);
     let our_delta = our_seat.map(|seat| cur_scores[seat as usize] - starting);
 
+    let our_rank_points = events.iter().rev().find_map(|ev| match ev {
+        MjaiEvent::EndGame {
+            rank_points: Some(points),
+            ..
+        } => our_seat.and_then(|seat| points.get(usize::from(seat)).copied()),
+        _ => None,
+    });
+
     Some(GameRecord {
         id: id.clone(),
         started_at,
@@ -349,6 +366,8 @@ pub fn aggregate(input: AggregateInput<'_>) -> Option<GameRecord> {
         our_delta,
         stats,
         match_info: game_meta.and_then(|meta| meta.match_info),
+        our_rank_points,
+        yaku,
         log_path: format!("games/{id}.mjai.jsonl"),
     })
 }
@@ -487,6 +506,7 @@ mod tests {
                 tsumogiri: false,
             },
             MjaiEvent::Hora {
+                score: None,
                 actor: 0,
                 target: 1,
                 deltas: Some(vec![8000, -8000, 0, 0]),
@@ -539,6 +559,7 @@ mod tests {
                 tsumogiri: false,
             },
             MjaiEvent::Hora {
+                score: None,
                 actor: 0,
                 target: 2,
                 deltas: Some(vec![8000, 0, -8000, 0]),
@@ -683,6 +704,7 @@ mod tests {
             },
             start_kyoku("E", 0, vec![25000, 25000, 25000, 25000]),
             MjaiEvent::Hora {
+                score: None,
                 actor: 0,
                 target: 1,
                 deltas: Some(vec![8000, -8000, 0, 0]),
@@ -731,6 +753,7 @@ mod tests {
                 num_players: 3,
             },
             MjaiEvent::Hora {
+                score: None,
                 actor: 0,
                 target: 1,
                 deltas: Some(vec![5000, -5000, 0]),
@@ -794,6 +817,7 @@ mod tests {
             start_game_4p(0),
             start_kyoku("E", 0, vec![25000, 25000, 25000, 25000]),
             MjaiEvent::Hora {
+                score: None,
                 actor: 0,
                 target: 1,
                 deltas: Some(vec![8000, -8000, 0, 0]),
@@ -822,5 +846,60 @@ mod tests {
         assert_eq!(rec.our_rank, Some(4));
         assert_eq!(rec.our_delta, Some(-13000));
         assert_eq!(rec.stats.agari, 1);
+    }
+
+    /// What a statistics page counts that the points alone do not say: which
+    /// yaku our wins had, and what the game did to our rank points. Another
+    /// seat's win is not ours to count.
+    #[test]
+    fn our_yaku_and_rank_points_are_kept() {
+        use crate::schema::mjai::HandScore;
+        let win = |actor: u8, target: u8, yaku: &[(u32, u32)]| MjaiEvent::Hora {
+            score: Some(HandScore {
+                yaku: yaku.to_vec(),
+                han: yaku.iter().map(|(_, han)| han).sum(),
+                fu: 30,
+                yakuman: false,
+            }),
+            actor,
+            target,
+            deltas: Some(vec![0, 0, 0, 0]),
+            ura_markers: None,
+            pai: None,
+            tehai: None,
+            scores: None,
+        };
+        let events = vec![
+            start_game_4p(0),
+            start_kyoku("E", 0, vec![25000, 25000, 25000, 25000]),
+            win(0, 1, &[(2, 1), (14, 1), (31, 2)]),
+            MjaiEvent::EndKyoku,
+            start_kyoku("E", 0, vec![25000, 25000, 25000, 25000]),
+            win(2, 3, &[(12, 1)]),
+            MjaiEvent::EndKyoku,
+            start_kyoku("E", 1, vec![25000, 25000, 25000, 25000]),
+            win(0, 0, &[(2, 1), (1, 1)]),
+            MjaiEvent::EndKyoku,
+            MjaiEvent::confirmed_game(None, None).with_rank_points(Some(vec![75, -15, -40, -20])),
+        ];
+        let rec = aggregate(AggregateInput {
+            events: &events,
+            platform: Platform::Majsoul,
+            started_at: ts(),
+            ended_at: ts(),
+            id: "YAKU".into(),
+        })
+        .unwrap();
+
+        let yaku: Vec<(u32, u32)> = rec.yaku.iter().map(|(id, n)| (*id, *n)).collect();
+        assert_eq!(yaku, [(1, 1), (2, 2), (14, 1), (31, 1)]);
+        assert_eq!(rec.our_rank_points, Some(75));
+
+        // A record written before these were kept still reads.
+        let mut old = serde_json::to_value(&rec).unwrap();
+        old.as_object_mut().unwrap().remove("yaku");
+        old.as_object_mut().unwrap().remove("our_rank_points");
+        let read: GameRecord = serde_json::from_value(old).unwrap();
+        assert!(read.yaku.is_empty() && read.our_rank_points.is_none());
     }
 }

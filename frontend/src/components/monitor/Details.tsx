@@ -1,39 +1,72 @@
-import { useLayoutEffect, useRef } from 'react'
-import { AlertTriangle, Check, ChevronRight } from 'lucide-react'
+import { Fragment, useLayoutEffect, useRef, useState } from 'react'
+import { AlertTriangle, Check, ChevronDown, ChevronRight } from 'lucide-react'
 import { Faces } from '@/components/monitor/Tiles'
 import { SeatTag } from '@/components/monitor/Table'
-import { eventLine, factsOf, seatLabel, serverLine, tableOf, type Alert, type Health, type MonitorSnapshot } from '@/lib/monitor'
+import { invoke } from '@/lib/host'
+import {
+  eventLine, factsOf, handLabel, resultTitle, seatLabel, serverLine, tableOf,
+  type Alert, type Health, type HandSummary, type MonitorEvent, type MonitorSnapshot,
+} from '@/lib/monitor'
 
 const clock = (ms: number) => new Date(ms).toLocaleTimeString('zh-CN', { hour12: false })
 const ago = (ms: number) => (ms < 60_000 ? `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} 秒前` : `${Math.floor(ms / 60_000)} 分钟前`)
 
-/** This round's public events as one list, read top to bottom in the order
- *  they happened. The newest line is kept in view unless the reader has
- *  scrolled back to look at an earlier one. */
+/** The game's public events as one list, read top to bottom in the order they
+ *  happened: a line for every hand, the hand in play open under its line and the
+ *  earlier ones folded until asked for. The newest line is kept in view unless
+ *  the reader has scrolled back to look at an earlier one. */
 export function EventList({ snapshot: s }: { snapshot: MonitorSnapshot }) {
   const table = tableOf(s.game)
   const confirmed = s.decision?.confirmed_seq ?? null
-  // Another seat's draw is face down: a line that says nothing, twice a turn.
-  const events = s.events.filter(e => !(e.event.type === 'tsumo' && e.event.pai === '?'))
+  const current = s.hands.at(-1) ?? null
+  const earlier = s.hands.slice(0, -1)
+  // An earlier hand's events, once asked for; `null` while they are on their way.
+  const [opened, setOpened] = useState<Record<number, MonitorEvent[] | null>>({})
+  const shut = (round: number) => setOpened(o => { const rest = { ...o }; delete rest[round]; return rest })
+  const toggle = (round: number) => {
+    if (round in opened) { shut(round); return }
+    setOpened(o => ({ ...o, [round]: null }))
+    invoke<MonitorEvent[]>('get_hand_events', { round }).then(
+      events => setOpened(o => (round in o ? { ...o, [round]: events } : o)),
+      () => shut(round),
+    )
+  }
   const list = useRef<HTMLOListElement>(null)
   const following = useRef(true)
-  const newest = events.at(-1)?.seq
+  const newest = s.events.at(-1)?.seq
   useLayoutEffect(() => {
     const el = list.current
     if (el && following.current) el.scrollTop = el.scrollHeight
   }, [newest])
-  if (events.length === 0) return <p className="mslot-empty md-wide">本局还没有事件</p>
-  return <ol className="mevents" ref={list} onScroll={e => { const el = e.currentTarget; following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 12 }}>
-    {events.map(e => {
+  if (s.events.length === 0 && s.hands.length === 0) return <p className="mslot-empty md-wide">这一桌还没有事件</p>
+  // Another seat's draw is face down: a line that says nothing, twice a turn.
+  const lines = (events: MonitorEvent[], live: boolean) => events
+    .filter(e => !(e.event.type === 'tsumo' && e.event.pai === '?'))
+    .map(e => {
       const line = eventLine(e.event, table)
       return <li key={e.seq} className="mevent" data-quiet={line.quiet || undefined} data-self={(line.seat != null && line.seat === table.self) || undefined} data-system={line.seat == null || undefined}>
         <time>{clock(e.ts_ms)}</time>
         <span className="mevent-seat">{line.seat != null && <><SeatTag seat={line.seat} table={table} />{seatLabel(line.seat, table)}<small>{s.names[line.seat] ?? ''}</small></>}</span>
         <span className="mevent-text">{line.text}</span>
         <span className="mevent-faces"><Faces faces={line.faces} /></span>
-        <span className="mevent-mark">{e.seq === confirmed && <span className="mevent-ok"><Check size={11} strokeWidth={3} />与建议一致</span>}</span>
+        <span className="mevent-mark">{live && e.seq === confirmed && <span className="mevent-ok"><Check size={11} strokeWidth={3} />与建议一致</span>}</span>
       </li>
-    })}
+    })
+  const head = (hand: HandSummary, open: boolean, onToggle?: () => void) => <li className="mhandrow" data-open={open || undefined}>
+    <button disabled={!onToggle} aria-expanded={open} onClick={onToggle}>
+      {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+      <strong>{handLabel(hand)}</strong>
+      <span>{hand.result ? resultTitle(hand.result) : '进行中'}</span>
+      <small>{hand.events} 条</small>
+    </button>
+  </li>
+  return <ol className="mevents" ref={list} onScroll={e => { const el = e.currentTarget; following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 12 }}>
+    {earlier.map(hand => <Fragment key={hand.round}>
+      {head(hand, hand.round in opened, () => toggle(hand.round))}
+      {lines(opened[hand.round] ?? [], false)}
+    </Fragment>)}
+    {current && head(current, true)}
+    {lines(s.events, true)}
   </ol>
 }
 

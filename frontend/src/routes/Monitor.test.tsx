@@ -1,11 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import type { MonitorSnapshot } from '@/lib/monitor'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import type { MonitorEvent, MonitorSnapshot } from '@/lib/monitor'
 
 const fixture = vi.hoisted(() => ({
   snapshot: null as MonitorSnapshot | null,
   options: { always_on_top: false },
   calls: [] as Array<[string, unknown]>,
+  /** What the core answers when an earlier hand's events are asked for. */
+  handEvents: [] as MonitorEvent[],
+  /** The games on record. */
+  history: [] as unknown[],
 }))
 vi.mock('@/hooks/useMonitor', () => ({ useMonitor: () => ({ snapshot: fixture.snapshot, error: null }) }))
 vi.mock('@/lib/host', () => ({
@@ -13,6 +17,8 @@ vi.mock('@/lib/host', () => ({
   invoke: vi.fn(async (cmd: string, args?: unknown) => {
     fixture.calls.push([cmd, args])
     if (cmd === 'set_monitor_pinned') fixture.options = { always_on_top: (args as { pinned: boolean }).pinned }
+    if (cmd === 'get_hand_events') return fixture.handEvents
+    if (cmd === 'get_history') return fixture.history
     return cmd === 'get_monitor_options' || cmd === 'set_monitor_pinned' ? fixture.options : undefined
   }),
 }))
@@ -29,7 +35,7 @@ function state(): MonitorSnapshot {
     capture: { state: 'running', descriptor: 'test' },
     bot: { state: 'ready', bot: 'demo', actor_id: 0 }, service: 'connected', service_error: null, server: { state: 'none' }, sync_error: null,
     brand: 'Demo', facts: [], autoplay_enabled: true,
-    previous_decision: null, result: null, previous_result: null, events: [], last_event_ms: null,
+    previous_decision: null, result: null, previous_result: null, hands: [], events: [], last_event_ms: null,
     decision: { id: 41, number: 1, context, started_ms: Date.now(), completed_ms: Date.now(),
       reaction_ms: 120, bot: 'demo', trigger: { type: 'tsumo', actor: 0, pai: '9m' }, state: 'awaiting', error: null, confirmed_seq: null,
       response: { type: 'dahai', actor: 0, pai: '9m', tsumogiri: true, meta: { show: { items: [
@@ -41,7 +47,7 @@ const decision = () => screen.getByRole('status').closest('section')!
 const candidates = () => screen.queryAllByRole('listitem').filter(li => li.className.includes('mcand'))
 
 describe('monitor user states', () => {
-  beforeEach(() => { fixture.snapshot = state(); fixture.options = { always_on_top: false }; fixture.calls = [] })
+  beforeEach(() => { fixture.snapshot = state(); fixture.options = { always_on_top: false }; fixture.calls = []; fixture.handEvents = [] })
 
   it('shows a suggestion the game has not answered yet as pending, never as done', () => {
     render(<Monitor />)
@@ -70,9 +76,10 @@ describe('monitor user states', () => {
     fixture.snapshot!.service = 'error'; fixture.snapshot!.service_error = 'Socket closed'
     fixture.snapshot!.decision!.state = 'expired'
     render(<Monitor />)
-    const status = screen.getByRole('button', { name: '连接状态' })
-    expect(within(status).getByText('断开')).toBeTruthy()
-    expect(status.textContent).toContain('Bot')
+    // The links have one light, on their tab, and it says which link is down.
+    const links = screen.getByRole('tab', { name: '连接' })
+    expect(links.querySelector('.mdot')?.getAttribute('data-tone')).toBe('bad')
+    expect(links.title).toBe('连接：模型断开')
     expect(screen.getByRole('alert').textContent).toContain('模型服务断开')
     // The action stays as history; its candidates do not stay as current ones.
     expect(screen.getByRole('status').textContent).toBe('已失效')
@@ -202,5 +209,142 @@ describe('monitor user states', () => {
     await waitFor(() => expect(fixture.calls.some(([cmd]) => cmd === 'resize_monitor_game')).toBe(true))
     expect(fixture.calls.filter(([cmd]) => cmd === 'resize_monitor_game').at(-1)![1]).toEqual({ bounds: { ...stage, visible: true } })
     rect.mockRestore()
+  })
+})
+
+describe('the game as a whole', () => {
+  const draw = { kind: 'draw', hands: [], scores: [25000, 25000, 25000, 25000], deltas: [0, 0, 0, 0] }
+  const win = { kind: 'hora', hands: [], scores: [33000, 17000, 25000, 25000], deltas: [8000, -8000, 0, 0] }
+  beforeEach(() => { fixture.snapshot = state(); fixture.options = { always_on_top: false }; fixture.calls = []; fixture.handEvents = [] })
+
+  it('shows the links as one light that is green when everything the window runs is up', () => {
+    const { unmount } = render(<Monitor />)
+    const light = () => screen.getByRole('tab', { name: '连接' }).querySelector('.mdot')?.getAttribute('data-tone')
+    expect(light()).toBe('ok')
+    expect(screen.queryByRole('button', { name: '连接状态' })).toBeNull()
+    unmount()
+    // A Bot process with no game to play is not a fault; a game view that is not open is not "up".
+    fixture.snapshot!.bot = { state: 'idle' }
+    render(<Monitor />)
+    expect(light()).toBe('ok')
+    cleanup()
+    fixture.snapshot!.capture = { state: 'stopped' }
+    render(<Monitor />)
+    expect(light()).toBe('idle')
+  })
+
+  it('turns through every hand the game has finished, the latest first', () => {
+    fixture.snapshot!.hands = [
+      { round: 1, bakaze: 'E', kyoku: 1, honba: 0, result: draw, events: 40 },
+      { round: 2, bakaze: 'E', kyoku: 1, honba: 1, result: win, events: 55 },
+      { round: 3, bakaze: 'E', kyoku: 2, honba: 0, result: null, events: 3 },
+    ]
+    render(<Monitor />)
+    fireEvent.click(screen.getByRole('tab', { name: '结果' }))
+    const card = () => screen.getByText('2 / 2', { exact: false }).closest('section')!
+    expect(within(card()).getByText('东1局 1 本场')).toBeTruthy()
+    expect(within(card()).getByText('和牌')).toBeTruthy()
+    expect((screen.getByRole('button', { name: '下一局' }) as HTMLButtonElement).disabled).toBe(true)
+
+    fireEvent.click(screen.getByRole('button', { name: '上一局' }))
+    expect(screen.getByText('东1局 0 本场')).toBeTruthy()
+    expect(screen.getByText('1 / 2')).toBeTruthy()
+    expect((screen.getByRole('button', { name: '上一局' }) as HTMLButtonElement).disabled).toBe(true)
+    // The hand still being played has no result and no page.
+    expect(screen.queryByText('东2局 0 本场')).toBeNull()
+  })
+
+  it('keeps the earlier hands of the game folded on the events tab and opens one when asked', async () => {
+    fixture.snapshot!.hands = [
+      { round: 1, bakaze: 'E', kyoku: 1, honba: 0, result: draw, events: 40 },
+      { round: 2, bakaze: 'E', kyoku: 1, honba: 1, result: null, events: 1 },
+    ]
+    fixture.snapshot!.events = [{ seq: 90, ts_ms: 0, event: { type: 'reach', actor: 2 } }]
+    fixture.handEvents = [{ seq: 12, ts_ms: 0, event: { type: 'dahai', actor: 1, pai: '3m', tsumogiri: false } }]
+    render(<Monitor />)
+    fireEvent.click(screen.getByRole('tab', { name: '事件' }))
+    // The hand in play is open; the one before it is a line of its own.
+    expect(screen.getByText('宣告立直')).toBeTruthy()
+    const earlier = screen.getByRole('button', { name: /东1局 0 本场/ })
+    expect(earlier.getAttribute('aria-expanded')).toBe('false')
+    expect(earlier.textContent).toContain('40 条')
+    expect(screen.queryByText('手切')).toBeNull()
+
+    fireEvent.click(earlier)
+    expect(await screen.findByText('手切')).toBeTruthy()
+    expect(fixture.calls).toContainEqual(['get_hand_events', { round: 1 }])
+    fireEvent.click(screen.getByRole('button', { name: /东1局 0 本场/ }))
+    expect(screen.queryByText('手切')).toBeNull()
+  })
+})
+
+describe('the record', () => {
+  const game = (rank: number, points: number | null, room: number, stats: Record<string, number>, yaku: Record<string, number> = {}) => ({
+    id: `G${rank}${room}`, ended_at: '2026-01-01T00:00:00Z', platform: 'majsoul', num_players: 4, our_seat: 0,
+    final_scores: [25000, 25000, 25000, 25000], our_rank: rank, stats, yaku,
+    match_info: { platform: 'majsoul', mode_id: room }, ...(points == null ? {} : { our_rank_points: points }),
+  })
+  beforeEach(() => {
+    fixture.snapshot = state(); fixture.options = { always_on_top: false }; fixture.calls = []; fixture.handEvents = []
+    fixture.history = [
+      game(1, 120, 9, { round: 10, agari: 3, houjuu: 1, riichi: 2 }, { 2: 2, 12: 1 }),
+      game(4, -165, 9, { round: 10, agari: 1, houjuu: 3, riichi: 1 }, { 2: 1 }),
+      // A friends' table: no rank points to speak of, and a record from before yaku were kept.
+      game(2, 0, 0, { round: 8, agari: 2, houjuu: 0, riichi: 1 }),
+    ]
+  })
+
+  it('adds up rank points, placement, the usual figures and yaku, and narrows to a room', async () => {
+    render(<Monitor />)
+    fireEvent.click(screen.getByRole('tab', { name: '统计' }))
+    // Three games: 120 - 165 + 0.
+    expect(await screen.findByText('−45')).toBeTruthy()
+    expect(screen.getByText('3 场的段位分变化')).toBeTruthy()
+    const figure = (name: string) => screen.getByText(name).closest('.mfact')!.querySelector('dd')!.textContent
+    expect(figure('和了率')).toBe('21.4%')
+    expect(figure('放铳率')).toBe('14.3%')
+    // Yaku count against the wins of the games that record them: 3 of 4.
+    const yaku = screen.getByText('立直').closest('li')!
+    expect(yaku.textContent).toBe('立直375.0%')
+    expect(screen.getByText('平均顺位').textContent).toBe('平均顺位 2.33')
+
+    fireEvent.change(screen.getByRole('combobox', { name: '统计范围' }), { target: { value: 'gold' } })
+    expect(screen.getByText('2 场的段位分变化')).toBeTruthy()
+    expect(figure('和了率')).toBe('20.0%')
+    expect(screen.getByText('平均顺位').textContent).toBe('平均顺位 2.50')
+  })
+
+  it('keeps its three panels in place with nothing on record', async () => {
+    fixture.history = []
+    render(<Monitor />)
+    fireEvent.click(screen.getByRole('tab', { name: '统计' }))
+    expect(await screen.findByText('还没有记录到段位分')).toBeTruthy()
+    expect(screen.getByText('役种从记录它的版本起开始累计')).toBeTruthy()
+    expect(screen.getByText('和了率').closest('.mfact')!.querySelector('dd')!.textContent).toBe('—')
+  })
+})
+
+describe('the settings', () => {
+  beforeEach(() => { fixture.snapshot = state(); fixture.options = { always_on_top: false }; fixture.calls = []; fixture.handEvents = []; fixture.history = [] })
+
+  it('has the switches of the window with their words, and says what it runs', async () => {
+    fixture.snapshot!.server = { state: 'ready', bot: 'demo', label: 'Model A', facts: [{ name: 'Device', value: 'CPU' }], since_ms: 0, startup_ms: 900 }
+    Object.assign(fixture.options, { version: '0.1.0' })
+    render(<Monitor />)
+    fireEvent.click(screen.getByRole('tab', { name: '设置' }))
+    const line = (name: string) => screen.getByText(name).closest('.mfact')!.querySelector('dd')!.textContent
+    expect(line('模型')).toBe('Model A')
+    expect(line('Device')).toBe('CPU')
+    await waitFor(() => expect(line('版本')).toBe('0.1.0'))
+
+    // The same two switches the bar has: one setting, two places to change it.
+    const pin = screen.getByRole('switch', { name: '窗口置顶' })
+    expect(pin.getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(pin)
+    await waitFor(() => expect(screen.getByRole('switch', { name: '窗口置顶' }).getAttribute('aria-checked')).toBe('true'))
+    expect(fixture.calls).toContainEqual(['set_monitor_pinned', { pinned: true }])
+
+    fireEvent.click(screen.getAllByRole('switch', { name: /自动操作/ }).at(-1)!)
+    expect(fixture.calls).toContainEqual(['set_monitor_autoplay', { enabled: false }])
   })
 })

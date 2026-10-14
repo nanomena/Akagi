@@ -102,6 +102,23 @@ pub fn facts_of(value: Option<&serde_json::Value>) -> Vec<Fact> {
         .unwrap_or_default()
 }
 
+/// One hand of the current game, kept after the next is dealt: which hand it
+/// was and how it ended. Its events stay on this side and are asked for by
+/// `round` ([`MonitorHandle::hand_events`]): the snapshot is sent whole on
+/// every change, and a game's worth of events is not something to send twice.
+#[derive(Debug, Clone, Serialize)]
+pub struct HandSummary {
+    /// Its place among the hands dealt this game, from one.
+    pub round: u64,
+    pub bakaze: String,
+    pub kyoku: u8,
+    pub honba: u8,
+    /// `None` while it is being played.
+    pub result: Option<RoundResult>,
+    /// How many events it has had.
+    pub events: usize,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct MonitorSnapshot {
     pub revision: u64,
@@ -130,6 +147,10 @@ pub struct MonitorSnapshot {
     pub previous_decision: Option<Decision>,
     pub result: Option<RoundResult>,
     pub previous_result: Option<RoundResult>,
+    /// The hands of this game in the order they were dealt, the one being
+    /// played last. Emptied when another game starts.
+    pub hands: Vec<HandSummary>,
+    /// The events of the hand being played.
     pub events: VecDeque<MonitorEvent>,
     pub last_event_ms: Option<i64>,
 }
@@ -162,6 +183,7 @@ impl Default for MonitorSnapshot {
             previous_decision: None,
             result: None,
             previous_result: None,
+            hands: vec![],
             events: VecDeque::new(),
             last_event_ms: None,
         }
@@ -173,6 +195,11 @@ struct Inner {
     next_decision: u64,
     /// Decisions begun in the current game.
     game_decisions: u64,
+    /// What the provider calls the current game, when it says: the same
+    /// name on a second `start_game` is a reconnection, not another game.
+    game_id: Option<u64>,
+    /// The events of each hand in `snapshot.hands`, in the same order.
+    hand_events: Vec<Vec<MonitorEvent>>,
 }
 
 #[derive(Clone)]
@@ -190,6 +217,8 @@ impl Default for MonitorHandle {
                 snapshot,
                 next_decision: 0,
                 game_decisions: 0,
+                game_id: None,
+                hand_events: vec![],
             })),
             updates,
         }
@@ -220,8 +249,15 @@ impl MonitorHandle {
         error: Option<String>,
     ) -> DecisionContext {
         self.update(|inner| {
-            if matches!(event, MjaiEvent::StartGame { .. }) {
+            if let MjaiEvent::StartGame { game_meta, .. } = event {
                 inner.game_decisions = 0;
+                // A game that is rejoined keeps the hands it has played.
+                let id = game_meta.as_ref().and_then(|meta| meta.game_id);
+                if id.is_none() || id != inner.game_id {
+                    inner.snapshot.hands.clear();
+                    inner.hand_events.clear();
+                }
+                inner.game_id = id;
             }
             let s = &mut inner.snapshot;
             s.context.event_seq += 1;
@@ -255,6 +291,37 @@ impl MonitorHandle {
                 s.events.clear();
                 s.sync_error = None;
             }
+            if let MjaiEvent::StartKyoku {
+                bakaze,
+                kyoku,
+                honba,
+                ..
+            } = event
+            {
+                // A hand dealt again before it ended — a rejoined game hands
+                // back the one in play — takes the place of its first deal.
+                let again = s.hands.last().is_some_and(|hand| {
+                    hand.result.is_none()
+                        && hand.bakaze == *bakaze
+                        && hand.kyoku == *kyoku
+                        && hand.honba == *honba
+                });
+                if again {
+                    if let Some(events) = inner.hand_events.last_mut() {
+                        events.clear();
+                    }
+                } else {
+                    s.hands.push(HandSummary {
+                        round: s.hands.len() as u64 + 1,
+                        bakaze: bakaze.clone(),
+                        kyoku: *kyoku,
+                        honba: *honba,
+                        result: None,
+                        events: 0,
+                    });
+                    inner.hand_events.push(vec![]);
+                }
+            }
             let mut game = game;
             // The monitor is a public view even when an offline replay contains
             // omniscient engine state. Public reveals have their own provenance.
@@ -281,6 +348,7 @@ impl MonitorHandle {
                     scores,
                     deltas,
                     ura_markers,
+                    ..
                 } => {
                     let result = s.result.get_or_insert_with(|| RoundResult {
                         kind: "hora".into(),
@@ -375,12 +443,27 @@ impl MonitorHandle {
                     *pai = "?".into();
                 }
             }
-            s.events.push_back(MonitorEvent {
+            let seen = MonitorEvent {
                 seq: s.context.event_seq,
                 ts_ms: now,
                 event: visible_event,
-            });
-            while s.events.len() > 80 {
+            };
+            // The hand's own record: everything from its deal on, and how it
+            // ended once it has. A rejoined game's second `start_game` belongs
+            // to no hand.
+            let rejoined = matches!(event, MjaiEvent::StartGame { .. });
+            if let (false, Some(hand), Some(events)) =
+                (rejoined, s.hands.last_mut(), inner.hand_events.last_mut())
+            {
+                events.push(seen.clone());
+                hand.events = events.len();
+                if s.result.is_some() {
+                    hand.result.clone_from(&s.result);
+                }
+            }
+            s.events.push_back(seen);
+            // A whole hand, calls and all, stays under this.
+            while s.events.len() > 240 {
                 s.events.pop_front();
             }
             confirm(s);
@@ -389,6 +472,14 @@ impl MonitorHandle {
             }
             s.context
         })
+    }
+
+    /// The events of one hand of the current game, by its `round` in
+    /// [`MonitorSnapshot::hands`]. `None` for a hand this game has not had.
+    pub fn hand_events(&self, round: u64) -> Option<Vec<MonitorEvent>> {
+        let inner = self.inner.lock().expect("monitor lock poisoned");
+        let index = usize::try_from(round.checked_sub(1)?).ok()?;
+        inner.hand_events.get(index).cloned()
     }
 
     pub fn begin(&self, context: DecisionContext, bot: &str, trigger: &MjaiEvent) -> Option<u64> {
@@ -664,6 +755,105 @@ mod tests {
     fn response(json: &str) -> BotResponse {
         serde_json::from_str(json).unwrap()
     }
+    fn deal(m: &MonitorHandle, kyoku: u8, honba: u8) -> DecisionContext {
+        let dealt = format!(
+            r#"{{"type":"start_kyoku","bakaze":"E","dora_marker":"1m","kyoku":{kyoku},"honba":{honba},"kyotaku":0,"oya":0,"scores":[25000,25000,25000,25000],"tehais":[[],[],[],[]]}}"#
+        );
+        m.game_event(&event(&dealt), None, None)
+    }
+    fn play(m: &MonitorHandle, events: &[&str]) {
+        for json in events {
+            m.game_event(&event(json), None, None);
+        }
+    }
+    /// The game a provider names, started (or rejoined).
+    fn start_named(m: &MonitorHandle, game_id: u64) {
+        let start = MjaiEvent::StartGame {
+            names: vec!["a".into(), "b".into(), "c".into(), "d".into()],
+            kyoku_first: None,
+            aka_flag: Some(true),
+            id: Some(0),
+            num_players: 4,
+            game_meta: Some(crate::schema::GameMeta {
+                game_id: Some(game_id),
+                ..Default::default()
+            }),
+        };
+        m.game_event(&start, None, None);
+    }
+
+    /// A game's hands stay: how each ended in the snapshot, its events on
+    /// request.
+    #[test]
+    fn the_hands_of_a_game_are_kept_until_another_game_starts() {
+        let m = MonitorHandle::default();
+        hand(&m);
+        play(
+            &m,
+            &[
+                r#"{"type":"tsumo","actor":0,"pai":"5m"}"#,
+                r#"{"type":"dahai","actor":0,"pai":"5m","tsumogiri":true}"#,
+                r#"{"type":"ryukyoku","deltas":[0,0,0,0]}"#,
+                r#"{"type":"end_kyoku"}"#,
+            ],
+        );
+        deal(&m, 1, 1);
+        play(&m, &[r#"{"type":"tsumo","actor":0,"pai":"9p"}"#]);
+
+        let s = m.snapshot();
+        let hands: Vec<_> = s
+            .hands
+            .iter()
+            .map(|h| (h.round, h.kyoku, h.honba, h.result.is_some(), h.events))
+            .collect();
+        assert_eq!(hands, [(1, 1, 0, true, 5), (2, 1, 1, false, 2)]);
+        // The hand in play is in the snapshot; an earlier one is asked for.
+        assert_eq!(s.events.len(), 2);
+        let first = m.hand_events(1).unwrap();
+        assert_eq!(first.len(), 5);
+        assert!(matches!(first[0].event, MjaiEvent::StartKyoku { .. }));
+        assert!(matches!(first[4].event, MjaiEvent::EndKyoku));
+        assert!(m.hand_events(0).is_none() && m.hand_events(3).is_none());
+
+        // Another game: nothing of the last one is left.
+        hand(&m);
+        assert_eq!(m.snapshot().hands.len(), 1);
+        assert_eq!(m.hand_events(1).unwrap().len(), 1);
+    }
+
+    /// Rejoining a game starts it again on the wire and deals the hand in
+    /// play again. The hands already played stay, and the hand in play is
+    /// one hand, not two.
+    #[test]
+    fn a_rejoined_game_keeps_its_hands() {
+        let m = MonitorHandle::default();
+        start_named(&m, 7);
+        deal(&m, 1, 0);
+        play(
+            &m,
+            &[
+                r#"{"type":"ryukyoku","deltas":[0,0,0,0]}"#,
+                r#"{"type":"end_kyoku"}"#,
+            ],
+        );
+        deal(&m, 1, 1);
+        play(&m, &[r#"{"type":"tsumo","actor":0,"pai":"9p"}"#]);
+
+        start_named(&m, 7);
+        deal(&m, 1, 1);
+        let hands: Vec<_> = m
+            .snapshot()
+            .hands
+            .iter()
+            .map(|h| (h.round, h.honba, h.result.is_some(), h.events))
+            .collect();
+        assert_eq!(hands, [(1, 0, true, 3), (2, 1, false, 1)]);
+
+        // A different game is a different game.
+        start_named(&m, 8);
+        assert!(m.snapshot().hands.is_empty());
+    }
+
     #[test]
     fn decisions_are_numbered_from_one_in_every_game() {
         let m = MonitorHandle::default();

@@ -103,6 +103,34 @@ impl TileClass {
     }
 }
 
+/// How a policy that imitates people sees a decision (see
+/// `autoplay::advisor`): the share of players making their likeliest move,
+/// the next likeliest, and the move that is actually being made.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HumanView {
+    pub top: f64,
+    pub second: Option<f64>,
+    pub chosen: f64,
+}
+
+/// What is known about a decision besides the bot's own numbers: facts read
+/// off the table (`autoplay::table`) and a second opinion
+/// (`autoplay::advisor`). Every part is optional — `None` is "not read", not
+/// "no" — and, like the probabilities, none of it can alter the action. The
+/// built-in model ignores it; it is there for delay scripts.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Reading {
+    /// The discarded tile is loose in the hand.
+    pub loose: Option<bool>,
+    /// The runner-up discard is loose in the hand. `None` unless the bot's
+    /// two likeliest candidates are discards of different tiles.
+    pub runner_up_loose: Option<bool>,
+    /// The discarded tile cannot deal in to any riichi. `None` with no
+    /// riichi on the table.
+    pub safe: Option<bool>,
+    pub human: Option<HumanView>,
+}
+
 /// Copy of the server time budget taken at planning time.
 /// `elapsed_ms` is pre-computed so the planner stays free of clocks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -149,6 +177,9 @@ pub struct DelayInput<'a> {
     /// could be interpreted (see [`probs::normalize_meta`]). The built-in
     /// model ignores them; they are exposed to user Lua scripts only.
     pub probs: Option<DecisionProbs>,
+    /// Table facts and a second opinion on this decision, as far as they
+    /// were read. Exposed to user Lua scripts only.
+    pub reading: Reading,
     /// Server time budget for this window, if known.
     pub budget: Option<BudgetSnapshot>,
     /// Time the click sequence itself will take *after* the pre-delay
@@ -162,11 +193,19 @@ pub struct DelayInput<'a> {
 /// Model output. `total_target_ms` is the target **total** thinking time
 /// since the window opened — the caller subtracts what has already
 /// elapsed. `allow_bank` reports whether this decision justifies dipping
-/// into the server's extra time pool (`time_add`).
+/// into the server's extra time pool (`time_add`). `hesitate` asks for the
+/// pointer to rest on the runner-up before the press — a wish: it is shown
+/// only where there is a runner-up to rest on and time to do it in, and it
+/// changes neither the action nor when it lands (see `autoplay::pointer`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DelayDecision {
     pub total_target_ms: u32,
     pub allow_bank: bool,
+    pub hesitate: bool,
+    /// How long the pointer should rest on a tile it looks at while
+    /// hesitating, when the script has a view; `None` leaves it to the
+    /// pointer's own default.
+    pub look_ms: Option<u32>,
 }
 
 /// The built-in delay policy. Pure given `rng`.
@@ -205,6 +244,10 @@ pub fn decide<R: Rng + ?Sized>(input: &DelayInput, rng: &mut R) -> DelayDecision
     DelayDecision {
         total_target_ms: target,
         allow_bank,
+        // Hesitation is a reading of the bot's own confidence, which the
+        // built-in model does not consult; only a script asks for it.
+        hesitate: false,
+        look_ms: None,
     }
 }
 
@@ -401,6 +444,7 @@ mod tests {
             junme: 0,
             legal_action_count: 1,
             probs: None,
+            reading: Default::default(),
             budget: None,
             click_overhead_ms: 0,
             cfg,
@@ -574,10 +618,12 @@ mod tests {
             Some(DecisionProbs {
                 top: 0.41,
                 second: Some(0.409), // near-tie
+                entropy: 0.0,
             }),
             Some(DecisionProbs {
                 top: 0.999,
                 second: Some(0.001), // obvious
+                entropy: 0.0,
             }),
         ] {
             let mut i = input(&c, &d);

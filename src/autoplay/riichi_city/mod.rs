@@ -51,7 +51,11 @@ impl PlatformAutoplay for RiichiCityAutoplay {
             },
             Step::SendFrame(frame),
         ];
-        PlanResult { steps }
+        PlanResult {
+            steps,
+            hesitate: false,
+            look_ms: None,
+        }
     }
 }
 
@@ -130,6 +134,7 @@ fn pre_delay(ctx: &ActionContext, kind: DecisionKind) -> u32 {
         junme: 0,
         legal_action_count: ctx.legal_actions.len(),
         probs: ctx.probs,
+        reading: ctx.reading,
         budget: ctx.budget,
         click_overhead_ms: 0,
         cfg: ctx.cfg,
@@ -199,6 +204,7 @@ mod tests {
                 delay_cfg: self.delay_cfg.clone(),
                 budget: None,
                 probs: None,
+                reading: Default::default(),
                 delay_script: None,
                 tenhou: None,
             }

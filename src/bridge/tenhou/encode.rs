@@ -494,6 +494,7 @@ mod tests {
     #[test]
     fn hora_splits_tsumo_and_ron() {
         let tsumo = MjaiEvent::Hora {
+            score: None,
             actor: 1,
             target: 1,
             deltas: None,
@@ -507,6 +508,7 @@ mod tests {
             r#"{"tag":"N","type":7}"#
         );
         let ron = MjaiEvent::Hora {
+            score: None,
             actor: 1,
             target: 2,
             deltas: None,

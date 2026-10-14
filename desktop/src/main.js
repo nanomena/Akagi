@@ -56,6 +56,7 @@ let game = null
 /** @type {Core | null} */
 let core = null
 /** The window's options as the core last saved them. */
+/** @type {{ always_on_top: boolean, version?: string }} */
 let options = { always_on_top: false }
 let cdpPort = 0
 let quitting = false
@@ -144,7 +145,7 @@ function holdRatio(frame) {
 
 /** @param {import('./core.js').Ready} ready */
 function openWindow(ready) {
-  options = ready.monitor
+  options = { ...ready.monitor, version: ready.version }
   const saved = restoredBounds(readJson(WINDOW_STATE), screen.getAllDisplays().map(display => display.workArea))
   const size = saved ?? openingSize(screen.getPrimaryDisplay().workAreaSize)
   const frame = window = new BaseWindow({
@@ -248,10 +249,13 @@ function running() {
  */
 const commands = {
   get_monitor: () => running().call('get_monitor'),
+  get_hand_events: ({ round }) => running().call('get_hand_events', { round: Number(round) }),
+  get_history: () => running().call('get_history'),
   get_monitor_options: async () => options,
   set_monitor_autoplay: ({ enabled }) => running().call('set_monitor_autoplay', { enabled: enabled === true }),
   async set_monitor_pinned({ pinned }) {
-    options = /** @type {{ always_on_top: boolean }} */ (await running().call('set_monitor_pinned', { pinned: pinned === true }))
+    const saved = /** @type {{ always_on_top: boolean }} */ (await running().call('set_monitor_pinned', { pinned: pinned === true }))
+    options = { ...options, ...saved }
     window?.setAlwaysOnTop(options.always_on_top)
     return options
   },
