@@ -295,13 +295,16 @@ plans made of canvas clicks (Majsoul):
   shallow eased arc (`cdp_input::travel`, `mouseMoved` events with no
   button held). If the delay script answered `hesitate = true`, and the
   bot's two likeliest candidates are discards of two different tiles,
-  it first rests on the runner-up — or goes to the choice, over to the
-  runner-up and back. What the candidates are comes from the bot:
+  and the two sit within three tiles of each other, it first rests on
+  the runner-up — or on the choice, then the runner-up, and comes back —
+  and settles on the choice before pressing it. How long a tile is
+  rested on is the script's `look_ms`, or `pointer::LOOK_MS`. Tiles
+  further apart get no look: that would be a sweep across the rack. What the candidates are comes from the bot:
   `show.items[]` with `prob` and `type` (the mjai event the candidate
   stands for). Without `type` nothing is assumed and there is no look.
 - **The rest.** Once the press has registered (`verify.rs`), the pointer
-  moves to a random point above the hand, where nothing is drawn under
-  it.
+  moves to a random point by the action buttons — where a hand waits for
+  the next thing it may have to answer — and off the hand.
 
 Invariants:
 

@@ -54,6 +54,7 @@ impl PlatformAutoplay for RiichiCityAutoplay {
         PlanResult {
             steps,
             hesitate: false,
+            look_ms: None,
         }
     }
 }

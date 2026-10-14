@@ -215,7 +215,7 @@ impl DelayScript {
         self.lua.remove_hook();
 
         match result {
-            Ok((target_ms, allow_bank, hesitate)) => {
+            Ok((target_ms, allow_bank, hesitate, look_ms)) => {
                 if let Ok(mut g) = self.last_error.lock() {
                     *g = None;
                 }
@@ -227,6 +227,7 @@ impl DelayScript {
                     total_target_ms: target,
                     allow_bank,
                     hesitate,
+                    look_ms,
                 })
             }
             Err(e) => {
@@ -242,7 +243,7 @@ impl DelayScript {
         }
     }
 
-    fn call(&self, input: &DelayInput) -> mlua::Result<(u32, bool, bool)> {
+    fn call(&self, input: &DelayInput) -> mlua::Result<(u32, bool, bool, Option<u32>)> {
         let ctx = self.build_ctx(input)?;
         let ret: Value = self.func.call(ctx)?;
         let Value::Table(t) = ret else {
@@ -268,7 +269,24 @@ impl DelayScript {
                 other.type_name()
             ))),
         };
-        Ok((delay_ms as u32, flag("allow_bank")?, flag("hesitate")?))
+        // How long to rest on a tile that is looked at: a tenth of a second
+        // to five, or the script has a bug.
+        let look_ms = match t.get::<Value>("look_ms") {
+            Ok(Value::Nil) | Err(_) => None,
+            Ok(Value::Integer(n)) if (100..=5_000).contains(&n) => Some(n as u32),
+            Ok(Value::Number(n)) if (100.0..=5_000.0).contains(&n) => Some(n as u32),
+            Ok(other) => {
+                return Err(mlua::Error::RuntimeError(format!(
+                    "decide_delay `look_ms` must be a number from 100 to 5000, got {other:?}"
+                )));
+            }
+        };
+        Ok((
+            delay_ms as u32,
+            flag("allow_bank")?,
+            flag("hesitate")?,
+            look_ms,
+        ))
     }
 
     /// Build the read-only `ctx` table the script receives.
@@ -653,6 +671,28 @@ mod tests {
             }),
         };
         assert_eq!(s.try_decide(&i).unwrap().total_target_ms, 2000);
+    }
+
+    #[test]
+    fn a_script_may_say_how_long_a_look_rests() {
+        let cfg = MajsoulAutoplayConfig::default();
+        let d = DelayModelConfig::default();
+        let ask = |answer: &str| {
+            let source = format!("function decide_delay(ctx) return {answer} end");
+            let s = DelayScript::compile(&source, "test").unwrap();
+            s.try_decide(&base_input(&cfg, &d))
+        };
+        assert_eq!(ask("{ delay_ms = 2300 }").unwrap().look_ms, None);
+        assert_eq!(
+            ask("{ delay_ms = 2300, look_ms = 1200 }").unwrap().look_ms,
+            Some(1200)
+        );
+        assert_eq!(
+            ask("{ delay_ms = 2300, look_ms = 950.5 }").unwrap().look_ms,
+            Some(950)
+        );
+        assert!(ask("{ delay_ms = 2300, look_ms = 20 }").is_none());
+        assert!(ask("{ delay_ms = 2300, look_ms = true }").is_none());
     }
 
     /// Lua's truthiness would read `hesitate = 0` as a yes.

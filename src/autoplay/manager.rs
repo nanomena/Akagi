@@ -410,6 +410,12 @@ impl AutoplayManager {
         // exactly what the way takes, so the press lands when it would
         // have (see `autoplay::pointer`).
         let mut approach = rect.and_then(|rect| self.plan_approach(&mut plan, rect, glance));
+        if approach.as_ref().is_some_and(|a| a.legs.len() > 1) {
+            info!(
+                "autoplay: looking at the runner-up before {:?}",
+                resp.action
+            );
+        }
 
         let mut window_checked = false;
         for step in &plan.steps {
@@ -666,6 +672,7 @@ impl AutoplayManager {
         rect: CanvasRect,
         glance: Option<(f64, f64)>,
     ) -> Option<crate::autoplay::pointer::Approach> {
+        let rest_ms = plan.look_ms.unwrap_or(crate::autoplay::pointer::LOOK_MS);
         let [Step::Sleep { duration_ms }, Step::Click { x_norm, y_norm }, ..] =
             plan.steps.as_mut_slice()
         else {
@@ -675,14 +682,17 @@ impl AutoplayManager {
         // A pointer that has not been anywhere yet starts from where it
         // would have been resting.
         let from = *self.state.pointer.get_or_insert_with(|| {
-            let (x, y) = crate::autoplay::pointer::rest_point((*x_norm, *y_norm), &mut rng);
+            let (x, y) = crate::autoplay::pointer::rest_point(&mut rng);
             rect.pixel(x, y)
         });
         let approach = crate::autoplay::pointer::approach(
             *duration_ms,
             from,
             rect.pixel(*x_norm, *y_norm),
-            glance.map(|(x, y)| rect.pixel(x, y)),
+            glance.map(|(x, y)| crate::autoplay::pointer::Look {
+                at: rect.pixel(x, y),
+                rest_ms,
+            }),
             rect.width / 16.0,
             &mut rng,
         );
@@ -718,7 +728,7 @@ impl AutoplayManager {
             .unwrap_or_else(|| rect.pixel(pressed.0, pressed.1));
         let leg = {
             let mut rng = rand::rng();
-            let (x, y) = crate::autoplay::pointer::rest_point(pressed, &mut rng);
+            let (x, y) = crate::autoplay::pointer::rest_point(&mut rng);
             crate::autoplay::pointer::leave(from, rect.pixel(x, y), rect.width / 16.0, &mut rng)
         };
         tokio::time::sleep(Duration::from_millis(u64::from(leg.dwell_ms))).await;

@@ -130,6 +130,9 @@ pub struct PlanResult {
     /// work out (see `autoplay::pointer`); the steps are the same either
     /// way.
     pub hesitate: bool,
+    /// How long the pointer should rest on a tile it looks at, when the
+    /// delay model said.
+    pub look_ms: Option<u32>,
 }
 
 pub trait PlatformAutoplay: Send + Sync {

@@ -26,10 +26,22 @@ use rand::Rng;
 /// A point in CSS pixels.
 pub type Point = (f64, f64);
 
-/// The shortest look at the runner-up that still reads as one.
-const MIN_DWELL_MS: u32 = 260;
-/// The longest; beyond it the pointer just looks parked on the wrong tile.
-const MAX_DWELL_MS: u32 = 1_300;
+/// How long the pointer rests on a tile it looks at, unless the delay script
+/// says otherwise (`look_ms` in its answer).
+pub const LOOK_MS: u32 = 800;
+
+/// How far apart, in 16:9 units, two tiles may sit for the pointer to go from
+/// one to the other: three tiles, and the gap before the drawn one. Any
+/// further and the look is a sweep across the rack, and nobody weighs two
+/// tiles by waving between the ends of their hand.
+const LOOK_REACH: f64 = 2.7;
+
+/// A look at the runner-up: where it sits, and how long a tile is rested on.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Look {
+    pub at: Point,
+    pub rest_ms: u32,
+}
 
 /// One stretch of an approach: travel to `to`, then stay for `dwell_ms`.
 #[derive(Debug, Clone, PartialEq)]
@@ -43,7 +55,9 @@ pub struct Leg {
 }
 
 /// The pointer's way to a press: wait `pause_ms`, then walk `legs`. The last
-/// leg ends on the press point with no dwell — the press's own hover follows.
+/// leg ends on the press point. A plain approach presses as it arrives — the
+/// press's own hover follows; one that looked elsewhere first settles on the
+/// tile before pressing it.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Approach {
     pub pause_ms: u32,
@@ -117,31 +131,33 @@ pub fn leave<R: Rng + ?Sized>(from: Point, to: Point, unit: f64, rng: &mut R) ->
 /// Plan the pointer's way from `from` to a press at `press`, to take exactly
 /// `think_ms`.
 ///
-/// With a `glance` — the runner-up's place — the pointer rests there first,
-/// or goes to the press, over to the runner-up and back. Whatever does not
-/// fit in `think_ms` is dropped, the look before the travel: a short think
-/// gets a plain approach, and a shorter one gets a quicker hand.
+/// With a `look` at a runner-up that sits within reach of the press, the
+/// pointer rests there first, or rests on the press, goes over to the
+/// runner-up and comes back. Whatever does not fit in `think_ms` is dropped,
+/// the look before the travel: a short think gets a plain approach, and a
+/// shorter one gets a quicker hand.
 pub fn approach<R: Rng + ?Sized>(
     think_ms: u32,
     from: Point,
     press: Point,
-    glance: Option<Point>,
+    look: Option<Look>,
     unit: f64,
     rng: &mut R,
 ) -> Approach {
-    if let Some(look) = glance {
+    if let Some(look) = look.filter(|l| distance(press, l.at) <= LOOK_REACH * unit) {
         // Reach for the choice, doubt it, come back — or reach for the
         // runner-up and think better of it.
         let stops: Vec<Point> = if rng.random_bool(0.4) {
-            vec![press, look]
+            vec![press, look.at]
         } else {
-            vec![look]
+            vec![look.at]
         };
-        if let Some(found) = with_stops(think_ms, from, press, &stops, unit, rng) {
+        if let Some(found) = with_stops(think_ms, from, press, &stops, look.rest_ms, unit, rng) {
             return found;
         }
         if stops.len() > 1 {
-            if let Some(found) = with_stops(think_ms, from, press, &[look], unit, rng) {
+            let only = [look.at];
+            if let Some(found) = with_stops(think_ms, from, press, &only, look.rest_ms, unit, rng) {
                 return found;
             }
         }
@@ -158,13 +174,20 @@ pub fn approach<R: Rng + ?Sized>(
     }
 }
 
-/// An approach that rests on each of `stops` on its way to `press`, or
-/// `None` when `think_ms` cannot hold it.
+/// The least and the most of `rest_ms` a tile that is looked at is rested on,
+/// and the same for the tile that is then pressed.
+const LOOK_SHARE: std::ops::Range<f64> = 0.75..1.35;
+const SETTLE_SHARE: std::ops::Range<f64> = 0.4..0.8;
+
+/// An approach that rests on each of `stops` on its way to `press`, and
+/// settles on `press` before pressing it; `None` when `think_ms` cannot hold
+/// that.
 fn with_stops<R: Rng + ?Sized>(
     think_ms: u32,
     from: Point,
     press: Point,
     stops: &[Point],
+    rest_ms: u32,
     unit: f64,
     rng: &mut R,
 ) -> Option<Approach> {
@@ -180,22 +203,31 @@ fn with_stops<R: Rng + ?Sized>(
         at = stop;
     }
     let travel: u32 = legs.iter().map(|l| l.travel_ms).sum();
-    let looks = stops.len() as u32;
     let spare = think_ms.checked_sub(travel)?;
-    if spare < looks * MIN_DWELL_MS {
+    let rest = f64::from(rest_ms);
+    let least = rest * (LOOK_SHARE.start * stops.len() as f64 + SETTLE_SHARE.start);
+    if f64::from(spare) < least {
         return None;
     }
-    // Each look takes a share of the think, within what a look can be, and
+    // A rest on each tile looked at and a shorter one on the tile pressed;
     // together no more than what is left once the travel is paid for.
-    let mut left = spare;
-    for (i, leg) in legs.iter_mut().take(stops.len()).enumerate() {
-        let after = (looks - 1 - i as u32) * MIN_DWELL_MS;
-        let wish = (f64::from(think_ms) * rng.random_range(0.14..0.32)) as u32;
-        leg.dwell_ms = wish.clamp(MIN_DWELL_MS, MAX_DWELL_MS).min(left - after);
-        left -= leg.dwell_ms;
+    for (i, leg) in legs.iter_mut().enumerate() {
+        let share = if i < stops.len() {
+            rng.random_range(LOOK_SHARE)
+        } else {
+            rng.random_range(SETTLE_SHARE)
+        };
+        leg.dwell_ms = (rest * share) as u32;
     }
+    let wished: u32 = legs.iter().map(|l| l.dwell_ms).sum();
+    if wished > spare {
+        for leg in &mut legs {
+            leg.dwell_ms = (u64::from(leg.dwell_ms) * u64::from(spare) / u64::from(wished)) as u32;
+        }
+    }
+    let rested: u32 = legs.iter().map(|l| l.dwell_ms).sum();
     Some(Approach {
-        pause_ms: left,
+        pause_ms: spare - rested,
         legs,
     })
 }
@@ -222,12 +254,15 @@ pub fn runner_up<'a>(candidates: &'a [Candidate], chosen: &str) -> Option<&'a st
     }
 }
 
-/// Where the pointer rests after a press at the normalised 16:9 point
-/// `pressed`: a little way off to either side, above the hand and below the
-/// table, where the client draws nothing under it.
-pub fn rest_point<R: Rng + ?Sized>(pressed: (f64, f64), rng: &mut R) -> (f64, f64) {
-    let x = (pressed.0 + rng.random_range(-1.6..1.6)).clamp(2.2, 12.8);
-    (x, rng.random_range(6.6..7.5))
+/// Where the pointer rests between presses, as a normalised 16:9 point: by
+/// the action buttons, where a hand waits for the next thing it may have to
+/// answer. Off the hand, so no tile is left lifted.
+pub fn rest_point<R: Rng + ?Sized>(rng: &mut R) -> (f64, f64) {
+    let (x, y) = crate::autoplay::majsoul::coords::ACTIONS[0];
+    (
+        x + rng.random_range(-1.3..0.6),
+        y + rng.random_range(-0.25..0.25),
+    )
 }
 
 #[cfg(test)]
@@ -237,6 +272,17 @@ mod tests {
     use rand::SeedableRng;
 
     const UNIT: f64 = 100.0;
+    const PRESS: Point = (1170.0, 836.0);
+    /// Two tiles along from the press.
+    const NEAR: Look = Look {
+        at: (1012.0, 836.0),
+        rest_ms: LOOK_MS,
+    };
+    /// The other end of the hand.
+    const FAR: Look = Look {
+        at: (300.0, 836.0),
+        rest_ms: LOOK_MS,
+    };
 
     fn discard(pai: &str, prob: f64) -> Candidate {
         Candidate {
@@ -297,59 +343,73 @@ mod tests {
     fn an_approach_takes_exactly_the_think_it_is_given() {
         let mut rng = StdRng::seed_from_u64(7);
         for think in [0, 40, 250, 700, 1_000, 1_800, 3_500, 9_000, 60_000] {
-            for glance in [None, Some((300.0, 836.0))] {
+            for look in [None, Some(NEAR), Some(FAR)] {
                 for _ in 0..200 {
                     let from = (
                         rng.random_range(200.0..1300.0),
                         rng.random_range(660.0..750.0),
                     );
-                    let plan = approach(think, from, (1170.0, 836.0), glance, UNIT, &mut rng);
+                    let plan = approach(think, from, PRESS, look, UNIT, &mut rng);
                     assert_eq!(plan.total_ms(), think, "{plan:?}");
-                    let last = plan.legs.last().unwrap();
-                    assert_eq!(last.to, (1170.0, 836.0));
-                    assert_eq!(last.dwell_ms, 0);
+                    assert_eq!(plan.legs.last().unwrap().to, PRESS);
                 }
             }
         }
     }
 
     #[test]
-    fn a_glance_rests_on_the_runner_up_before_the_press() {
+    fn a_look_rests_on_the_runner_up_and_then_settles_on_the_press() {
         let mut rng = StdRng::seed_from_u64(11);
-        let (press, look) = ((1170.0, 836.0), (300.0, 836.0));
         let mut shapes = std::collections::BTreeSet::new();
         for _ in 0..200 {
-            let plan = approach(4_000, (700.0, 700.0), press, Some(look), UNIT, &mut rng);
+            let plan = approach(6_000, (700.0, 700.0), PRESS, Some(NEAR), UNIT, &mut rng);
             let stops: Vec<Point> = plan.legs.iter().map(|l| l.to).collect();
-            assert!(stops == vec![look, press] || stops == vec![press, look, press]);
-            for leg in &plan.legs[..plan.legs.len() - 1] {
-                assert!(
-                    (MIN_DWELL_MS..=MAX_DWELL_MS).contains(&leg.dwell_ms),
-                    "{leg:?}"
-                );
+            assert!(stops == vec![NEAR.at, PRESS] || stops == vec![PRESS, NEAR.at, PRESS]);
+            let (settle, looks) = plan.legs.split_last().unwrap();
+            for leg in looks {
+                assert!((600..=1_080).contains(&leg.dwell_ms), "{leg:?}");
             }
+            assert!((320..=640).contains(&settle.dwell_ms), "{settle:?}");
             shapes.insert(stops.len());
         }
         assert_eq!(shapes.len(), 2, "both shapes should occur");
+    }
+
+    /// A longer rest asked for is a longer rest given.
+    #[test]
+    fn the_rest_on_a_tile_is_the_one_asked_for() {
+        let mut rng = StdRng::seed_from_u64(13);
+        let long = Look {
+            rest_ms: 1_600,
+            ..NEAR
+        };
+        for _ in 0..100 {
+            let plan = approach(9_000, (700.0, 700.0), PRESS, Some(long), UNIT, &mut rng);
+            assert!(plan.legs.len() > 1);
+            assert!(plan.legs[0].dwell_ms >= 1_200, "{plan:?}");
+        }
+    }
+
+    #[test]
+    fn tiles_far_apart_are_not_looked_between() {
+        let mut rng = StdRng::seed_from_u64(17);
+        for _ in 0..100 {
+            let plan = approach(9_000, (700.0, 700.0), PRESS, Some(FAR), UNIT, &mut rng);
+            assert_eq!(plan.legs.len(), 1, "{plan:?}");
+            assert_eq!(plan.legs[0].dwell_ms, 0);
+        }
     }
 
     #[test]
     fn a_think_too_short_for_a_look_gets_a_plain_approach() {
         let mut rng = StdRng::seed_from_u64(3);
         for _ in 0..100 {
-            let plan = approach(
-                500,
-                (700.0, 700.0),
-                (1170.0, 836.0),
-                Some((300.0, 836.0)),
-                UNIT,
-                &mut rng,
-            );
+            let plan = approach(900, (700.0, 700.0), PRESS, Some(NEAR), UNIT, &mut rng);
             assert_eq!(plan.legs.len(), 1);
-            assert_eq!(plan.total_ms(), 500);
+            assert_eq!(plan.total_ms(), 900);
         }
         // And one too short even to travel gets a quicker hand, not a later press.
-        let plan = approach(60, (200.0, 700.0), (1170.0, 836.0), None, UNIT, &mut rng);
+        let plan = approach(60, (200.0, 700.0), PRESS, None, UNIT, &mut rng);
         assert_eq!((plan.pause_ms, plan.legs[0].travel_ms), (0, 60));
     }
 
@@ -392,15 +452,13 @@ mod tests {
     }
 
     #[test]
-    fn the_pointer_rests_above_the_hand() {
+    fn the_pointer_rests_by_the_buttons_and_off_the_hand() {
         let mut rng = StdRng::seed_from_u64(5);
-        for x in [2.2, 6.9, 12.7] {
-            for _ in 0..200 {
-                let (rx, ry) = rest_point((x, 8.3625), &mut rng);
-                assert!((2.2..=12.8).contains(&rx));
-                // Clear of a lifted tile below and of the table above.
-                assert!((6.6..7.5).contains(&ry));
-            }
+        for _ in 0..500 {
+            let (x, y) = rest_point(&mut rng);
+            assert!((9.5..11.5).contains(&x), "{x}");
+            // Above a lifted tile, on the buttons' row.
+            assert!((6.7..7.3).contains(&y), "{y}");
         }
     }
 }

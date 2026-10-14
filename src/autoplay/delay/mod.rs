@@ -202,6 +202,10 @@ pub struct DelayDecision {
     pub total_target_ms: u32,
     pub allow_bank: bool,
     pub hesitate: bool,
+    /// How long the pointer should rest on a tile it looks at while
+    /// hesitating, when the script has a view; `None` leaves it to the
+    /// pointer's own default.
+    pub look_ms: Option<u32>,
 }
 
 /// The built-in delay policy. Pure given `rng`.
@@ -243,6 +247,7 @@ pub fn decide<R: Rng + ?Sized>(input: &DelayInput, rng: &mut R) -> DelayDecision
         // Hesitation is a reading of the bot's own confidence, which the
         // built-in model does not consult; only a script asks for it.
         hesitate: false,
+        look_ms: None,
     }
 }
 
