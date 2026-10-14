@@ -329,7 +329,13 @@ impl AutoplayManager {
         }
 
         // Throwing the tile just drawn: see `rest_pointer`.
-        let threw_draw = matches!(resp.action, MjaiEvent::Dahai { tsumogiri: true, .. });
+        let threw_draw = matches!(
+            resp.action,
+            MjaiEvent::Dahai {
+                tsumogiri: true,
+                ..
+            }
+        );
         let mut plan = platform.plan(&action_ctx);
         if plan.steps.is_empty() {
             return;
@@ -889,7 +895,12 @@ impl AutoplayManager {
     ///
     /// Not after a tsumogiri the pointer was already waiting for: a hand that
     /// threw the tile it drew stays where it drew it.
-    async fn rest_pointer(&mut self, rect: CanvasRect, plan: &crate::autoplay::PlanResult, threw_draw: bool) {
+    async fn rest_pointer(
+        &mut self,
+        rect: CanvasRect,
+        plan: &crate::autoplay::PlanResult,
+        threw_draw: bool,
+    ) {
         if std::mem::take(&mut self.state.waiting_on_draw) && threw_draw {
             self.settle_glances();
             return;
