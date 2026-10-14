@@ -36,6 +36,10 @@ export type ShowItem = {
   tiles?: string
   /** Right-side text (any format — e.g. "85.42%", "+12000"). */
   value?: string
+  /** A discard's `tsumogiri`, as its MJAI event would carry it. Throwing the
+   *  tile just drawn and throwing a copy of it from the hand are two candidates;
+   *  a bot that names this tells them apart. */
+  tsumogiri?: boolean
   /** Hex accent color (e.g. "#00ff80") — applied as left bar + faint row tint. */
   color?: string
   /** Small subtitle under `label`. */

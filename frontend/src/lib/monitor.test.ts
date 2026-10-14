@@ -70,6 +70,18 @@ describe('candidates', () => {
     // Hand discard and tsumogiri of the same tile are two rows; the first one is the answer.
     expect(rows.map(r => r.chosen)).toEqual([true, false, false, false, false])
   })
+  it('tells the tsumogiri from a hand copy of the same tile when the bot says which', () => {
+    const items: ShowItem[] = [
+      { label: 'Discard', pais: ['9s'], value: '50%', tsumogiri: true }, { label: 'Discard', pais: ['9s'], value: '30%', tsumogiri: false },
+      { label: 'Discard', pais: ['3m'], value: '20%', tsumogiri: false },
+    ]
+    const rows = candidatesOf(decision({ type: 'dahai', actor: 0, pai: '9s', tsumogiri: false }, items), table)
+    expect(rows.map(r => r.note)).toEqual(['摸切', '', ''])
+    // The bot threw the hand's 9s: the second row, though the first shows the same tile.
+    expect(rows.map(r => r.chosen)).toEqual([false, true, false])
+    const drawn = candidatesOf(decision({ type: 'dahai', actor: 0, pai: '9s', tsumogiri: true }, items), table, { type: 'dahai', actor: 0, pai: '9s', tsumogiri: false })
+    expect(drawn.map(r => [r.chosen, r.taken])).toEqual([[true, false], [false, true], [false, false]])
+  })
   it('expresses riichi, calls, kans, wins and passes', () => {
     const d = decision({ type: 'chi', actor: 0, target: 3, pai: '7s', consumed: ['8s', '9s'] }, [
       { label: 'Chi', pais: ['8s', '9s', '7s'], value: '40%' }, { label: 'Pass', value: '30%' },
