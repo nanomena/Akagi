@@ -90,6 +90,20 @@ describe('monitor user states', () => {
     expect(candidates()).toHaveLength(0)
   })
 
+  it('shows a tab while the pointer rests on it, and keeps the one clicked', async () => {
+    const { container } = render(<Monitor />)
+    const shown = () => container.querySelector('[role="tabpanel"]')!.getAttribute('data-tab')
+    fireEvent.mouseEnter(screen.getByRole('tab', { name: '牌桌' }))
+    await waitFor(() => expect(shown()).toBe('table'))
+    // Leaving the dock goes back to the tab kept.
+    fireEvent.mouseLeave(container.querySelector('aside.md')!)
+    expect(shown()).toBe('decision')
+    fireEvent.mouseEnter(screen.getByRole('tab', { name: '事件' }))
+    fireEvent.click(screen.getByRole('tab', { name: '事件' }))
+    fireEvent.mouseLeave(container.querySelector('aside.md')!)
+    expect(shown()).toBe('events')
+  })
+
   it('keeps the confirmed action as history but drops its candidates at round end', () => {
     fixture.snapshot!.decision!.state = 'confirmed'
     fixture.snapshot!.round_ended = true
