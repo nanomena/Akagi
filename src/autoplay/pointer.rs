@@ -255,13 +255,14 @@ pub fn runner_up<'a>(candidates: &'a [Candidate], chosen: &str) -> Option<&'a st
 }
 
 /// Where the pointer rests between presses, as a normalised 16:9 point:
-/// around the action buttons and the table above them, where a hand waits for
-/// the next thing it may have to answer — a wide area, so that it is not the
-/// same spot every time. Off the hand, so no tile is left lifted.
+/// along the action buttons' row and the table above it, where a hand waits
+/// for the next thing it may have to answer — a wide band, more than half the
+/// width of the game, so that it is not the same spot every time. Off the
+/// hand, so no tile is left lifted.
 pub fn rest_point<R: Rng + ?Sized>(rng: &mut R) -> (f64, f64) {
     let (x, y) = crate::autoplay::majsoul::coords::ACTIONS[0];
     (
-        x + rng.random_range(-3.4..1.6),
+        x + rng.random_range(-6.4..2.4),
         y + rng.random_range(-1.1..0.25),
     )
 }
@@ -457,7 +458,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(5);
         for _ in 0..500 {
             let (x, y) = rest_point(&mut rng);
-            assert!((7.4..12.5).contains(&x), "{x}");
+            assert!((4.4..13.3).contains(&x), "{x}");
             // Above a lifted tile: on the buttons' row or over the table above it.
             assert!((5.85..7.3).contains(&y), "{y}");
         }
