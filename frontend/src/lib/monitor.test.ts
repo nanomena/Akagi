@@ -18,7 +18,7 @@ function snapshot(d: MonitorDecision, patch: Partial<MonitorSnapshot> = {}): Mon
     round_ended: false, game_ended: false, capture: { state: 'running', descriptor: 'test' },
     bot: { state: 'ready', bot: 'demo', actor_id: 0 }, service: 'connected', service_error: null, server: { state: 'none' }, sync_error: null,
     brand: 'Demo', facts: [], autoplay_enabled: true, decision: d, previous_decision: null,
-    result: null, previous_result: null, events: [], last_event_ms: null, ...patch }
+    result: null, previous_result: null, hands: [], events: [], last_event_ms: null, ...patch }
 }
 
 describe('monitor stream identities', () => {
