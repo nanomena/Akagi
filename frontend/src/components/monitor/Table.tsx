@@ -1,7 +1,9 @@
+import { useState, type ReactNode } from 'react'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { Faces, Hand, Melds, River } from '@/components/monitor/Tiles'
 import { fmtScore } from '@/lib/format'
 import {
-  REL_SHORT, HAND_ROOM, handMarks, handOutcome, meldView, ownHand, relOf, resultTitle, seatLabel, seatWind, signed, tableOf,
+  REL_SHORT, HAND_ROOM, handLabel, handMarks, handOutcome, meldView, ownHand, relOf, resultTitle, seatLabel, seatWind, signed, tableOf,
   type MonitorSnapshot, type RoundResult, type Table,
 } from '@/lib/monitor'
 import type { GameStateSnapshot, MjaiEvent } from '@/types'
@@ -62,16 +64,21 @@ type ResultProps = {
   snapshot: MonitorSnapshot
   /** A result kept from the round before: the table it refers to is gone. */
   previous?: boolean
+  /** Which hand this is, when the card is one of several. */
+  title?: string
+  /** What stands at the head's right: the way to the other hands. */
+  pager?: ReactNode
 }
 
 /** What the round's end made public — and nothing inferred beyond that. The
  *  revealed hands stand one to a line; the settled scores beside them. */
-export function ResultCard({ result, snapshot: s, previous = false }: ResultProps) {
+export function ResultCard({ result, snapshot: s, previous = false, title, pager }: ResultProps) {
   const game = s.game
   const table = tableOf(game)
   return <section className="mresult" data-kind={result.kind === 'hora' ? 'hora' : 'draw'}>
     <header className="msec-head">
-      <h3>{previous ? '上一局结果' : '本局结果'}<span className="mtag" data-tone={result.kind === 'hora' ? 'win' : 'idle'}>{resultTitle(result)}</span></h3>
+      <h3>{title ?? (previous ? '上一局结果' : '本局结果')}<span className="mtag" data-tone={result.kind === 'hora' ? 'win' : 'idle'}>{resultTitle(result)}</span></h3>
+      {pager}
     </header>
     <div className="mresult-hands">
       {result.hands.length === 0 && <p className="mslot-empty">这一局没有公开的手牌</p>}
@@ -87,6 +94,27 @@ export function ResultCard({ result, snapshot: s, previous = false }: ResultProp
     </div>
     <ResultScores result={result} snapshot={s} />
   </section>
+}
+
+/** Every hand this game has finished, one at a time: the latest unless another
+ *  has been turned to. The arrows keep their places whatever the count. */
+export function ResultPages({ snapshot: s }: { snapshot: MonitorSnapshot }) {
+  const ended = s.hands.filter(h => h.result)
+  // The hand turned to, by its round; null follows the latest.
+  const [turned, setTurned] = useState<number | null>(null)
+  if (ended.length === 0) return <p className="mslot-empty md-wide">一局结束后，这里保留这一桌每一局公开的结果</p>
+  const found = turned == null ? -1 : ended.findIndex(h => h.round === turned)
+  const at = found < 0 ? ended.length - 1 : found
+  const hand = ended[at]
+  const go = (to: number) => setTurned(to === ended.length - 1 ? null : ended[to].round)
+  // Open melds are known only for the hand still on the table.
+  const onTable = !!s.result && hand.round === s.hands.at(-1)?.round
+  const pager = <span className="mpager">
+    <button aria-label="上一局" disabled={at === 0} onClick={() => go(at - 1)}><ChevronLeft size={14} /></button>
+    <b>{at + 1} / {ended.length}</b>
+    <button aria-label="下一局" disabled={at === ended.length - 1} onClick={() => go(at + 1)}><ChevronRight size={14} /></button>
+  </span>
+  return <ResultCard result={hand.result!} snapshot={s} previous={!onTable} title={handLabel(hand)} pager={pager} />
 }
 
 /** The settled scores of a result, one line a seat. */

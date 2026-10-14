@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { LoaderCircle, Pin, PinOff, X } from 'lucide-react'
 import { CandidateList, DecisionCard } from '@/components/monitor/Decision'
-import { HandStrip, ResultCard, ScoreStrip, SeatColumns } from '@/components/monitor/Table'
+import { HandStrip, ResultCard, ResultPages, ScoreStrip, SeatColumns } from '@/components/monitor/Table'
 import { Diagnostics, EventList, FaultCard } from '@/components/monitor/Details'
 import { Faces } from '@/components/monitor/Tiles'
 import { useMonitor } from '@/hooks/useMonitor'
 import { pickShow } from '@/lib/botShow'
 import {
-  MONITOR_DEFAULTS, alertsOf, candidatesOf, decisionView, healthOf, roundLabel, seatWind, tableOf,
+  MONITOR_DEFAULTS, alertsOf, candidatesOf, decisionView, healthOf, linkOf, roundLabel, seatWind, tableOf,
   type Alert, type Candidate, type DecisionView, type Health, type MonitorConfig, type MonitorSnapshot,
 } from '@/lib/monitor'
 import { invoke } from '@/lib/host'
@@ -66,11 +66,6 @@ type Model = {
   now: number
 }
 
-/** Four chips, each in a place of its own: a link that needs a word gets it without moving its neighbours. */
-function StatusChips({ health }: { health: Health[] }) {
-  return <>{health.map(h => <span key={h.key} className="mchip" data-tone={h.tone} title={`${h.name}：${h.state}`}><i className="mdot" data-tone={h.tone} />{h.name}<b>{h.tone !== 'ok' && h.state}</b></span>)}</>
-}
-
 function Round({ s }: { s: MonitorSnapshot | null }) {
   const game = s?.game
   return <div className="mround">
@@ -95,19 +90,18 @@ function Slot({ m, onDetails }: { m: Model; onDetails: () => void }) {
 function Dock({ m, tab, setTab, tools, onAutoplay }: { m: Model; tab: Tab; setTab: (tab: Tab) => void; tools: React.ReactNode; onAutoplay: ((enabled: boolean) => void) | null }) {
   const { s, view } = m
   const game = s?.game ?? null
-  const faulty = m.health.some(h => h.tone === 'bad')
-  const last = s?.result ?? s?.previous_result ?? null
+  const link = linkOf(m.health)
   return <aside className="md">
     <header className="md-bar">
       <Round s={s} />
       {/* Room for five indicators, the most a hand can turn over. */}
       <span className="mdora" title="宝牌指示牌">{game && game.dora_markers.length > 0 && <>宝牌<Faces faces={game.dora_markers.map(tile => ({ tile }))} /></>}</span>
       <nav className="md-tabs" role="tablist" aria-label="监视内容">
-        {TABS.map(([key, label]) => <button key={key} role="tab" aria-selected={tab === key} onClick={() => setTab(key)}>
-          {label}{key === 'link' && faulty && <i className="mdot md-tab-flag" data-tone="bad" />}
+        {/* The links have one light, on their tab: everything behind it is run by this window. */}
+        {TABS.map(([key, label]) => <button key={key} role="tab" aria-selected={tab === key} onClick={() => setTab(key)} title={key === 'link' ? `连接：${link.summary}` : undefined}>
+          {label}{key === 'link' && <i className="mdot md-tab-dot" data-tone={link.tone} />}
         </button>)}
       </nav>
-      <button className="md-health" onClick={() => setTab('link')} title="查看连接详情" aria-label="连接状态"><StatusChips health={m.health} /></button>
       {/* The switch is the setting, and says so: whether the model's actions may be carried out — not that one has been. */}
       <button className="mswitch" role="switch" aria-checked={!!s?.autoplay_enabled} disabled={!s || !onAutoplay} onClick={() => onAutoplay?.(!s?.autoplay_enabled)}
         title={s?.autoplay_enabled ? '已允许自动执行模型的动作。点击后停止自动执行，只显示建议。' : '只显示建议。点击后允许自动执行模型的动作。'}>
@@ -127,8 +121,8 @@ function Dock({ m, tab, setTab, tools, onAutoplay }: { m: Model; tab: Tab; setTa
             : <p className="mslot-empty">对局开始后，这里显示手牌和四家点数</p>}
         </>)}
       {tab === 'table' && (s?.game ? <SeatColumns snapshot={s} /> : <p className="mslot-empty md-wide">对局开始后，这里显示公开的牌河、副露和点数</p>)}
-      {tab === 'result' && (s && last ? <ResultCard result={last} snapshot={s} previous={!s.result} /> : <p className="mslot-empty md-wide">一局结束后，这里保留它公开的结果，直到下一局结束</p>)}
-      {tab === 'events' && (s ? <EventList snapshot={s} /> : <p className="mslot-empty md-wide">正在连接监视数据</p>)}
+      {tab === 'result' && (s ? <ResultPages key={s.context.game} snapshot={s} /> : <p className="mslot-empty md-wide">正在连接监视数据</p>)}
+      {tab === 'events' && (s ? <EventList key={s.context.game} snapshot={s} /> : <p className="mslot-empty md-wide">正在连接监视数据</p>)}
       {tab === 'link' && <Diagnostics snapshot={s} health={m.health} now={m.now} />}
     </div>
   </aside>
