@@ -22,6 +22,7 @@ use coords::{
     action_button_pos, candidate_pos, get_pai_coord, kan_candidate_pos, MajsoulOpType,
     ACTION_PRIORITY, TILES,
 };
+use rand::Rng;
 use riichienv_core::action::{Action, ActionType};
 use riichienv_core::parser::tid_to_mjai;
 
@@ -40,7 +41,11 @@ impl PlatformAutoplay for MajsoulAutoplay {
 
         match ctx.action {
             // ----- Dahai (打牌) ---------------------------------------------
-            MjaiEvent::Dahai { actor, pai, .. } if *actor == ctx.our_seat => {
+            MjaiEvent::Dahai {
+                actor,
+                pai,
+                tsumogiri,
+            } if *actor == ctx.our_seat => {
                 // While in riichi, Majsoul auto-discards, so ours would be a
                 // second one. (The riichi-declaring tile goes out inside the
                 // Reach plan below, before acceptance, so it is unaffected.)
@@ -71,7 +76,12 @@ impl PlatformAutoplay for MajsoulAutoplay {
                 let paced = push_pre_delay(&mut result.steps, ctx, DecisionKind::Dahai, 0);
                 result.hesitate = paced.hesitate;
                 result.look_ms = paced.look_ms;
-                if let Some(click) = plan_dahai_click(pai, ctx) {
+                let whence = if *tsumogiri {
+                    Whence::Drawn
+                } else {
+                    Whence::Hand
+                };
+                if let Some(click) = plan_dahai_click(pai, whence, ctx) {
                     result.steps.push(click);
                 }
             }
@@ -103,7 +113,8 @@ impl PlatformAutoplay for MajsoulAutoplay {
                 result.steps.push(Step::Sleep {
                     duration_ms: ctx.cfg.inter_click_delay_ms,
                 });
-                if let Some(click) = plan_dahai_click(tile, ctx) {
+                // The reach names its tile but not which copy: see `Whence::Unsaid`.
+                if let Some(click) = plan_dahai_click(tile, Whence::Unsaid, ctx) {
                     result.steps.push(click);
                 }
             }
@@ -367,14 +378,44 @@ fn push_pre_delay(
 /// Where `pai` sits in our hand, as a normalised 16:9 point — the place a
 /// discard of it would be pressed.
 pub fn discard_point(pai: &str, ctx: &ActionContext) -> Option<(f64, f64)> {
-    match plan_dahai_click(pai, ctx)? {
+    match plan_dahai_click(pai, Whence::Unsaid, ctx)? {
         Step::Click { x_norm, y_norm } => Some((x_norm, y_norm)),
         _ => None,
     }
 }
 
+/// Which copy of a tile a discard presses when the rack shows more than one.
+/// The game records a press of the drawn tile as a tsumogiri and any other
+/// as a tedashi, and the other players see which it was.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Whence {
+    /// The tile just drawn: a tsumogiri.
+    Drawn,
+    /// One already in the hand: a tedashi. The drawn tile only when the hand
+    /// holds no other copy.
+    Hand,
+    /// Not said (a reach names only its tile; a glance has no copy): the drawn
+    /// tile when it is that tile, else one from the hand.
+    Unsaid,
+}
+
+/// One of `places` at random. Identical tiles are interchangeable to the game,
+/// and a hand that always took the leftmost would be a pattern.
+fn any_of(places: &[usize], rng: &mut impl Rng) -> Option<usize> {
+    (!places.is_empty()).then(|| places[rng.random_range(0..places.len())])
+}
+
 /// Plan a hand-tile click for a discard or riichi-declaring discard.
-fn plan_dahai_click(pai: &str, ctx: &ActionContext) -> Option<Step> {
+fn plan_dahai_click(pai: &str, whence: Whence, ctx: &ActionContext) -> Option<Step> {
+    plan_dahai_click_with(pai, whence, ctx, &mut rand::rng())
+}
+
+fn plan_dahai_click_with(
+    pai: &str,
+    whence: Whence,
+    ctx: &ActionContext,
+    rng: &mut impl Rng,
+) -> Option<Step> {
     let our_seat = ctx.our_seat as usize;
     if our_seat >= ctx.snapshot.players.len() {
         return None;
@@ -387,7 +428,8 @@ fn plan_dahai_click(pai: &str, ctx: &ActionContext) -> Option<Step> {
     if is_dealer_first_discard(ctx) {
         let mut sorted = ctx.snapshot.players[our_seat].tehai.clone();
         sorted.sort_by(|a, b| compare_pai(a, b));
-        let idx = sorted.iter().position(|x| x == pai)?;
+        let copies: Vec<usize> = (0..sorted.len()).filter(|&i| sorted[i] == pai).collect();
+        let idx = any_of(&copies, rng)?;
         let (x, y) = TILES.get(idx).copied()?;
         return Some(Step::Click {
             x_norm: x,
@@ -421,25 +463,28 @@ fn plan_dahai_click(pai: &str, ctx: &ActionContext) -> Option<Step> {
 
     if has_tsumohai {
         let t = tsumohai.unwrap();
-        if pai == t {
-            // Discarding the tsumohai: click the far-right tsumohai slot.
+        // The tsumohai sits apart on the far right. Exclude the last
+        // occurrence of the tsumohai tile from sorted_tehai; what remains
+        // is the rack left of the gap, in order.
+        let tsumo_excl = sorted_tehai.iter().rposition(|x| x.as_str() == t);
+        let copies: Vec<usize> = sorted_tehai
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| Some(*i) != tsumo_excl)
+            .enumerate()
+            .filter(|(_, (_, x))| x.as_str() == pai)
+            .map(|(visual_idx, _)| visual_idx)
+            .collect();
+        // The drawn tile itself: for a tsumogiri, and for a tedashi only
+        // when the hand holds no other copy of it.
+        if pai == t && (whence != Whence::Hand || copies.is_empty()) {
             let (x, y) = get_pai_coord(13, tehai.len() - 1);
             return Some(Step::Click {
                 x_norm: x,
                 y_norm: y,
             });
         }
-        // Discarding a closed-hand tile. The tsumohai sits on the far right
-        // visually. Exclude the last occurrence of the tsumohai tile from
-        // sorted_tehai, then find pai index in the remaining tiles.
-        let tsumo_excl = sorted_tehai.iter().rposition(|x| x.as_str() == t);
-        let idx = sorted_tehai
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| Some(*i) != tsumo_excl)
-            .enumerate()
-            .find(|(_, (_, x))| x.as_str() == pai)
-            .map(|(visual_idx, _)| visual_idx)?;
+        let idx = any_of(&copies, rng)?;
         if idx >= TILES.len() - 1 {
             return None;
         }
@@ -451,7 +496,10 @@ fn plan_dahai_click(pai: &str, ctx: &ActionContext) -> Option<Step> {
     }
 
     // No tsumohai: all tiles closed, click by sorted index directly.
-    let idx = sorted_tehai.iter().position(|x| x.as_str() == pai)?;
+    let copies: Vec<usize> = (0..sorted_tehai.len())
+        .filter(|&i| sorted_tehai[i] == pai)
+        .collect();
+    let idx = any_of(&copies, rng)?;
     if idx >= TILES.len() - 1 {
         return None;
     }
@@ -886,6 +934,107 @@ mod tests {
             }
             _ => panic!("second step should be a click"),
         }
+    }
+
+    /// The click of a discard planned with a fixed source of chance.
+    fn dahai_x(pai: &str, whence: Whence, ctx: &ActionContext, seed: u64) -> f64 {
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+        match plan_dahai_click_with(pai, whence, ctx, &mut rng) {
+            Some(Step::Click { x_norm, .. }) => x_norm,
+            other => panic!("expected a click, got {other:?}"),
+        }
+    }
+
+    /// A non-dealer hand of 14 holding two 5p besides the drawn 5p, and two 1m.
+    fn doubled_hand() -> GameStateSnapshot {
+        snapshot_with_oya(
+            0,
+            1,
+            vec![
+                "1m", "1m", "3m", "4m", "5m", "6m", "7m", "8m", "9m", "1p", "5p", "5p", "7p", "5p",
+            ],
+        )
+    }
+
+    #[test]
+    fn a_tedashi_of_the_drawn_tile_presses_a_copy_in_the_hand() {
+        let snap = doubled_hand();
+        let act = MjaiEvent::Dahai {
+            actor: 0,
+            pai: "5p".into(),
+            tsumogiri: false,
+        };
+        let cfg_ref = cfg();
+        let ctx = ctx_for(&act, &snap, &[], Some("1m"), Some("5p"), false, &cfg_ref);
+        // Left of the gap the rack is 1m 1m 3m 4m 5m 6m 7m 8m 9m 1p 5p 5p 7p:
+        // the hand's 5p are at 10 and 11, never the drawn one at 13.
+        let hand = [get_pai_coord(10, 13).0, get_pai_coord(11, 13).0];
+        let drawn = get_pai_coord(13, 13).0;
+        for seed in 0..32 {
+            let x = dahai_x("5p", Whence::Hand, &ctx, seed);
+            assert!(
+                hand.iter().any(|h| (x - h).abs() < 1e-9),
+                "seed {seed}: {x} is not a hand 5p"
+            );
+            assert!((x - drawn).abs() > 1e-9);
+        }
+    }
+
+    #[test]
+    fn a_tsumogiri_presses_the_drawn_tile_even_with_copies_in_the_hand() {
+        let snap = doubled_hand();
+        let act = MjaiEvent::Dahai {
+            actor: 0,
+            pai: "5p".into(),
+            tsumogiri: true,
+        };
+        let cfg_ref = cfg();
+        let ctx = ctx_for(&act, &snap, &[], Some("1m"), Some("5p"), false, &cfg_ref);
+        let drawn = TILES[13].0 + TSUMO_SPACE;
+        for seed in 0..8 {
+            assert!((dahai_x("5p", Whence::Drawn, &ctx, seed) - drawn).abs() < 1e-9);
+        }
+        // The plan reads the choice off the event itself.
+        match &MajsoulAutoplay::new().plan(&ctx).steps[1] {
+            Step::Click { x_norm, .. } => assert!((*x_norm - drawn).abs() < 1e-9),
+            other => panic!("expected a click, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_tedashi_with_no_other_copy_presses_the_drawn_tile() {
+        let snap = doubled_hand();
+        let act = MjaiEvent::Dahai {
+            actor: 0,
+            pai: "3m".into(),
+            tsumogiri: false,
+        };
+        let cfg_ref = cfg();
+        // Drawn 3m, the only one: the drawn tile is the only copy to press.
+        let ctx = ctx_for(&act, &snap, &[], Some("1m"), Some("3m"), false, &cfg_ref);
+        let drawn = get_pai_coord(13, 13).0;
+        assert!((dahai_x("3m", Whence::Hand, &ctx, 0) - drawn).abs() < 1e-9);
+    }
+
+    #[test]
+    fn identical_copies_are_pressed_in_turn_not_always_the_first() {
+        let snap = doubled_hand();
+        let act = MjaiEvent::Dahai {
+            actor: 0,
+            pai: "1m".into(),
+            tsumogiri: false,
+        };
+        let cfg_ref = cfg();
+        let ctx = ctx_for(&act, &snap, &[], Some("1m"), Some("5p"), false, &cfg_ref);
+        let places = [get_pai_coord(0, 13).0, get_pai_coord(1, 13).0];
+        let mut seen = [false, false];
+        for seed in 0..64 {
+            let x = dahai_x("1m", Whence::Hand, &ctx, seed);
+            let at = places.iter().position(|p| (x - p).abs() < 1e-9);
+            seen[at.unwrap_or_else(|| panic!("seed {seed}: {x} is not a 1m"))] = true;
+        }
+        assert_eq!(seen, [true, true]);
     }
 
     #[test]

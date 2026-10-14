@@ -161,6 +161,8 @@ const actorOf = (e: MjaiEvent): number | null => ('actor' in e && typeof e.actor
 
 export type Candidate = {
   tone: ActionTone; verb: string; faces: Face[]
+  /** 摸切 on a discard its bot says is the tile just drawn; empty otherwise. */
+  note: string
   /** The row's value as a share, 0..1, when it is a percentage; null otherwise. */
   share: number | null
   value: string
@@ -172,7 +174,7 @@ export type Candidate = {
 
 const sameTiles = (a: string[], b: string[]) => a.length === b.length && sorted(a).join() === sorted(b).join()
 
-function candidateOf(item: ShowItem, d: MonitorDecision, t: Table): Omit<Candidate, 'share' | 'value' | 'chosen' | 'taken'> & { matches: (r: MjaiEvent) => boolean } {
+function candidateOf(item: ShowItem, d: MonitorDecision, t: Table): Omit<Candidate, 'share' | 'value' | 'chosen' | 'taken' | 'note'> & { note?: string; matches: (r: MjaiEvent) => boolean } {
   const pais = item.pais ?? []
   const from = actorOf(d.trigger)
   const self = t.self ?? actorOf(d.response ?? { type: 'none' }) ?? 0
@@ -181,7 +183,14 @@ function candidateOf(item: ShowItem, d: MonitorDecision, t: Table): Omit<Candida
   const own = pais.slice(0, -1)
   const claims = (kind: string) => (r: MjaiEvent) => r.type === kind && 'consumed' in r && 'pai' in r && r.pai === called && sameTiles(r.consumed, own)
   switch (item.label) {
-    case 'Discard': return { tone: 'discard', verb: tr('打'), faces: pais.map(tile => ({ tile })), matches: r => r.type === 'dahai' && r.pai === pais[0] }
+    case 'Discard': {
+      // Said by the bot or not at all: without it, either copy of the tile is this row.
+      const giri = typeof item.tsumogiri === 'boolean' ? item.tsumogiri : null
+      return {
+        tone: 'discard', verb: tr('打'), faces: pais.map(tile => ({ tile })), note: giri ? tr('摸切') : '',
+        matches: r => r.type === 'dahai' && r.pai === pais[0] && (giri === null || r.tsumogiri === giri),
+      }
+    }
     case 'Riichi': return { tone: 'riichi', verb: tr('立直'), faces: [], matches: r => r.type === 'reach' }
     case 'Chi': return { tone: 'call', verb: tr('吃'), faces: meldFaces(called, own, from, self, t), matches: claims('chi') }
     case 'Pon': return { tone: 'call', verb: tr('碰'), faces: meldFaces(called, own, from, self, t), matches: claims('pon') }
@@ -212,12 +221,13 @@ export function candidatesOf(d: MonitorDecision | null, t: Table, instead: MjaiE
   return visibleItems(pickShow(response.meta), limit).map(item => {
     const { matches, ...row } = candidateOf(item, d, t)
     const percent = /^\s*(\d+(?:\.\d+)?)\s*%\s*$/.exec(item.value ?? '')
-    // Two rows can show the same tile (hand discard and tsumogiri); the higher one is the answer.
+    // Two rows can show the same tile (hand discard and tsumogiri). A bot that says
+    // which is which is matched by it; otherwise the higher one is the answer.
     const isChosen = !chosen && matches(response)
     const isTaken = !taken && !isChosen && !!instead && matches(instead)
     chosen ||= isChosen
     taken ||= isTaken
-    return { ...row, share: percent ? Math.min(1, Number(percent[1]) / 100) : null, value: item.value ?? '', chosen: isChosen, taken: isTaken }
+    return { ...row, note: row.note ?? '', share: percent ? Math.min(1, Number(percent[1]) / 100) : null, value: item.value ?? '', chosen: isChosen, taken: isTaken }
   })
 }
 
