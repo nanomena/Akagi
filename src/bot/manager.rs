@@ -343,13 +343,15 @@ impl BotManager {
                     let reach_ev = MjaiEvent::Reach {
                         actor: seat,
                         pai: None,
+                        tsumogiri: None,
                     };
                     match runner.react(std::slice::from_ref(&reach_ev)).await {
                         Ok(follow) => match follow.action {
-                            MjaiEvent::Dahai { pai, .. } => {
+                            MjaiEvent::Dahai { pai, tsumogiri, .. } => {
                                 resp.action = MjaiEvent::Reach {
                                     actor: seat,
                                     pai: Some(pai),
+                                    tsumogiri: Some(tsumogiri),
                                 };
                                 did_reach_followup = true;
                             }
@@ -400,7 +402,21 @@ impl BotManager {
         }
         // MjaiEvent::None still goes on the bus — downstream consumers
         // decide whether to render. Centralizes the "skip" decision.
-        let _ = self.out_tx.send(resp);
+        // Except at a boundary: that batch is how the bot learns the hand or
+        // the game is over, its `none` answers nothing, and by then there may
+        // be nothing on screen to answer — a player who left the game is on
+        // another page. On the bus it read as a pass, and autoplay pressed
+        // where the pass button had been.
+        let boundary = matches!(
+            event,
+            MjaiEvent::Hora { .. }
+                | MjaiEvent::Ryukyoku { .. }
+                | MjaiEvent::EndKyoku
+                | MjaiEvent::EndGame { .. }
+        );
+        if !(boundary && matches!(resp.action, MjaiEvent::None)) {
+            let _ = self.out_tx.send(resp);
+        }
 
         if matches!(event, MjaiEvent::EndGame { .. }) {
             // Drain runner cleanly (writes end_game to stdin internally
@@ -1130,11 +1146,16 @@ mod tests {
     /// the runner is torn down.
     #[tokio::test]
     async fn boundaries_flush_even_though_nothing_can_be_acted_on() {
-        let (mut mgr, calls, _, _, _) = manager_with_mock(vec![]);
+        let (mut mgr, calls, mut resp_rx, _, _) = manager_with_mock(vec![]);
         mgr.handle_tracked(tracked(MjaiEvent::EndKyoku, Some(false)))
             .await
             .unwrap();
         assert_eq!(calls.lock().await.len(), 1, "end_kyoku still flushes");
+        // Its `none` is no pass for autoplay to press.
+        assert!(
+            resp_rx.try_recv().is_err(),
+            "a boundary's none stays off the bus"
+        );
     }
 
     #[tokio::test]
@@ -1746,7 +1767,11 @@ mod tests {
 
     fn reach_none(actor: u8) -> BotResponse {
         BotResponse {
-            action: MjaiEvent::Reach { actor, pai: None },
+            action: MjaiEvent::Reach {
+                actor,
+                pai: None,
+                tsumogiri: None,
+            },
             meta: None,
         }
     }
@@ -1791,7 +1816,8 @@ mod tests {
                     c[1].as_slice(),
                     [MjaiEvent::Reach {
                         actor: 2,
-                        pai: None
+                        pai: None,
+                        ..
                     }]
                 ),
                 "follow-up feeds the runner the reach"
@@ -1800,7 +1826,7 @@ mod tests {
 
         let emitted = resp_rx.try_recv().expect("a bot response");
         assert!(
-            matches!(emitted.action, MjaiEvent::Reach { actor: 2, pai: Some(ref t) } if t == "3p"),
+            matches!(emitted.action, MjaiEvent::Reach { actor: 2, pai: Some(ref t), .. } if t == "3p"),
             "the emitted reach carries the resolved riichi tile"
         );
         assert!(
@@ -1812,6 +1838,7 @@ mod tests {
         mgr.handle(MjaiEvent::Reach {
             actor: 2,
             pai: None,
+            tsumogiri: None,
         })
         .await
         .unwrap();
@@ -1843,7 +1870,8 @@ mod tests {
                 emitted.action,
                 MjaiEvent::Reach {
                     actor: 2,
-                    pai: None
+                    pai: None,
+                    ..
                 }
             ),
             "bare reach forwarded unchanged"
@@ -1854,6 +1882,7 @@ mod tests {
         mgr.handle(MjaiEvent::Reach {
             actor: 2,
             pai: None,
+            tsumogiri: None,
         })
         .await
         .unwrap();
@@ -1874,6 +1903,7 @@ mod tests {
             action: MjaiEvent::Reach {
                 actor: 2,
                 pai: Some("3p".into()),
+                tsumogiri: None,
             },
             meta: None,
         };
@@ -1888,7 +1918,7 @@ mod tests {
         );
         let emitted = resp_rx.try_recv().expect("a bot response");
         assert!(
-            matches!(emitted.action, MjaiEvent::Reach { actor: 2, pai: Some(ref t) } if t == "3p")
+            matches!(emitted.action, MjaiEvent::Reach { actor: 2, pai: Some(ref t), .. } if t == "3p")
         );
         assert!(
             !mgr.drop_next_own_reach,

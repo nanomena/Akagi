@@ -529,7 +529,8 @@ mod tests {
             encode(
                 &MjaiEvent::Reach {
                     actor: 0,
-                    pai: None
+                    pai: None,
+                    tsumogiri: None
                 },
                 view(&[], &[])
             )

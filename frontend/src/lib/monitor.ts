@@ -112,7 +112,7 @@ export type ActionView = {
   /** What the verb applies to, in words: "9索". Empty when the verb says it all. */
   object: string
   faces: Face[]
-  /** 摸切 / 手切 — only known for a discard the model or the game actually named. */
+  /** 摸切 / 手切 — only known for a discard, or a riichi's, that the model or the game named. */
   note?: string
 }
 
@@ -134,7 +134,10 @@ export function describeAction(action: MjaiEvent | null | undefined, t: Table): 
   if (!action) return null
   switch (action.type) {
     case 'dahai': return { tone: 'discard', verb: tr('打'), object: tileLabel(action.pai), faces: [{ tile: action.pai }], note: action.tsumogiri ? tr('摸切') : tr('手切') }
-    case 'reach': return { tone: 'riichi', verb: tr('立直'), object: action.pai ? tr('打 {0}', tileLabel(action.pai)) : '', faces: action.pai ? [{ tile: action.pai }] : [] }
+    case 'reach': return {
+      tone: 'riichi', verb: tr('立直'), object: action.pai ? tr('打 {0}', tileLabel(action.pai)) : '', faces: action.pai ? [{ tile: action.pai }] : [],
+      note: action.tsumogiri === undefined ? undefined : action.tsumogiri ? tr('摸切') : tr('手切'),
+    }
     case 'chi': return { tone: 'call', verb: tr('吃'), object: tileLabel(action.pai), faces: meldFaces(action.pai, action.consumed, action.target, action.actor, t) }
     case 'pon': return { tone: 'call', verb: tr('碰'), object: tileLabel(action.pai), faces: meldFaces(action.pai, action.consumed, action.target, action.actor, t) }
     case 'daiminkan': return { tone: 'kan', verb: tr('明杠'), object: tileLabel(action.pai), faces: meldFaces(action.pai, action.consumed, action.target, action.actor, t) }

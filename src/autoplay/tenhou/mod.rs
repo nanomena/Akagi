@@ -739,6 +739,7 @@ mod tests {
         let action = MjaiEvent::Reach {
             actor: 0,
             pai: Some("2m".into()),
+            tsumogiri: None,
         };
         let cfg = crate::config::MajsoulAutoplayConfig::default();
         let snap = snapshot_fixture();
@@ -798,6 +799,7 @@ mod tests {
         let action = MjaiEvent::Reach {
             actor: 0,
             pai: None,
+            tsumogiri: None,
         };
         let cfg = crate::config::MajsoulAutoplayConfig::default();
         let snap = snapshot_fixture();
@@ -844,6 +846,7 @@ mod tests {
         let action = MjaiEvent::Reach {
             actor: 0,
             pai: Some("9s".into()),
+            tsumogiri: None,
         };
         let cfg = crate::config::MajsoulAutoplayConfig::default();
         let snap = snapshot_fixture();
@@ -1020,6 +1023,7 @@ mod tests {
                 MjaiEvent::Reach {
                     actor: 0,
                     pai: None,
+                    tsumogiri: None,
                 },
                 "c22-2",
             ),

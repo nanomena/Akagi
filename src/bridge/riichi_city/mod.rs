@@ -515,7 +515,11 @@ impl RiichiCityBridge {
                     self.status.drawn_by = None;
                     let is_li_zhi = field_bool(action, "is_li_zhi");
                     if is_li_zhi {
-                        events.push(MjaiEvent::Reach { actor, pai: None });
+                        events.push(MjaiEvent::Reach {
+                            actor,
+                            pai: None,
+                            tsumogiri: None,
+                        });
                     }
                     events.push(MjaiEvent::Dahai {
                         actor,

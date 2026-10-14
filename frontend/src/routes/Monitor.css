@@ -265,8 +265,11 @@
 .mact--hero .mact-text { gap: 10px; }
 .mact--hero strong { font: 600 32px/1.1 var(--m-display); letter-spacing: 0.02em; }
 .mact--hero .mact-text > span { font: 500 23px/1.15 var(--m-display); }
-/* How the tile left the hand, at the end of the row whatever stands before it. */
-.mact-note { flex: none; margin-left: auto; padding: 1px 7px; border-radius: 4px; font-size: 11.5px; font-style: normal; color: var(--m-ink2); background: hsl(35 20% 14% / 0.06); }
+/* The words, and under them how the tile left the hand: a line of its own,
+ * so no length of words — a riichi's included — pushes it out of the card.
+ * Kept when empty, so the words stand at one height with it or without. */
+.mact-words { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
+.mact-note { flex: none; padding: 1px 7px; border-radius: 4px; font-size: 11.5px; font-style: normal; color: var(--m-ink2); background: hsl(35 20% 14% / 0.06); }
 .mact-note:empty { visibility: hidden; }
 .mact--pending strong { font: 500 24px/1.1 var(--m-display); color: var(--m-ink); }
 .mact--pending .mact-text > .mdec-clock { font-size: 16px; font-weight: 400; color: var(--m-dim); font-variant-numeric: tabular-nums; }

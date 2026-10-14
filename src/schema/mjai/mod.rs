@@ -160,6 +160,11 @@ pub enum MjaiEvent {
         /// events leave it None.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pai: Option<Tile>,
+        /// Non-spec extension, beside `pai`: whether that discard is the
+        /// tile just drawn (a tsumogiri) or a copy from the hand, as a
+        /// `dahai` says it. None when the bot does not say.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tsumogiri: Option<bool>,
     },
     ReachAccepted {
         actor: Actor,
@@ -340,7 +345,7 @@ mod tests {
         let plain = r#"{"type":"reach","actor":0}"#;
         let ev: MjaiEvent = serde_json::from_str(plain).unwrap();
         match &ev {
-            MjaiEvent::Reach { actor, pai } => {
+            MjaiEvent::Reach { actor, pai, .. } => {
                 assert_eq!(*actor, 0);
                 assert!(pai.is_none(), "bridge reach must have pai=None");
             }
@@ -353,7 +358,7 @@ mod tests {
         let with_pai = r#"{"type":"reach","actor":1,"pai":"5p"}"#;
         let ev: MjaiEvent = serde_json::from_str(with_pai).unwrap();
         match &ev {
-            MjaiEvent::Reach { actor, pai } => {
+            MjaiEvent::Reach { actor, pai, .. } => {
                 assert_eq!(*actor, 1);
                 assert_eq!(pai.as_deref(), Some("5p"));
             }
@@ -368,7 +373,7 @@ mod tests {
         let null_pai = r#"{"type":"reach","actor":2,"pai":null}"#;
         let ev: MjaiEvent = serde_json::from_str(null_pai).unwrap();
         match &ev {
-            MjaiEvent::Reach { actor, pai } => {
+            MjaiEvent::Reach { actor, pai, .. } => {
                 assert_eq!(*actor, 2);
                 assert!(pai.is_none(), "explicit null must deserialize to None");
             }
@@ -387,7 +392,7 @@ mod tests {
         let empty_pai = r#"{"type":"reach","actor":3,"pai":""}"#;
         let ev: MjaiEvent = serde_json::from_str(empty_pai).unwrap();
         match &ev {
-            MjaiEvent::Reach { actor, pai } => {
+            MjaiEvent::Reach { actor, pai, .. } => {
                 assert_eq!(*actor, 3);
                 assert_eq!(pai.as_deref(), Some(""));
             }
