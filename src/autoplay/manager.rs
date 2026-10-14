@@ -292,6 +292,12 @@ impl AutoplayManager {
         // One line a decision, for measuring a pace against afterwards.
         info!(action = ?resp.action, ?probs, ?reading, "autoplay: decision read");
 
+        // Where the pointer is now: a discard of the tile it rests on presses
+        // that copy, not its twin.
+        let pointer = match self.state.pointer {
+            Some((px, py)) => (*self.ctx.canvas_rect.read().await).map(|rect| rect.norm(px, py)),
+            None => None,
+        };
         let action_ctx = ActionContext {
             action: &resp.action,
             snapshot: &snapshot,
@@ -308,6 +314,7 @@ impl AutoplayManager {
             reading,
             delay_script: self.delay_script.script(),
             tenhou: tenhou_state.as_ref(),
+            pointer,
         };
 
         let platform: &dyn PlatformAutoplay = match platform_kind {
@@ -855,12 +862,13 @@ impl AutoplayManager {
         let Some(rect) = self.canvas_rect_resolve().await else {
             return;
         };
+        let pointer = self.state.pointer.map(|(x, y)| rect.norm(x, y));
         let leg = {
             let mut rng = rand::rng();
             let point =
                 |spot: &crate::autoplay::lean::Spot, rng: &mut rand::rngs::ThreadRng| match spot {
                     crate::autoplay::lean::Spot::Hand(pai) => {
-                        crate::autoplay::majsoul::hand_point(pai, &tehai, rng)
+                        crate::autoplay::majsoul::hand_point(pai, &tehai, pointer, rng)
                     }
                     crate::autoplay::lean::Spot::Draw => {
                         Some(crate::autoplay::majsoul::draw_point(tehai.len()))
@@ -879,6 +887,10 @@ impl AutoplayManager {
                 if (at.0 - main.0).abs() > crate::autoplay::pointer::LOOK_REACH {
                     at = main;
                 }
+            }
+            // A look at the tile the hand is already on is a look that stays.
+            if crate::autoplay::majsoul::on_tile(at, pointer) {
+                return;
             }
             // Not the middle of the tile every time.
             let at = (

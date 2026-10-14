@@ -207,6 +207,7 @@ mod tests {
                 reading: Default::default(),
                 delay_script: None,
                 tenhou: None,
+                pointer: None,
             }
         }
     }
