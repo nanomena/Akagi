@@ -51,7 +51,7 @@ pub struct LeanOption {
 }
 
 /// Where an option puts the pointer.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Spot {
     /// On a tile of the hand.
     Hand(String),
