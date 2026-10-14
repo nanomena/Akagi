@@ -4,7 +4,7 @@ import { Faces } from '@/components/monitor/Tiles'
 import { decisionMark, type ActionView, type Candidate, type DecisionView, type MonitorDecision, type StepState, type Tone } from '@/lib/monitor'
 import { localized, tr } from '@/lib/i18n'
 
-const BADGE_ICON: Record<Tone, typeof Check> = { ok: Check, wait: Hourglass, busy: LoaderCircle, bad: AlertTriangle, idle: Minus }
+const BADGE_ICON: Record<Tone, typeof Check> = { ok: Check, done: Check, wait: Hourglass, busy: LoaderCircle, bad: AlertTriangle, idle: Minus }
 const STEPS = localized(['请求', '建议', '确认'] as const)
 const STEP_MARK: Partial<Record<StepState, typeof Check>> = { done: Check, bad: X }
 
