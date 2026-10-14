@@ -923,9 +923,10 @@ impl MajsoulBridge {
     /// payment correctly.
     ///
     /// `data.scores[]` is an array of `NoTileScoreInfo` — each entry
-    /// carries its own `delta_scores` array sized to `num_players`. Multiple
-    /// entries can occur (rare — e.g. tenpai redistribution + nagashi mangan
-    /// in the same frame); the bridge sums them per seat.
+    /// carries its own `delta_scores` array sized to `num_players`, or an
+    /// empty one when no points change hands. Multiple entries can occur
+    /// (rare — e.g. tenpai redistribution + nagashi mangan in the same
+    /// frame); the bridge sums them per seat.
     fn build_no_tile(&mut self, data: &JsonValue) -> Result<Vec<MjaiEvent>> {
         let deltas = sum_delta_scores(data, self.num_players)?;
         let tehais = data
@@ -1567,7 +1568,9 @@ fn draw_settlement_scores(
 /// Sum every `delta_scores` array under `data.scores[]` into a single
 /// `Vec<i32>` sized to `num_players`. Returns `None` when no entries are
 /// present (no point change — kept distinguishable from an explicit all-zero
-/// delta). Malformed native-length vectors and integer overflow are errors.
+/// delta). An entry whose `delta_scores` is empty is a draw in which nobody
+/// paid and adds nothing. Malformed native-length vectors and integer
+/// overflow are errors.
 fn sum_delta_scores(data: &JsonValue, num_players: u8) -> Result<Option<Vec<i32>>> {
     let arr = match data.get("scores") {
         Some(value) => value.as_array().context("draw scores is not an array")?,
@@ -1583,6 +1586,11 @@ fn sum_delta_scores(data: &JsonValue, num_players: u8) -> Result<Option<Vec<i32>
             Some(value) => value.as_array().context("delta_scores is not an array")?,
             None => continue,
         };
+        // The server sends no deltas at all, rather than zeros, when every
+        // seat is tenpai or every seat is noten.
+        if deltas.is_empty() {
+            continue;
+        }
         if deltas.len() != n {
             bail!("delta_scores count differs from num_players");
         }
@@ -3817,6 +3825,7 @@ mod tests {
             json!({"players": [{"hand": "0m"}, {}, {}, {}]}),
             json!({"players": [{"hand": ["bad"]}, {}, {}, {}]}),
             json!({"scores": [{"delta_scores": [0]}]}),
+            json!({"scores": [{"delta_scores": []}, {"delta_scores": [0,0,0]}]}),
             json!({"scores": [{"old_scores": [25000], "delta_scores": [0,0,0,0]}]}),
             json!({"scores": [{"old_scores": [25000,25000,25000,25000]}, {"old_scores": [24000,25000,25000,25000]}]}),
         ] {
@@ -3895,6 +3904,94 @@ mod tests {
         match &events[0] {
             MjaiEvent::Ryukyoku { deltas, .. } => {
                 assert_eq!(*deltas, Some(vec![3000, -1000, -1000, -1000]));
+            }
+            other => panic!("expected Ryukyoku first, got {other:?}"),
+        }
+        assert!(matches!(events[1], MjaiEvent::EndKyoku));
+    }
+
+    /// Real captured `ActionNoTile` payload of a draw with all four seats
+    /// noten: `delta_scores` arrives empty, not as four zeros. The hand
+    /// still ends, with zero deltas and the scores unchanged.
+    #[test]
+    fn action_no_tile_with_empty_deltas_emits_zero_deltas() {
+        let mut bridge = MajsoulBridge::new(None, None);
+        bridge.seat = Some(0);
+        let events = bridge.dispatch(&action_msg(
+            ACTION_NO_TILE,
+            json!({
+                "gameend": false,
+                "hules_history": [],
+                "liujumanguan": false,
+                "players": [
+                    { "already_hule": false, "hand": [], "tingpai": false, "tings": [] },
+                    { "already_hule": false, "hand": [], "tingpai": false, "tings": [] },
+                    { "already_hule": false, "hand": [], "tingpai": false, "tings": [] },
+                    { "already_hule": false, "hand": [], "tingpai": false, "tings": [] },
+                ],
+                "scores": [{
+                    "delta_scores": [],
+                    "doras": [],
+                    "hand": [],
+                    "lines": [],
+                    "ming": [],
+                    "old_scores": [25000, 25000, 25000, 25000],
+                    "score": 0,
+                    "seat": 0,
+                    "taxes": [],
+                }],
+            }),
+        ));
+        assert_eq!(events.len(), 2);
+        match &events[0] {
+            MjaiEvent::Ryukyoku {
+                deltas,
+                tehais,
+                scores,
+                reason,
+            } => {
+                assert_eq!(*deltas, Some(vec![0, 0, 0, 0]));
+                assert_eq!(*tehais, Some(vec![None, None, None, None]));
+                assert_eq!(*scores, Some(vec![25000, 25000, 25000, 25000]));
+                assert_eq!(reason.as_deref(), Some("exhaustive"));
+            }
+            other => panic!("expected Ryukyoku first, got {other:?}"),
+        }
+        assert!(matches!(events[1], MjaiEvent::EndKyoku));
+    }
+
+    /// The other draw nobody pays for: every seat tenpai. Empty
+    /// `delta_scores` must not cost the hands the frame discloses.
+    #[test]
+    fn action_no_tile_with_empty_deltas_keeps_disclosed_hands() {
+        let mut bridge = MajsoulBridge::new(None, None);
+        bridge.seat = Some(0);
+        bridge.num_players = 3;
+        let events = bridge.dispatch(&action_msg(
+            ACTION_NO_TILE,
+            json!({
+                "players": [
+                    { "tingpai": true, "hand": ["0p", "6p", "8p", "8p"] },
+                    { "tingpai": true, "hand": ["4s", "4s", "6s", "7s"] },
+                    { "tingpai": true, "hand": ["1z"] },
+                ],
+                "scores": [{ "delta_scores": [], "old_scores": [36000, 35000, 34000] }],
+            }),
+        ));
+        assert_eq!(events.len(), 2);
+        match &events[0] {
+            MjaiEvent::Ryukyoku {
+                deltas,
+                tehais,
+                scores,
+                ..
+            } => {
+                assert_eq!(*deltas, Some(vec![0, 0, 0]));
+                let hands = tehais.as_ref().unwrap();
+                assert_eq!(hands[0].as_ref().unwrap(), &["5pr", "6p", "8p", "8p"]);
+                assert_eq!(hands[1].as_ref().unwrap(), &["4s", "4s", "6s", "7s"]);
+                assert_eq!(hands[2].as_ref().unwrap(), &["E"]);
+                assert_eq!(*scores, Some(vec![36000, 35000, 34000]));
             }
             other => panic!("expected Ryukyoku first, got {other:?}"),
         }
