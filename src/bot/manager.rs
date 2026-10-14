@@ -651,15 +651,16 @@ impl BotManager {
         // child via AKAGI_BOT_CONFIG. Bots without a manifest get no env
         // var — same behaviour as v3 before settings existed.
         if let Some(m) = entry.manifest.as_ref() {
-            // What Akagi asks of the bot beyond its settings, under `host`:
-            // `lean`, to be asked between turns as well (see `peeks`).
+            // What Akagi asks of the bot beyond its settings, in a section
+            // of its own (`akagi`, beside whatever the bot calls its own
+            // keys): `lean`, to be asked between turns as well (see `peeks`).
             let lean = {
                 let config = self.config.read().await;
                 config.monitor.pointer_lean && config.autoplay.enabled
             };
             match manifest::load_values(&entry.dir, m)
                 .map(|mut values| {
-                    values.insert("host".into(), serde_json::json!({ "lean": lean }));
+                    values.insert("akagi".into(), serde_json::json!({ "lean": lean }));
                     values
                 })
                 .and_then(|values| manifest::write_resolved(&entry.dir, &values))
