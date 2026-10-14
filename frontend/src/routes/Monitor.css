@@ -209,11 +209,12 @@
 /* The round, the seat and the counters each have a place; a dealer's mark or a
  * second digit moves nothing. Before a game the window's name and one line of
  * status stand there instead. */
-.mround { display: grid; grid-template-columns: 62px 72px minmax(0, 1fr); align-items: baseline; align-content: center; column-gap: 8px; min-width: 0; height: 26px; white-space: nowrap; }
+.mround { display: grid; grid-template-columns: 62px 104px minmax(0, 1fr); align-items: baseline; align-content: center; column-gap: 8px; min-width: 0; height: 26px; white-space: nowrap; }
 .mround > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .mround-idle { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 9px; }
 .mround-seat { align-self: center; display: flex; }
 .mround strong { font: 500 20px/1 var(--m-display); letter-spacing: 0.02em; }
+.mround-count { justify-self: end; text-align: right; }
 .mround span { font-size: 12.5px; color: var(--m-ink2); font-variant-numeric: tabular-nums; }
 .mround em { align-self: center; padding: 0 9px; border-radius: 999px; font-size: 12px; line-height: 20px; background: var(--m-panel); border: 1px solid var(--m-line); }
 
@@ -315,7 +316,7 @@
 .mcand-list { display: grid; grid-template-rows: repeat(5, minmax(0, 1fr)); row-gap: 4px; min-height: 0; }
 .mcand {
   --th: 24px;
-  position: relative; display: grid; grid-template-columns: 10px 58px 96px minmax(0, 1fr) 56px; align-items: center; column-gap: 9px; min-height: 0; padding: 0 12px 0 10px;
+  position: relative; display: grid; grid-template-columns: 10px 66px 96px minmax(0, 1fr) 56px; align-items: center; column-gap: 9px; min-height: 0; padding: 0 12px 0 10px;
   border-radius: 6px; overflow: hidden; background: var(--m-panel); box-shadow: inset 0 0 0 1px var(--m-line); animation: m-fade 0.16s ease-out;
 }
 .mcand::before { content: ''; position: absolute; inset: 0 auto 0 0; width: var(--share); background: var(--m-row); transition: width 0.2s ease-out; }
@@ -495,28 +496,28 @@
 
 /* 1280 × 240: a 36 bar, then 192 of content 12 off the bottom edge. */
 .md { display: grid; grid-template: 36px minmax(0, 1fr) / minmax(0, 1fr); width: 1280px; height: 240px; border-top: 1px solid var(--m-line); }
-/* 1280 × 36, seven places of fixed width: round, dora, tabs, links, switch,
- * the service's name, tools. What one of them shows never moves another. */
-.md-bar { display: grid; grid-template-columns: 244px 122px 360px 114px minmax(0, 1fr) 28px; align-items: center; column-gap: 8px; min-width: 0; padding: 0 9px 0 16px; }
-.md-bar > .mround { grid-column: 1; }
-.md-bar > .mdora { grid-column: 2; }
-.md-bar > .md-tabs { grid-column: 3; }
-.md-bar > .mswitch { grid-column: 4; }
-.md-bar > .md-model { grid-column: 5; }
-.md-bar > .mtools { grid-column: 6; }
-.md-bar .mdora { --th: 26px; }
+/* One grid for the bar and the panels under it — the decision's column, the
+ * tabs' column over what the tabs change, and a third — so that every panel's
+ * edge stands under an edge of the bar. The widths are the same in every
+ * language: each cell is as wide as its widest words. */
+.md-bar { display: grid; grid-template-columns: 344px 424px minmax(0, 1fr); align-items: center; column-gap: 12px; min-width: 0; padding: 0 16px; }
+/* Over the hand: the dora indicators, the switch, the service's name, the tools. */
+.md-right { display: grid; grid-template-columns: 160px minmax(0, 1fr) 126px 28px; align-items: center; column-gap: 8px; min-width: 0; }
+.md-right .md-model { text-align: right; }
+.md-right .mswitch { justify-self: end; }
+.md-right .mdora { --th: 26px; }
 /* The segmented control: a grey well, the chosen segment a white pill. */
-.md-tabs { display: flex; justify-self: start; gap: 2px; padding: 3px; border-radius: 8px; background: var(--m-well); }
-.md-tabs button { position: relative; display: inline-flex; align-items: center; flex: none; white-space: nowrap; height: 22px; padding: 0 10px; border-radius: 6px; font-size: 12.5px; color: var(--m-ink2); }
+.md-tabs { display: flex; justify-self: stretch; gap: 2px; padding: 3px; border-radius: 8px; background: var(--m-well); }
+.md-tabs button { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: 1 1 auto; white-space: nowrap; height: 22px; padding: 0 10px; border-radius: 6px; font-size: 12.5px; color: var(--m-ink2); }
 /* The links' one light sits after their tab's name, always there: it changes colour, not the tab's width. */
 .md-tab-dot { margin-left: 6px; }
 .md-tabs button:hover { color: var(--m-ink); }
 .md-tabs button[aria-selected='true'] { color: var(--m-ink); background: var(--m-panel); box-shadow: var(--m-shadow); }
 .md-model { min-width: 0; height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 18px; color: var(--m-dim); }
 
-/* Decision 384 · candidates 384 · hand and scores 456, 12 apart. The decision
- * keeps the first column on every tab; the tabs own the other two. */
-.md-body { display: grid; grid-template: minmax(0, 1fr) / 384px 384px minmax(0, 1fr); column-gap: 12px; min-height: 0; padding: 0 16px 12px; }
+/* Decision 344 · candidates 424 · hand and scores 456, 12 apart: the bar's own
+ * columns. The decision keeps the first on every tab; the tabs own the other two. */
+.md-body { display: grid; grid-template: minmax(0, 1fr) / 344px 424px minmax(0, 1fr); column-gap: 12px; min-height: 0; padding: 0 16px 12px; }
 .md-wide { grid-column: 2 / -1; }
 .md-side { display: grid; grid-template: 104px minmax(0, 1fr) / minmax(0, 1fr); row-gap: 8px; min-width: 0; min-height: 0; }
 
@@ -570,7 +571,7 @@
 
 /* 852 x 192, three panels that keep their places whatever is in them: rank
  * points and placement, the usual figures, yaku. The last two scroll. */
-.mstats { grid-column: 2 / -1; display: grid; grid-template-columns: 272px minmax(0, 1fr) minmax(0, 1fr); column-gap: 12px; min-height: 0; }
+.mstats { grid-column: 2 / -1; display: grid; grid-template-columns: 424px minmax(0, 1fr) minmax(0, 1fr); column-gap: 12px; min-height: 0; }
 .mstat { display: grid; grid-template-rows: 22px minmax(0, 1fr); row-gap: 6px; min-width: 0; min-height: 0; padding: 10px 14px; }
 .mstat > .mslot-empty { align-self: center; }
 .mstat-rank { grid-template-rows: 22px 42px minmax(0, 1fr) 16px; }
@@ -601,7 +602,6 @@
 
 /* The same three panels as the record: what the window can be told, what it
  * runs, and which build it is. */
-.msets { grid-template-columns: 300px minmax(0, 1fr) 232px; }
 .mset-rows { display: grid; grid-template-rows: repeat(3, minmax(0, 1fr)); min-height: 0; }
 .mset-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 10px; min-height: 0; }
 .mset-row + .mset-row { border-top: 1px solid var(--m-line); }
@@ -610,15 +610,3 @@
 .mset-row small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--m-dim); }
 .mset-row .mswitch { justify-self: end; }
 
-/* ----------------------------------------------------------- languages ---- */
-
-/* The canvas is drawn for two-character Chinese words. A language with longer
- * ones gets its own widths for the cells they sit in — every cell still in one
- * place for that language, whatever it shows. */
-.mon[data-lang='en'] .md-bar { grid-template-columns: 300px 122px 412px 126px minmax(0, 1fr) 28px; }
-/* ON / OFF are wider than 开 / 关: the switch needs the room, or it is squeezed differently state to state. */
-.mon[data-lang='ja'] .md-bar { grid-template-columns: 244px 122px 360px 128px minmax(0, 1fr) 28px; }
-.mon[data-lang='en'] .mround { grid-template-columns: 86px 96px minmax(0, 1fr); }
-.mon[data-lang='en'] .mcand { grid-template-columns: 10px 78px 96px minmax(0, 1fr) 56px; }
-.mon[data-lang='en'] .mact--hero strong { font-size: 26px; }
-.mon[data-lang='en'] .mact--hero .mact-text > span { font-size: 17px; }

@@ -51,11 +51,11 @@ To add a text, write it in Chinese through `tr` and run the tests:
 them, for any a table lacks (or still has after the page dropped it), and
 `Monitor.test.tsx` draws every tab in English and fails on any Chinese left.
 
-Fixed places hold per language. The canvas is drawn for two-character Chinese
-words; a language with longer ones has its own widths for the cells they sit
-in, under `.mon[data-lang='…']` at the end of `Monitor.css`. A word and its
-other state — on / off, a step's name plain and bold — reserve the wider of
-the two, so nothing shifts as it changes.
+Fixed places hold in every language with one set of widths: each cell is as
+wide as its widest words, whichever language they are in, and English uses the
+short forms riichi players write (E/S/W/N, `r5m`, `Cut`, `Wd`/`Gd`/`Rd`) so its
+words fit the same cells. A word and its other state — on / off, a step's name
+plain and bold — reserve the wider of the two, so nothing shifts as it changes.
 
 ## Commands
 
