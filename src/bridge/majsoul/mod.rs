@@ -674,7 +674,11 @@ impl MajsoulBridge {
             events.push(MjaiEvent::Dora { dora_marker });
         }
         if is_riichi {
-            events.push(MjaiEvent::Reach { actor, pai: None });
+            events.push(MjaiEvent::Reach {
+                actor,
+                pai: None,
+                tsumogiri: None,
+            });
         }
         events.push(MjaiEvent::Dahai {
             actor,
@@ -2139,7 +2143,7 @@ mod tests {
             }),
         );
         let events = bridge.dispatch(&restore);
-        assert!(matches!(&events[0], MjaiEvent::Reach { actor: 1, pai } if pai.is_none()));
+        assert!(matches!(&events[0], MjaiEvent::Reach { actor: 1, pai, .. } if pai.is_none()));
         assert!(matches!(&events[1], MjaiEvent::Dahai { actor: 1, pai, .. } if pai == "5p"));
         assert_eq!(bridge.pending_reach_accepted, Some(1));
 

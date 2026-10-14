@@ -886,7 +886,11 @@ impl TenhouBridge {
                 if actor == self.state.seat {
                     self.state.open_window(0);
                 }
-                vec![MjaiEvent::Reach { actor, pai: None }]
+                vec![MjaiEvent::Reach {
+                    actor,
+                    pai: None,
+                    tsumogiri: None,
+                }]
             }
             Some(2) => {
                 if actor == self.state.seat {

@@ -343,13 +343,15 @@ impl BotManager {
                     let reach_ev = MjaiEvent::Reach {
                         actor: seat,
                         pai: None,
+                        tsumogiri: None,
                     };
                     match runner.react(std::slice::from_ref(&reach_ev)).await {
                         Ok(follow) => match follow.action {
-                            MjaiEvent::Dahai { pai, .. } => {
+                            MjaiEvent::Dahai { pai, tsumogiri, .. } => {
                                 resp.action = MjaiEvent::Reach {
                                     actor: seat,
                                     pai: Some(pai),
+                                    tsumogiri: Some(tsumogiri),
                                 };
                                 did_reach_followup = true;
                             }
@@ -1746,7 +1748,11 @@ mod tests {
 
     fn reach_none(actor: u8) -> BotResponse {
         BotResponse {
-            action: MjaiEvent::Reach { actor, pai: None },
+            action: MjaiEvent::Reach {
+                actor,
+                pai: None,
+                tsumogiri: None,
+            },
             meta: None,
         }
     }
@@ -1791,7 +1797,8 @@ mod tests {
                     c[1].as_slice(),
                     [MjaiEvent::Reach {
                         actor: 2,
-                        pai: None
+                        pai: None,
+                        ..
                     }]
                 ),
                 "follow-up feeds the runner the reach"
@@ -1800,7 +1807,7 @@ mod tests {
 
         let emitted = resp_rx.try_recv().expect("a bot response");
         assert!(
-            matches!(emitted.action, MjaiEvent::Reach { actor: 2, pai: Some(ref t) } if t == "3p"),
+            matches!(emitted.action, MjaiEvent::Reach { actor: 2, pai: Some(ref t), .. } if t == "3p"),
             "the emitted reach carries the resolved riichi tile"
         );
         assert!(
@@ -1812,6 +1819,7 @@ mod tests {
         mgr.handle(MjaiEvent::Reach {
             actor: 2,
             pai: None,
+            tsumogiri: None,
         })
         .await
         .unwrap();
@@ -1843,7 +1851,8 @@ mod tests {
                 emitted.action,
                 MjaiEvent::Reach {
                     actor: 2,
-                    pai: None
+                    pai: None,
+                    ..
                 }
             ),
             "bare reach forwarded unchanged"
@@ -1854,6 +1863,7 @@ mod tests {
         mgr.handle(MjaiEvent::Reach {
             actor: 2,
             pai: None,
+            tsumogiri: None,
         })
         .await
         .unwrap();
@@ -1874,6 +1884,7 @@ mod tests {
             action: MjaiEvent::Reach {
                 actor: 2,
                 pai: Some("3p".into()),
+                tsumogiri: None,
             },
             meta: None,
         };
@@ -1888,7 +1899,7 @@ mod tests {
         );
         let emitted = resp_rx.try_recv().expect("a bot response");
         assert!(
-            matches!(emitted.action, MjaiEvent::Reach { actor: 2, pai: Some(ref t) } if t == "3p")
+            matches!(emitted.action, MjaiEvent::Reach { actor: 2, pai: Some(ref t), .. } if t == "3p")
         );
         assert!(
             !mgr.drop_next_own_reach,

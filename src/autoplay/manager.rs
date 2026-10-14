@@ -1739,6 +1739,7 @@ mod tests {
         let reach = MjaiEvent::Reach {
             actor: 0,
             pai: Some("2m".into()),
+            tsumogiri: None,
         };
         assert!(!discard_needs_window_guard(&reach));
     }
