@@ -3,8 +3,13 @@ import { pickShow, visibleItems } from '@/lib/botShow'
 import type { BotResponse, BotStatus, CaptureStatus, GameStateSnapshot, MahgenView, MeldSnapshot, MjaiEvent, ShowItem } from '@/types'
 import { localized, tr } from '@/lib/i18n'
 
-/** The window's own options, and which build it is (`version` comes from the shell). */
-export type MonitorConfig = { always_on_top: boolean; pointer_trail?: boolean; pointer_lean?: boolean; version?: string }
+/** The window's own options, and which build it is (`version` comes from the shell).
+ *  `stream_url` is the address the shell serves the game at, while it does. */
+export type MonitorConfig = {
+  always_on_top: boolean; pointer_trail?: boolean; pointer_lean?: boolean
+  stream_output?: boolean; stream_port?: number; stream_token?: string; stream_url?: string
+  version?: string
+}
 export const MONITOR_DEFAULTS: MonitorConfig = { always_on_top: false, pointer_trail: false, pointer_lean: false }
 export type DecisionContext = { game: number; round: number; event_seq: number }
 export type MonitorDecision = {
