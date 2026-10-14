@@ -63,6 +63,7 @@ pub mod cdp_input;
 pub mod context;
 pub mod delay;
 pub mod inject;
+pub mod lean;
 pub mod majsoul;
 pub mod manager;
 pub mod platform;

@@ -384,6 +384,21 @@ pub fn discard_point(pai: &str, ctx: &ActionContext) -> Option<(f64, f64)> {
     }
 }
 
+/// Where a tile of a hand at rest — between turns, nothing drawn — lies:
+/// one of its copies, at random. For the pointer's lean (`autoplay::lean`).
+pub fn hand_point(pai: &str, tehai: &[String], rng: &mut impl Rng) -> Option<(f64, f64)> {
+    let mut sorted = tehai.to_vec();
+    sorted.sort_by(|a, b| compare_pai(a, b));
+    let copies: Vec<usize> = (0..sorted.len()).filter(|&i| sorted[i] == pai).collect();
+    let idx = any_of(&copies, rng)?;
+    (idx < TILES.len() - 1).then(|| get_pai_coord(idx, sorted.len()))
+}
+
+/// Where the next draw will land on a hand of `count` tiles at rest.
+pub fn draw_point(count: usize) -> (f64, f64) {
+    get_pai_coord(13, count)
+}
+
 /// Which copy of a tile a discard presses when the rack shows more than one.
 /// The game records a press of the drawn tile as a tsumogiri and any other
 /// as a tedashi, and the other players see which it was.
@@ -1000,6 +1015,31 @@ mod tests {
             Step::Click { x_norm, .. } => assert!((*x_norm - drawn).abs() < 1e-9),
             other => panic!("expected a click, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_hand_at_rest_puts_a_tile_at_one_of_its_copies_and_the_draw_beyond_it() {
+        use rand::SeedableRng;
+        let hand: Vec<String> = [
+            "1m", "1m", "3m", "4m", "5m", "6m", "7m", "8m", "9m", "1p", "5p", "7p", "7p",
+        ]
+        .iter()
+        .map(|t| t.to_string())
+        .collect();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(5);
+        let places: Vec<f64> = (0..40)
+            .map(|_| hand_point("7p", &hand, &mut rng).unwrap().0)
+            .collect();
+        let (a, b) = (get_pai_coord(11, 13).0, get_pai_coord(12, 13).0);
+        assert!(places
+            .iter()
+            .all(|x| (x - a).abs() < 1e-9 || (x - b).abs() < 1e-9));
+        assert!(
+            places.iter().any(|x| (x - a).abs() < 1e-9)
+                && places.iter().any(|x| (x - b).abs() < 1e-9)
+        );
+        assert_eq!(hand_point("E", &hand, &mut rng), None);
+        assert!((draw_point(13).0 - (TILES[13].0 + TSUMO_SPACE)).abs() < 1e-9);
     }
 
     #[test]
