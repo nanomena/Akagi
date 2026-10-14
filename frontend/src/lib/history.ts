@@ -1,3 +1,4 @@
+import { localized, tr } from '@/lib/i18n'
 // The games on record (`get_history`) and what the statistics tab works out
 // from them. The core stores one line a game: how it ended for us, a block of
 // counters for the hands in it, and — from the builds that keep them — what it
@@ -32,7 +33,7 @@ const TIER_OF_MODE: Record<number, Room> = {
 }
 export type Room = 'bronze' | 'silver' | 'gold' | 'jade' | 'throne' | 'other'
 export const ROOMS: Room[] = ['bronze', 'silver', 'gold', 'jade', 'throne', 'other']
-export const ROOM_NAME: Record<Room, string> = { bronze: '铜之间', silver: '银之间', gold: '金之间', jade: '玉之间', throne: '王座之间', other: '友人场及其他' }
+export const ROOM_NAME: Record<Room, string> = localized({ bronze: '铜之间', silver: '银之间', gold: '金之间', jade: '玉之间', throne: '王座之间', other: '友人场及其他' })
 
 /** The room a game was played in. Anything that is not a ranked room this
  *  table knows — a friends' table, a contest, an event, another platform — is
@@ -45,15 +46,15 @@ export function roomOf(r: GameRecord): Room {
 // ------------------------------------------------------------------ yaku ----
 
 /** Mahjong Soul's ids for yaku. An id that is not here is shown by its number. */
-const YAKU_NAME: Record<number, string> = {
+const YAKU_NAME: Record<number, string> = localized({
   1: '门前清自摸和', 2: '立直', 3: '抢杠', 4: '岭上开花', 5: '海底摸月', 6: '河底捞鱼', 7: '役牌 白', 8: '役牌 发', 9: '役牌 中',
   10: '役牌 自风', 11: '役牌 场风', 12: '断幺九', 13: '一杯口', 14: '平和', 15: '混全带幺九', 16: '一气通贯', 17: '三色同顺',
   18: '两立直', 19: '三色同刻', 20: '三杠子', 21: '对对和', 22: '三暗刻', 23: '小三元', 24: '混老头', 25: '七对子',
   26: '纯全带幺九', 27: '混一色', 28: '二杯口', 29: '清一色', 30: '一发', 31: '宝牌', 32: '红宝牌', 33: '里宝牌', 34: '拔北宝牌',
   35: '天和', 36: '地和', 37: '大三元', 38: '四暗刻', 39: '字一色', 40: '绿一色', 41: '清老头', 42: '国士无双', 43: '小四喜',
   44: '四杠子', 45: '九莲宝灯', 46: '八连庄', 47: '纯正九莲宝灯', 48: '四暗刻单骑', 49: '国士无双十三面', 50: '大四喜',
-}
-export const yakuName = (id: number): string => YAKU_NAME[id] ?? `役 #${id}`
+})
+export const yakuName = (id: number): string => YAKU_NAME[id] ?? tr('役 #{0}', id)
 
 // ----------------------------------------------------------------- totals ----
 
@@ -111,22 +112,22 @@ const average = (total: number, count: number, digits = 0): string =>
 export function figuresOf(t: Totals): Figure[] {
   const s = (key: string) => t.sum[key] ?? 0
   return [
-    { name: '和了率', value: percent(s('agari'), t.hands), note: '和了的局数 ÷ 总局数' },
-    { name: '放铳率', value: percent(s('houjuu'), t.hands), note: '放铳的局数 ÷ 总局数' },
-    { name: '立直率', value: percent(s('riichi'), t.hands) },
-    { name: '副露率', value: percent(s('fuuro'), t.hands) },
-    { name: '流局率', value: percent(s('ryukyoku'), t.hands) },
-    { name: '平均和了点', value: average(s('agari_point_oya') + s('agari_point_ko'), s('agari')) },
-    { name: '平均放铳点', value: average(s('houjuu_point_to_oya') + s('houjuu_point_to_ko'), s('houjuu')) },
-    { name: '和了巡数', value: average(s('agari_jun'), s('agari'), 1) },
-    { name: '立直巡数', value: average(s('riichi_jun'), s('riichi'), 1) },
-    { name: '立直和了率', value: percent(s('riichi_agari'), s('riichi')), note: '立直后和了 ÷ 立直次数' },
-    { name: '立直放铳率', value: percent(s('riichi_houjuu'), s('riichi')), note: '立直后放铳 ÷ 立直次数' },
-    { name: '副露和了率', value: percent(s('fuuro_agari'), s('fuuro')), note: '副露后和了 ÷ 副露的局数' },
-    { name: '副露放铳率', value: percent(s('fuuro_houjuu'), s('fuuro')), note: '副露后放铳 ÷ 副露的局数' },
-    { name: '默听和了', value: percent(s('dama_agari'), s('agari')), note: '门前不立直的和了 ÷ 和了次数' },
-    { name: '追立', value: `${s('chasing_riichi')} 次`, note: '在别家立直之后宣告的立直' },
-    { name: '役满', value: `${s('yakuman')} 次` },
-    { name: '总局数', value: `${t.hands} 局` },
+    { name: tr('和了率'), value: percent(s('agari'), t.hands), note: tr('和了的局数 ÷ 总局数') },
+    { name: tr('放铳率'), value: percent(s('houjuu'), t.hands), note: tr('放铳的局数 ÷ 总局数') },
+    { name: tr('立直率'), value: percent(s('riichi'), t.hands) },
+    { name: tr('副露率'), value: percent(s('fuuro'), t.hands) },
+    { name: tr('流局率'), value: percent(s('ryukyoku'), t.hands) },
+    { name: tr('平均和了点'), value: average(s('agari_point_oya') + s('agari_point_ko'), s('agari')) },
+    { name: tr('平均放铳点'), value: average(s('houjuu_point_to_oya') + s('houjuu_point_to_ko'), s('houjuu')) },
+    { name: tr('和了巡数'), value: average(s('agari_jun'), s('agari'), 1) },
+    { name: tr('立直巡数'), value: average(s('riichi_jun'), s('riichi'), 1) },
+    { name: tr('立直和了率'), value: percent(s('riichi_agari'), s('riichi')), note: tr('立直后和了 ÷ 立直次数') },
+    { name: tr('立直放铳率'), value: percent(s('riichi_houjuu'), s('riichi')), note: tr('立直后放铳 ÷ 立直次数') },
+    { name: tr('副露和了率'), value: percent(s('fuuro_agari'), s('fuuro')), note: tr('副露后和了 ÷ 副露的局数') },
+    { name: tr('副露放铳率'), value: percent(s('fuuro_houjuu'), s('fuuro')), note: tr('副露后放铳 ÷ 副露的局数') },
+    { name: tr('默听和了'), value: percent(s('dama_agari'), s('agari')), note: tr('门前不立直的和了 ÷ 和了次数') },
+    { name: tr('追立'), value: tr('{0} 次', s('chasing_riichi')), note: tr('在别家立直之后宣告的立直') },
+    { name: tr('役满'), value: tr('{0} 次', s('yakuman')) },
+    { name: tr('总局数'), value: tr('{0} 局', t.hands) },
   ]
 }

@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { MonitorEvent, MonitorSnapshot } from '@/lib/monitor'
+import { setLang } from '@/lib/i18n'
 
 const fixture = vi.hoisted(() => ({
   snapshot: null as MonitorSnapshot | null,
@@ -346,5 +347,59 @@ describe('the settings', () => {
 
     fireEvent.click(screen.getAllByRole('switch', { name: /自动操作/ }).at(-1)!)
     expect(fixture.calls).toContainEqual(['set_monitor_autoplay', { enabled: false }])
+  })
+})
+
+describe('another language', () => {
+  const chinese = /[\u3400-\u9fff]/
+  beforeEach(() => {
+    fixture.snapshot = state(); fixture.options = { always_on_top: false }; fixture.calls = []; fixture.handEvents = []
+    fixture.history = [{ id: 'G', ended_at: '2026-01-01T00:00:00Z', platform: 'majsoul', num_players: 4, our_seat: 0, final_scores: [25000, 25000, 25000, 25000],
+      our_rank: 1, our_rank_points: 80, stats: { round: 10, agari: 3, houjuu: 1, riichi: 2 }, yaku: { 2: 2, 12: 1, 99: 1 }, match_info: { platform: 'majsoul', mode_id: 9 } }]
+    const draw = { kind: 'yao9', hands: [{ seat: 1, tiles: ['1m', '9m', 'E'], winning_tile: null, target: null, ura_markers: [] }], scores: [25000, 25000, 25000, 25000], deltas: [0, 0, 0, 0] }
+    fixture.snapshot.hands = [
+      { round: 1, bakaze: 'E', kyoku: 1, honba: 0, result: draw, events: 12 },
+      { round: 2, bakaze: 'E', kyoku: 1, honba: 1, result: null, events: 2 },
+    ]
+    fixture.snapshot.events = [
+      { seq: 90, ts_ms: 0, event: { type: 'reach', actor: 2 } },
+      { seq: 91, ts_ms: 0, event: { type: 'dahai', actor: 2, pai: '5pr', tsumogiri: false } },
+      { seq: 92, ts_ms: 0, event: { type: 'pon', actor: 3, target: 2, pai: 'C', consumed: ['C', 'C'] } },
+    ]
+  })
+  afterEach(() => setLang('zh-CN'))
+
+  it('leaves no Chinese on any tab in English', async () => {
+    setLang('en')
+    const { container } = render(<Monitor />)
+    // What is on screen and what is read out, the language list aside: each language is under its own name.
+    const shown = () => {
+      const copy = container.cloneNode(true) as HTMLElement
+      copy.querySelectorAll('select[aria-label="Language"]').forEach(el => el.remove())
+      return [copy.textContent ?? '', ...[...copy.querySelectorAll('*')].flatMap(el => ['title', 'aria-label', 'alt'].map(name => el.getAttribute(name) ?? ''))].join('\n')
+    }
+    const tabs = screen.getAllByRole('tab').map(tab => tab.textContent ?? '')
+    expect(tabs).toHaveLength(7)
+    for (const name of tabs) {
+      fireEvent.click(screen.getByRole('tab', { name }))
+      await waitFor(() => expect(fixture.calls.some(([cmd]) => cmd === 'get_monitor_options')).toBe(true))
+      const left = shown().split('\n').filter(line => chinese.test(line))
+      expect(left, `on the ${name} tab`).toEqual([])
+    }
+    // The record's own words too, once it has been read.
+    fireEvent.click(screen.getByRole('tab', { name: 'Stats' }))
+    expect(await screen.findByText('Riichi')).toBeTruthy()
+    expect(shown().split('\n').filter(line => chinese.test(line))).toEqual([])
+  })
+
+  it('is chosen on the settings tab, changes every word at once, and is remembered', async () => {
+    render(<Monitor />)
+    fireEvent.click(screen.getByRole('tab', { name: '设置' }))
+    fireEvent.change(screen.getByRole('combobox', { name: '界面语言' }), { target: { value: 'ja' } })
+    // The tab stays where it was; its name and everything on it are in the new language.
+    expect(screen.getByRole('tab', { name: '設定' }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.queryByRole('tab', { name: '设置' })).toBeNull()
+    expect(localStorage.getItem('akagi.language')).toBe('ja')
+    expect(document.querySelector('.mon')?.getAttribute('data-lang')).toBe('ja')
   })
 })
