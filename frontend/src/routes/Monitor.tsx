@@ -14,6 +14,7 @@ import {
 } from '@/lib/monitor'
 import { invoke } from '@/lib/host'
 import './Monitor.css'
+import { localized, tr, useLang } from '@/lib/i18n'
 
 // The application is this one window, and the window is a fixed canvas: drawn
 // at the size below and scaled as one piece to whatever size the window is.
@@ -26,7 +27,7 @@ const STAGE = { w: 1280, h: 720 }
 const DOCK = { w: 1280, h: 240 }
 
 type Tab = 'decision' | 'table' | 'result' | 'events' | 'stats' | 'link' | 'settings'
-const TABS: Array<[Tab, string]> = [['decision', '决策'], ['table', '牌桌'], ['result', '结果'], ['events', '事件'], ['stats', '统计'], ['link', '连接'], ['settings', '设置']]
+const TABS: Array<[Tab, string]> = localized([['decision', '决策'], ['table', '牌桌'], ['result', '结果'], ['events', '事件'], ['stats', '统计'], ['link', '连接'], ['settings', '设置']])
 
 /** The stage the game is shown in may not be smaller than this; `resize_monitor_game` rejects less than 100. */
 const STAGE_MIN = 160
@@ -73,9 +74,9 @@ function Round({ s }: { s: MonitorSnapshot | null }) {
   return <div className="mround">
     {game ? <>
       <strong>{roundLabel(game)}</strong>
-      <span className="mround-seat">{game.our_seat != null && <em>{seatWind(game.our_seat, game)}家{game.our_seat === game.oya ? ' · 庄' : ''}</em>}</span>
-      <span className="mround-count">{game.honba} 本场 · 供托 {game.kyotaku}</span>
-    </> : <span className="mround-idle"><strong>{s?.brand ?? ''}</strong><span>{s?.game_ended === false ? '等待牌局数据' : '等待对局'}</span></span>}
+      <span className="mround-seat">{game.our_seat != null && <em>{tr('{0}家', seatWind(game.our_seat, game))}{game.our_seat === game.oya ? tr(' · 庄') : ''}</em>}</span>
+      <span className="mround-count">{game.honba} {tr('本场 · 供托')} {game.kyotaku}</span>
+    </> : <span className="mround-idle"><strong>{s?.brand ?? ''}</strong><span>{s?.game_ended === false ? tr('等待牌局数据') : tr('等待对局')}</span></span>}
   </div>
 }
 
@@ -103,17 +104,17 @@ function Dock({ m, tab, setTab, tools, options, onAutoplay, onPin }: DockProps) 
     <header className="md-bar">
       <Round s={s} />
       {/* Room for five indicators, the most a hand can turn over. */}
-      <span className="mdora" title="宝牌指示牌">{game && game.dora_markers.length > 0 && <>宝牌<Faces faces={game.dora_markers.map(tile => ({ tile }))} /></>}</span>
-      <nav className="md-tabs" role="tablist" aria-label="监视内容">
+      <span className="mdora" title={tr('宝牌指示牌')}>{game && game.dora_markers.length > 0 && <>{tr('宝牌')}<Faces faces={game.dora_markers.map(tile => ({ tile }))} /></>}</span>
+      <nav className="md-tabs" role="tablist" aria-label={tr('监视内容')}>
         {/* The links have one light, on their tab: everything behind it is run by this window. */}
-        {TABS.map(([key, label]) => <button key={key} role="tab" aria-selected={tab === key} onClick={() => setTab(key)} title={key === 'link' ? `连接：${link.summary}` : undefined}>
+        {TABS.map(([key, label]) => <button key={key} role="tab" aria-selected={tab === key} onClick={() => setTab(key)} title={key === 'link' ? tr('连接：{0}', link.summary) : undefined}>
           {label}{key === 'link' && <i className="mdot md-tab-dot" data-tone={link.tone} />}
         </button>)}
       </nav>
       {/* The switch is the setting, and says so: whether the model's actions may be carried out — not that one has been. */}
       <button className="mswitch" role="switch" aria-checked={!!s?.autoplay_enabled} disabled={!s || !onAutoplay} onClick={() => onAutoplay?.(!s?.autoplay_enabled)}
-        title={s?.autoplay_enabled ? '已允许自动执行模型的动作。点击后停止自动执行，只显示建议。' : '只显示建议。点击后允许自动执行模型的动作。'}>
-        自动操作<i aria-hidden /><b>{s?.autoplay_enabled ? '开' : '关'}</b>
+        title={s?.autoplay_enabled ? tr('已允许自动执行模型的动作。点击后停止自动执行，只显示建议。') : tr('只显示建议。点击后允许自动执行模型的动作。')}>
+        {tr('自动操作')}<i aria-hidden /><b data-other={s?.autoplay_enabled ? tr('关') : tr('开')}>{s?.autoplay_enabled ? tr('开') : tr('关')}</b>
       </button>
       <span className="md-model">{s?.server.state === 'ready' ? s.server.label ?? '' : ''}</span>
       <div className="mtools">{tools}</div>
@@ -126,11 +127,11 @@ function Dock({ m, tab, setTab, tools, options, onAutoplay, onPin }: DockProps) 
         : <>
           <Slot m={m} onDetails={() => setTab('link')} />
           {game ? <div className="md-side"><HandStrip game={game} suggestion={view.live ? s?.decision?.response ?? null : null} /><ScoreStrip game={game} /></div>
-            : <p className="mslot-empty">对局开始后，这里显示手牌和四家点数</p>}
+            : <p className="mslot-empty">{tr('对局开始后，这里显示手牌和四家点数')}</p>}
         </>)}
-      {tab === 'table' && (s?.game ? <SeatColumns snapshot={s} /> : <p className="mslot-empty md-wide">对局开始后，这里显示公开的牌河、副露和点数</p>)}
-      {tab === 'result' && (s ? <ResultPages key={s.context.game} snapshot={s} /> : <p className="mslot-empty md-wide">正在连接监视数据</p>)}
-      {tab === 'events' && (s ? <EventList key={s.context.game} snapshot={s} /> : <p className="mslot-empty md-wide">正在连接监视数据</p>)}
+      {tab === 'table' && (s?.game ? <SeatColumns snapshot={s} /> : <p className="mslot-empty md-wide">{tr('对局开始后，这里显示公开的牌河、副露和点数')}</p>)}
+      {tab === 'result' && (s ? <ResultPages key={s.context.game} snapshot={s} /> : <p className="mslot-empty md-wide">{tr('正在连接监视数据')}</p>)}
+      {tab === 'events' && (s ? <EventList key={s.context.game} snapshot={s} /> : <p className="mslot-empty md-wide">{tr('正在连接监视数据')}</p>)}
       {/* The record can change when a game starts or ends, and at no other time. */}
       {tab === 'stats' && <Statistics refresh={`${s?.context.game ?? 0}:${s?.game_ended ?? true}`} />}
       {tab === 'link' && <Diagnostics snapshot={s} health={m.health} now={m.now} />}
@@ -141,6 +142,9 @@ function Dock({ m, tab, setTab, tools, options, onAutoplay, onPin }: DockProps) 
 
 export function Monitor() {
   const { snapshot: s, error: bridgeError } = useMonitor()
+  // Everything below is drawn in the language of the moment; the dock, which
+  // remembers words it has worked out, is made anew when the language changes.
+  const lang = useLang()
   const [options, setOptions] = useState(MONITOR_DEFAULTS)
   const [ready, setReady] = useState(false)
   const [tab, setTab] = useState<Tab>('decision')
@@ -227,33 +231,33 @@ export function Monitor() {
   const sound = !!s && !s.round_ended && !s.sync_error && s.service !== 'error'
   const listState = view.phase === 'mismatch' ? 'void' : view.phase === 'confirmed' ? 'done' : 'live'
   const rows = sound && (view.live || view.phase === 'confirmed' || view.phase === 'mismatch') ? candidatesOf(d, table, view.instead) : []
-  const noRows = !s ? '正在连接监视数据'
-    : view.phase === 'idle' ? '轮到自己时，这里列出模型的候选动作'
-    : view.phase === 'failed' || view.phase === 'unavailable' ? '这一步没有候选'
-    : sound && (view.live || view.phase === 'confirmed') ? '模型这一步没有给出候选'
-    : s.round_ended ? '本局已结束，候选不再有效'
-    : '建议已失效，候选不再显示'
+  const noRows = !s ? tr('正在连接监视数据')
+    : view.phase === 'idle' ? tr('轮到自己时，这里列出模型的候选动作')
+    : view.phase === 'failed' || view.phase === 'unavailable' ? tr('这一步没有候选')
+    : sound && (view.live || view.phase === 'confirmed') ? tr('模型这一步没有给出候选')
+    : s.round_ended ? tr('本局已结束，候选不再有效')
+    : tr('建议已失效，候选不再显示')
   const m: Model = { s, view, rows, listState, noRows, faults, health: healthOf(s), elapsed: d ? Math.max(0, now - d.started_ms) : 0, now }
 
-  const tools = <button className="mtool" aria-label="置顶" title={options.always_on_top ? '取消置顶' : '窗口置顶'} aria-pressed={options.always_on_top} disabled={!ready || busy}
+  const tools = <button className="mtool" aria-label={tr('置顶')} title={options.always_on_top ? tr('取消置顶') : tr('窗口置顶')} aria-pressed={options.always_on_top} disabled={!ready || busy}
     onClick={() => void pin(!options.always_on_top)}>{options.always_on_top ? <Pin size={15} /> : <PinOff size={15} />}</button>
 
-  return <main className="mon" style={{ '--k': k } as CSSProperties}>
+  return <main className="mon" data-lang={lang} style={{ '--k': k } as CSSProperties}>
     <div className="mon-fit">
       <div className="mon-stage" ref={stage}>
         <div className="mon-canvas mon-canvas--stage">
           {embedded ? <div className="mon-stage-idle">
             <LoaderCircle size={22} className="mspin" />
-            <p>雀魂视图在这里显示</p>
-            <button className="mbtn" onClick={place}>重新对齐游戏视图</button>
+            <p>{tr('雀魂视图在这里显示')}</p>
+            <button className="mbtn" onClick={place}>{tr('重新对齐游戏视图')}</button>
           </div>
             : <div className="mon-stage-start">
-              <h2>{s?.brand ? `${s.brand} · 雀魂` : '雀魂'}</h2>
-              <p>上面登录雀魂并对局，下面核对模型建议和雀魂的实际动作。</p>
+              <h2>{s?.brand ? tr('{0} · 雀魂', s.brand) : tr('雀魂')}</h2>
+              <p>{tr('上面登录雀魂并对局，下面核对模型建议和雀魂的实际动作。')}</p>
               <div className="mon-start-card">
-                <p>游戏使用独立的登录资料，只在这个窗口里用。</p>
+                <p>{tr('游戏使用独立的登录资料，只在这个窗口里用。')}</p>
                 <button className="mbtn mbtn--primary" disabled={!ready || busy} onClick={() => void openGame()}>
-                  {busy ? <><LoaderCircle size={16} className="mspin" />正在连接游戏视图…</> : '打开雀魂'}
+                  {busy ? <><LoaderCircle size={16} className="mspin" />{tr('正在连接游戏视图…')}</> : tr('打开雀魂')}
                 </button>
               </div>
             </div>}
@@ -261,11 +265,11 @@ export function Monitor() {
       </div>
 
       <div className="mon-canvas mon-canvas--dock">
-        <Dock m={m} tab={tab} setTab={setTab} tools={tools} options={options}
+        <Dock key={lang} m={m} tab={tab} setTab={setTab} tools={tools} options={options}
           onAutoplay={ready ? setAutoplay : null} onPin={ready && !busy ? pinned => void pin(pinned) : null} />
         {local.length > 0 && <div className="mtoast" role="alert">
           <div><strong>{local[0].title}</strong><p>{local[0].message}</p></div>
-          {uiError && <button aria-label="知道了" onClick={() => setUiError(null)}><X size={13} /></button>}
+          {uiError && <button aria-label={tr('知道了')} onClick={() => setUiError(null)}><X size={13} /></button>}
         </div>}
       </div>
     </div>
