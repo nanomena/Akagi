@@ -885,7 +885,8 @@ impl AutoplayManager {
             let from = self.state.pointer.unwrap_or(to);
             crate::autoplay::pointer::leave(from, to, rect.width / 16.0, &mut rng)
         };
-        if self.move_pointer(leg.to, leg.travel_ms, leg.bend).await {
+        // A look is unhurried: half the speed of the way to a press.
+        if self.move_pointer(leg.to, leg.travel_ms * 2, leg.bend).await {
             self.state.waiting_on_draw = spot == crate::autoplay::lean::Spot::Draw;
         }
     }
