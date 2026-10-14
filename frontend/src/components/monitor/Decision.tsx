@@ -110,7 +110,7 @@ export function CandidateList({ rows, state, empty, loading, caption, hint }: Li
         {/* Five columns, the same in every row: a longer word or a fourth tile moves nothing. */}
         <span className="mcand-rank">{i + 1}</span>
         <span className="mcand-verb">{row.verb}</span>
-        <span className="mcand-faces"><Faces faces={row.faces} /></span>
+        <span className="mcand-faces"><Faces faces={row.faces} />{row.note && <small className="mcand-note">{row.note}</small>}</span>
         <span className="mcand-mark">{row.chosen ? (state === 'done' ? tr('已执行') : tr('模型选择')) : row.taken ? tr('雀魂实际') : ''}</span>
         <span className="mcand-val">{row.value}</span>
       </li>)}
