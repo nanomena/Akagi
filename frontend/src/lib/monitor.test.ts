@@ -125,7 +125,7 @@ describe('where a decision stands', () => {
   it('is live only between the suggestion and the game answering it', () => {
     expect(decisionView(snapshot(discard()))).toMatchObject({ phase: 'awaiting', live: true, steps: ['done', 'done', 'active'] })
     expect(decisionView(snapshot({ ...discard(), state: 'thinking', response: null }))).toMatchObject({ phase: 'thinking', live: false, action: null })
-    expect(decisionView(snapshot({ ...discard(), state: 'confirmed', confirmed_seq: 11 }))).toMatchObject({ phase: 'confirmed', live: false, steps: ['done', 'done', 'done'] })
+    expect(decisionView(snapshot({ ...discard(), state: 'confirmed', confirmed_seq: 11 }))).toMatchObject({ phase: 'confirmed', tone: 'done', live: false, steps: ['done', 'done', 'done'] })
   })
   it('stops being live on a fault or at the end of the round', () => {
     expect(decisionView(snapshot(discard(), { service: 'error' })).live).toBe(false)
