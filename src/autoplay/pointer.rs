@@ -34,7 +34,7 @@ pub const LOOK_MS: u32 = 800;
 /// one to the other: three tiles, and the gap before the drawn one. Any
 /// further and the look is a sweep across the rack, and nobody weighs two
 /// tiles by waving between the ends of their hand.
-const LOOK_REACH: f64 = 2.7;
+pub const LOOK_REACH: f64 = 2.7;
 
 /// A look at the runner-up: where it sits, and how long a tile is rested on.
 #[derive(Debug, Clone, Copy, PartialEq)]

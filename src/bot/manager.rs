@@ -281,6 +281,9 @@ impl BotManager {
         self.pending.push(event.clone());
 
         if !self.is_decision_point(&event, can_act) {
+            if self.peeks(&event).await {
+                return self.peek().await;
+            }
             return Ok(());
         }
 
@@ -407,6 +410,51 @@ impl BotManager {
             self.runner = None;
             self.actor_id = None;
             self.emit_status(BotStatus::Stopped { bot });
+        }
+        Ok(())
+    }
+
+    /// Whether to ask the bot at an event that is no decision of ours: with
+    /// the pointer's lean on, at every other seat's discard, so that a bot
+    /// playing its next turn out ahead can say what it expects of it (see
+    /// `autoplay::lean`).
+    async fn peeks(&self, e: &MjaiEvent) -> bool {
+        let Some(me) = self.actor_id else {
+            return false;
+        };
+        if !matches!(e, MjaiEvent::Dahai { actor, .. } if *actor != me) {
+            return false;
+        }
+        let config = self.config.read().await;
+        config.monitor.pointer_lean && config.autoplay.enabled
+    }
+
+    /// Ask the bot between our turns, for nothing but what it expects of the
+    /// next one. The answer is no decision: it goes to `autoplay::lean` and
+    /// nowhere else — never onto the response bus, where a `none` would read
+    /// as a pass — and nothing records or shows it.
+    async fn peek(&mut self) -> Result<()> {
+        let Some(runner) = self.runner.as_mut() else {
+            return Ok(());
+        };
+        let batch = std::mem::take(&mut self.pending);
+        let resp = runner
+            .react(&batch)
+            .await
+            .context("bot react failed (between turns)")?;
+        if !matches!(resp.action, MjaiEvent::None) {
+            warn!(
+                "bot manager: the bot answered {:?} where our seat had nothing to answer; ignored",
+                resp.action
+            );
+        }
+        let lean = resp
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.get("lean"))
+            .and_then(|lean| serde_json::from_value(lean.clone()).ok());
+        if let Some(lean) = lean {
+            crate::autoplay::lean::publish(lean);
         }
         Ok(())
     }
@@ -603,7 +651,17 @@ impl BotManager {
         // child via AKAGI_BOT_CONFIG. Bots without a manifest get no env
         // var — same behaviour as v3 before settings existed.
         if let Some(m) = entry.manifest.as_ref() {
+            // What Akagi asks of the bot beyond its settings, under `host`:
+            // `lean`, to be asked between turns as well (see `peeks`).
+            let lean = {
+                let config = self.config.read().await;
+                config.monitor.pointer_lean && config.autoplay.enabled
+            };
             match manifest::load_values(&entry.dir, m)
+                .map(|mut values| {
+                    values.insert("host".into(), serde_json::json!({ "lean": lean }));
+                    values
+                })
                 .and_then(|values| manifest::write_resolved(&entry.dir, &values))
             {
                 Ok(path) => {
@@ -1214,6 +1272,47 @@ mod tests {
         assert_eq!(calls.len(), 1);
         assert!(matches!(calls[0][0], MjaiEvent::ReachAccepted { actor: 1 }));
         assert!(matches!(calls[0][1], MjaiEvent::Tsumo { actor: 2, .. }));
+    }
+
+    #[tokio::test]
+    async fn with_the_lean_on_an_unanswerable_discard_is_asked_and_its_lean_reaches_autoplay_alone()
+    {
+        let lean = serde_json::json!({"lines": 12, "options": [{"discard": true, "pai": "6s", "share": 0.8}]});
+        let reply = BotResponse {
+            action: MjaiEvent::None,
+            meta: Some(serde_json::json!({ "lean": lean })),
+        };
+        let (mut mgr, calls, mut resp_rx, _, _) = manager_with_mock(vec![reply]);
+        {
+            let mut config = mgr.config.write().await;
+            config.monitor.pointer_lean = true;
+            config.autoplay.enabled = true;
+        }
+        let mut leans = crate::autoplay::lean::subscribe();
+        mgr.handle_tracked(tracked(dahai(0), Some(false)))
+            .await
+            .unwrap();
+        assert_eq!(
+            calls.lock().await.len(),
+            1,
+            "asked at the other seat's discard"
+        );
+        assert!(
+            resp_rx.try_recv().is_err(),
+            "no decision goes on the response bus"
+        );
+        let got = leans.try_recv().expect("the lean goes to autoplay");
+        assert_eq!(
+            got.first(),
+            Some(crate::autoplay::lean::Spot::Hand("6s".into()))
+        );
+
+        // With the lean off the same discard asks nothing.
+        let (mut off, calls, _, _, _) = manager_with_mock(vec![]);
+        off.handle_tracked(tracked(dahai(0), Some(false)))
+            .await
+            .unwrap();
+        assert!(calls.lock().await.is_empty());
     }
 
     #[tokio::test]

@@ -56,6 +56,8 @@ export const en: Record<string, string> = {
   '关掉后只显示建议，不替你操作': 'Off: suggestions are shown, not played',
   '光标轨迹': 'Pointer trail',
   '在游戏画面上画出自动操作的光标和点击': 'Draws autoplay\'s pointer and clicks over the game',
+  '预判光标': 'Pre-aim pointer',
+  '别家行动时，光标停在下一手可能要打的牌上': 'Rests the pointer on the likely next discard while others play',
   '模型与服务': 'Model & service',
   '未启动': 'Not started',
   '模型': 'Model',
