@@ -113,6 +113,10 @@ pub struct ActionContext<'a> {
     /// the current decision window. `None` on other platforms, and on
     /// Tenhou before the first parsed frame.
     pub tenhou: Option<&'a crate::autoplay::tenhou_state::TenhouState>,
+    /// Where the pointer is as the plan is made, as a normalised 16:9 point,
+    /// when that is known. A discard of a tile the pointer is already on
+    /// presses that copy rather than its twin.
+    pub pointer: Option<(f64, f64)>,
 }
 
 /// Output of `PlatformAutoplay::plan`: the click sequence to execute.
