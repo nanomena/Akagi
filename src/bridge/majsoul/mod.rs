@@ -306,7 +306,9 @@ impl MajsoulBridge {
                     parse_game_end_standings(&msg.payload, self.num_players)
                         .map(|(scores, ranks)| (Some(scores), Some(ranks)))
                         .unwrap_or((None, None));
-                vec![MjaiEvent::confirmed_game(final_scores, final_ranks)]
+                let rank_points = parse_rank_points(&msg.payload, self.num_players);
+                vec![MjaiEvent::confirmed_game(final_scores, final_ranks)
+                    .with_rank_points(rank_points)]
             }
             (MessageType::Notify, METHOD_NOTIFY_GAME_TERMINATE) => {
                 info!(
@@ -1076,6 +1078,7 @@ impl MajsoulBridge {
                 })
                 .transpose()?;
             events.push(MjaiEvent::Hora {
+                score: hand_score(hule),
                 actor,
                 target,
                 deltas: deltas.clone(),
@@ -1433,6 +1436,52 @@ fn stable_game_id(game_uuid: &str) -> u64 {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     hash
+}
+
+/// How a `HuleInfo` scored its hand: the yaku it lists (`fans`), han, fu and
+/// whether it is a yakuman. `None` when it lists no yaku.
+fn hand_score(hule: &JsonValue) -> Option<crate::schema::mjai::HandScore> {
+    let number = |value: Option<&JsonValue>| {
+        value
+            .and_then(JsonValue::as_u64)
+            .and_then(|n| u32::try_from(n).ok())
+    };
+    let yaku: Vec<(u32, u32)> = hule
+        .get("fans")?
+        .as_array()?
+        .iter()
+        .filter_map(|fan| Some((number(fan.get("id"))?, number(fan.get("val")).unwrap_or(0))))
+        .collect();
+    if yaku.is_empty() {
+        return None;
+    }
+    Some(crate::schema::mjai::HandScore {
+        yaku,
+        han: number(hule.get("count")).unwrap_or(0),
+        fu: number(hule.get("fu")).unwrap_or(0),
+        yakuman: hule
+            .get("yiman")
+            .and_then(JsonValue::as_bool)
+            .unwrap_or(false),
+    })
+}
+
+/// What the game did to each seat's rank points, by seat, from the
+/// final-result payload (`grading_score`). `None` unless every seat has
+/// one. A room that is not ranked reports zeros.
+fn parse_rank_points(payload: &JsonValue, num_players: u8) -> Option<Vec<i32>> {
+    let n = usize::from(num_players);
+    let players = payload.pointer("/result/players")?.as_array()?;
+    if players.len() != n {
+        return None;
+    }
+    let mut points = vec![None; n];
+    for player in players {
+        let seat = usize::try_from(player.get("seat")?.as_u64()?).ok()?;
+        let change = i32::try_from(player.get("grading_score")?.as_i64()?).ok()?;
+        *points.get_mut(seat)? = Some(change);
+    }
+    points.into_iter().collect()
 }
 
 /// `result.players` is ordered by placement and each row carries its absolute
@@ -4528,12 +4577,18 @@ mod tests {
                 target,
                 deltas,
                 ura_markers,
+                score,
                 ..
             } => {
                 assert_eq!(*actor, 2);
                 assert_eq!(*target, 0);
                 assert_eq!(*deltas, Some(vec![-12000, 0, 13000]));
                 assert_eq!(ura_markers.as_deref(), Some(&["5p".to_string()][..]));
+                // How the hand was scored rides beside the event: its yaku by the
+                // provider's ids, with their han.
+                let score = score.as_ref().expect("the win says how it was scored");
+                assert_eq!(score.yaku, [(25, 2), (2, 1), (33, 2), (34, 2)]);
+                assert_eq!((score.han, score.fu, score.yakuman), (7, 25, false));
             }
             other => panic!("expected Hora, got {other:?}"),
         }
@@ -4631,6 +4686,42 @@ mod tests {
 
     /// `NotifyGameEndResult` (top-level Notify, NOT ActionPrototype) →
     /// `[EndGame]`. Standings remain private metadata; mjai JSON stays empty.
+    /// What a game did to each seat's rank points is read by seat, whatever
+    /// order the result lists them in; it is all of them or none.
+    #[test]
+    fn rank_points_are_read_by_seat() {
+        let ranked = json!({ "result": { "players": [
+            { "seat": 1, "part_point_1": 43800, "grading_score": 120 },
+            { "seat": 3, "part_point_1": 24700, "grading_score": 45 },
+            { "seat": 0, "part_point_1": 20500, "grading_score": -30 },
+            { "seat": 2, "part_point_1": 11000, "grading_score": -165 },
+        ] } });
+        assert_eq!(
+            parse_rank_points(&ranked, 4),
+            Some(vec![-30, 120, -165, 45])
+        );
+        // A result that does not say for every seat says nothing.
+        let partial = json!({ "result": { "players": [
+            { "seat": 0, "grading_score": 10 }, { "seat": 1 }, { "seat": 2 }, { "seat": 3 },
+        ] } });
+        assert_eq!(parse_rank_points(&partial, 4), None);
+        assert_eq!(parse_rank_points(&ranked, 3), None);
+
+        // And it reaches the event that ends the game.
+        let mut bridge = MajsoulBridge::new(None, None);
+        bridge.num_players = 4;
+        let events = bridge.dispatch(&ParsedMessage {
+            msg_type: MessageType::Notify,
+            msg_id: None,
+            method_name: Arc::from(METHOD_NOTIFY_GAME_END_RESULT),
+            payload: ranked,
+        });
+        assert!(matches!(
+            &events[0],
+            MjaiEvent::EndGame { rank_points: Some(points), .. } if points == &[-30, 120, -165, 45]
+        ));
+    }
+
     #[test]
     fn notify_game_end_result_emits_end_game() {
         let mut bridge = MajsoulBridge::new(None, None);
@@ -4657,6 +4748,7 @@ mod tests {
                 reason: crate::schema::GameEndReason::Confirmed,
                 final_scores: Some(scores),
                 final_ranks: Some(ranks),
+                ..
             } if scores == &[20500, 43800, 11000, 24700]
                 && ranks == &[3, 1, 4, 2]
         ));

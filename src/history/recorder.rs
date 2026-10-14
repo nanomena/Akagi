@@ -334,6 +334,7 @@ mod tests {
         tx.send(start_game()).unwrap();
         tx.send(start_kyoku()).unwrap();
         tx.send(MjaiEvent::Hora {
+            score: None,
             actor: 0,
             target: 1,
             deltas: Some(vec![8000, -8000, 0, 0]),
@@ -380,6 +381,7 @@ mod tests {
         tx.send(start_game()).unwrap();
         tx.send(start_kyoku()).unwrap();
         tx.send(MjaiEvent::Hora {
+            score: None,
             actor: 0,
             target: 1,
             deltas: Some(vec![8000, -8000, 0, 0]),
@@ -424,6 +426,7 @@ mod tests {
         tx.send(start_game()).unwrap();
         tx.send(start_kyoku()).unwrap();
         tx.send(MjaiEvent::Hora {
+            score: None,
             actor: 0,
             target: 1,
             deltas: Some(vec![8000, -8000, 0, 0]),
@@ -454,6 +457,7 @@ mod tests {
         state.handle(start_kyoku_at(1, vec![25000; 4]), &store, &history_tx);
         state.handle(
             MjaiEvent::Hora {
+                score: None,
                 actor: 0,
                 target: 1,
                 deltas: Some(vec![8000, -8000, 0, 0]),

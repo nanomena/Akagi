@@ -1020,6 +1020,7 @@ fn bot_action_to_mjai(a: BotAction, actor: u8) -> MjaiEvent {
             consumed: take_n(consumed),
         },
         BotAction::Hora { target } => MjaiEvent::Hora {
+            score: None,
             actor,
             target,
             deltas: None,

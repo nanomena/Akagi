@@ -220,6 +220,18 @@ pub struct GameRecord {
     #[serde(default)]
     pub match_info: Option<MatchInfo>,
 
+    /// What the game did to our rank points, when the platform reported it.
+    /// Zero in a room that is not ranked; `None` for records written before
+    /// this was kept.
+    #[serde(default)]
+    pub our_rank_points: Option<i32>,
+
+    /// Our wins by yaku: the platform's id for a yaku, and how many of our
+    /// winning hands this game had it. Empty when the platform does not say
+    /// how a hand was scored, and for records written before this was kept.
+    #[serde(default)]
+    pub yaku: std::collections::BTreeMap<u32, u32>,
+
     /// Path of the mjai.jsonl copy, relative to the history root —
     /// always `"games/<id>.mjai.jsonl"`.
     pub log_path: String,
@@ -371,6 +383,8 @@ mod tests {
     #[test]
     fn game_record_without_match_info_still_parses() {
         let r = GameRecord {
+            our_rank_points: None,
+            yaku: Default::default(),
             id: "OLD".into(),
             started_at: Utc::now(),
             ended_at: Utc::now(),
@@ -402,6 +416,8 @@ mod tests {
     #[test]
     fn history_filter_default_matches_everything() {
         let r = GameRecord {
+            our_rank_points: None,
+            yaku: Default::default(),
             id: "01ARZ".into(),
             started_at: Utc::now(),
             ended_at: Utc::now(),
@@ -424,6 +440,8 @@ mod tests {
     #[test]
     fn history_filter_platform_mismatch() {
         let r = GameRecord {
+            our_rank_points: None,
+            yaku: Default::default(),
             id: "x".into(),
             started_at: Utc::now(),
             ended_at: Utc::now(),
@@ -450,6 +468,8 @@ mod tests {
     #[test]
     fn history_event_recorded_round_trips() {
         let rec = GameRecord {
+            our_rank_points: None,
+            yaku: Default::default(),
             id: "rec1".into(),
             started_at: Utc::now(),
             ended_at: Utc::now(),
