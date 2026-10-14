@@ -5,12 +5,23 @@
 -- the default on the next start. If the script ever errors, Akagi keeps
 -- playing with its built-in model and logs the reason once.
 --
--- decide_delay(ctx) returns { delay_ms = <number>, allow_bank = <bool> }.
+-- decide_delay(ctx) returns
+--   { delay_ms = <number>, allow_bank = <bool>, hesitate = <bool>,
+--     look_ms = <number> }.
 --
 -- delay_ms is the target TOTAL thinking time for the decision window —
 -- the time the SERVER observes between offering the decision and
 -- receiving the action. It is NOT a sleep length: Akagi subtracts
 -- whatever networking and bot inference already consumed.
+--
+-- hesitate asks for the pointer to rest on the runner-up before a discard
+-- is pressed. It is a wish: it is shown only when the bot's two likeliest
+-- candidates are discards of different tiles (the bot has to say so —
+-- `type` and `prob` on its candidates), and only inside delay_ms, which
+-- it never lengthens; and only between tiles that sit within three of
+-- each other, not across the hand. look_ms is how long the pointer then
+-- rests on a tile it looks at (100 to 5000; left out, Akagi's own). This
+-- default never asks for a look.
 --
 -- Akagi always enforces on top of whatever this script returns:
 --   * a minimum delay (config `min_delay_ms`; the higher
@@ -40,8 +51,29 @@
 --   ctx.top_prob        bot's top candidate probability (0..1), or nil
 --   ctx.second_prob     second candidate probability, or nil
 --   ctx.margin          top_prob - second_prob, or nil
---                       (the three above are unused by this default
+--   ctx.entropy         how spread the bot's candidates were, in nats:
+--                       0 for a forced move, ln(n) for n equally likely
+--                       ones; nil when the bot reports no probabilities
+--                       (the four above are unused by this default
 --                       model — see the note before routine_probability)
+--
+-- Read off the table, for a discard (nil when not read; unused by this
+-- default model):
+--   ctx.loose           the discarded tile is loose in the hand: no
+--                       second copy, nothing of its suit within two
+--   ctx.runner_up_loose the same for the runner-up, when the bot's two
+--                       likeliest candidates are discards of different
+--                       tiles
+--   ctx.safe            someone is in riichi, and the discarded tile is
+--                       (true) or is not (false) in the discards of
+--                       every seat in riichi; nil with no riichi
+--
+-- A second opinion, from the built-in bot, which imitates people: the
+-- share of players who would make each move (nil when it has none;
+-- unused by this default model):
+--   ctx.human_top       their likeliest move
+--   ctx.human_second    their next likeliest, or nil
+--   ctx.human_chosen    the move the active bot is making
 --   ctx.budget          { fixed_ms, add_ms, elapsed_ms } or nil
 --   ctx.rng()           uniform random in [0, 1)
 --   ctx.lognormal(mu, sigma)  log-normal sample in SECONDS

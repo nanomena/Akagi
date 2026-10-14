@@ -58,6 +58,9 @@ pub struct AutoplayManager {
     /// User Lua delay policy (hot-reloaded from disk; see
     /// `autoplay::delay::script`).
     delay_script: crate::autoplay::delay::ScriptHost,
+    /// The built-in bot following the game, for a second opinion on how
+    /// obvious each decision is (see `autoplay::advisor`).
+    advisor: crate::autoplay::advisor::Advisor,
     /// Directory holding the loaded config file; the script lives at
     /// `<config_dir>/delay.lua`.
     config_dir: std::path::PathBuf,
@@ -82,6 +85,9 @@ struct ManagerState {
     /// responses that arrive for the same one are dropped before they are
     /// planned rather than after.
     acted_window: Option<Instant>,
+    /// Where the pointer was last put, in CSS pixels. `None` until the
+    /// first press of a session.
+    pointer: Option<(f64, f64)>,
 }
 
 impl AutoplayManager {
@@ -104,6 +110,7 @@ impl AutoplayManager {
             riichi: RiichiCityAutoplay::new(),
             state: ManagerState::default(),
             delay_script: crate::autoplay::delay::ScriptHost::default(),
+            advisor: crate::autoplay::advisor::Advisor::default(),
             config_dir,
         }
     }
@@ -224,6 +231,42 @@ impl AutoplayManager {
             (our_seat, legal_actions, snapshot, num_players)
         };
 
+        // What the table and a second opinion say about this decision (see
+        // `autoplay::table`, `autoplay::advisor`). Like the probabilities it
+        // feeds the delay model and cannot alter the chosen action.
+        let reading = {
+            let (loose, runner_up_loose, safe) = match &resp.action {
+                MjaiEvent::Dahai { pai, .. } => {
+                    let hand = snapshot
+                        .players
+                        .get(our_seat as usize)
+                        .map_or(&[][..], |p| p.tehai.as_slice());
+                    let candidates = crate::autoplay::delay::probs::candidates(resp.meta.as_ref());
+                    let riichi_rivers: Vec<Vec<&str>> = snapshot
+                        .players
+                        .iter()
+                        .filter(|p| p.seat != our_seat && p.riichi_declared)
+                        .map(|p| p.river.iter().map(|d| d.tile.as_str()).collect())
+                        .collect();
+                    (
+                        Some(crate::autoplay::table::is_loose(pai, hand)),
+                        crate::autoplay::pointer::runner_up(&candidates, pai)
+                            .map(|other| crate::autoplay::table::is_loose(other, hand)),
+                        crate::autoplay::table::is_safe(pai, &riichi_rivers),
+                    )
+                }
+                _ => (None, None, None),
+            };
+            crate::autoplay::delay::Reading {
+                loose,
+                runner_up_loose,
+                safe,
+                human: self.advisor.view(&resp.action),
+            }
+        };
+        // One line a decision, for measuring a pace against afterwards.
+        info!(action = ?resp.action, ?probs, ?reading, "autoplay: decision read");
+
         let action_ctx = ActionContext {
             action: &resp.action,
             snapshot: &snapshot,
@@ -237,6 +280,7 @@ impl AutoplayManager {
             delay_cfg,
             budget,
             probs,
+            reading,
             delay_script: self.delay_script.script(),
             tenhou: tenhou_state.as_ref(),
         };
@@ -259,10 +303,21 @@ impl AutoplayManager {
             }
         }
 
-        let plan = platform.plan(&action_ctx);
+        let mut plan = platform.plan(&action_ctx);
         if plan.steps.is_empty() {
             return;
         }
+        // The runner-up's place in the hand, when the delay model asked for
+        // a look at it and the bot's two likeliest candidates are discards
+        // of different tiles (see `autoplay::pointer`).
+        let glance = match (&resp.action, plan.hesitate) {
+            (MjaiEvent::Dahai { pai, .. }, true) => {
+                let candidates = crate::autoplay::delay::probs::candidates(resp.meta.as_ref());
+                crate::autoplay::pointer::runner_up(&candidates, pai)
+                    .and_then(|other| crate::autoplay::majsoul::discard_point(other, &action_ctx))
+            }
+            _ => None,
+        };
         debug!(
             "autoplay: action={:?} steps={}",
             resp.action,
@@ -350,6 +405,18 @@ impl AutoplayManager {
             return;
         }
 
+        // The pointer's way to the first press is made inside the thinking
+        // time, not after it: the pause that leads the plan gives up
+        // exactly what the way takes, so the press lands when it would
+        // have (see `autoplay::pointer`).
+        let mut approach = rect.and_then(|rect| self.plan_approach(&mut plan, rect, glance));
+        if approach.as_ref().is_some_and(|a| a.legs.len() > 1) {
+            info!(
+                "autoplay: looking at the runner-up before {:?}",
+                resp.action
+            );
+        }
+
         let mut window_checked = false;
         for step in &plan.steps {
             match step {
@@ -434,6 +501,14 @@ impl AutoplayManager {
                         warn!("autoplay: click step with no canvas rect; skipping");
                         continue;
                     };
+                    // Moving over a table whose window has closed presses
+                    // nothing, so the walk comes before the check below and
+                    // the check stays right against the press.
+                    if let Some(approach) = approach.take() {
+                        if !self.walk(&approach).await {
+                            return;
+                        }
+                    }
                     // The decision window can close while we sleep: a
                     // higher-priority claimant (ron over our chi window)
                     // resolves it early, and the *next* window's buttons
@@ -495,6 +570,7 @@ impl AutoplayManager {
                         return;
                     }
                     drop(page_guard);
+                    self.state.pointer = Some((px, py));
                 }
                 // Riichi City SendFrames never reach this loop — they are
                 // spawned above as per-decision tasks.
@@ -579,7 +655,102 @@ impl AutoplayManager {
                     ),
                 );
             }
+            if registered {
+                self.rest_pointer(rect, &plan).await;
+            }
+        } else if let Some(rect) = rect {
+            self.rest_pointer(rect, &plan).await;
         }
+    }
+
+    /// Plan the pointer's way to the plan's first press and take its time
+    /// out of the pause that leads the plan. `None` for a plan that does not
+    /// open with a pause and a press: there is no thinking time to move in.
+    fn plan_approach(
+        &mut self,
+        plan: &mut crate::autoplay::PlanResult,
+        rect: CanvasRect,
+        glance: Option<(f64, f64)>,
+    ) -> Option<crate::autoplay::pointer::Approach> {
+        let rest_ms = plan.look_ms.unwrap_or(crate::autoplay::pointer::LOOK_MS);
+        let [Step::Sleep { duration_ms }, Step::Click { x_norm, y_norm }, ..] =
+            plan.steps.as_mut_slice()
+        else {
+            return None;
+        };
+        let mut rng = rand::rng();
+        // A pointer that has not been anywhere yet starts from where it
+        // would have been resting.
+        let from = *self.state.pointer.get_or_insert_with(|| {
+            let (x, y) = crate::autoplay::pointer::rest_point(&mut rng);
+            rect.pixel(x, y)
+        });
+        let approach = crate::autoplay::pointer::approach(
+            *duration_ms,
+            from,
+            rect.pixel(*x_norm, *y_norm),
+            glance.map(|(x, y)| crate::autoplay::pointer::Look {
+                at: rect.pixel(x, y),
+                rest_ms,
+            }),
+            rect.width / 16.0,
+            &mut rng,
+        );
+        *duration_ms = approach.pause_ms;
+        Some(approach)
+    }
+
+    /// Walk the pointer along `approach`. False when it could not be moved.
+    async fn walk(&mut self, approach: &crate::autoplay::pointer::Approach) -> bool {
+        for leg in &approach.legs {
+            if !self.move_pointer(leg.to, leg.travel_ms, leg.bend).await {
+                return false;
+            }
+            if leg.dwell_ms > 0 {
+                tokio::time::sleep(Duration::from_millis(u64::from(leg.dwell_ms))).await;
+            }
+        }
+        true
+    }
+
+    /// Take the pointer off what the plan last pressed, to somewhere the
+    /// client draws nothing under it (see `autoplay::pointer`).
+    async fn rest_pointer(&mut self, rect: CanvasRect, plan: &crate::autoplay::PlanResult) {
+        let Some(pressed) = plan.steps.iter().rev().find_map(|s| match s {
+            Step::Click { x_norm, y_norm } => Some((*x_norm, *y_norm)),
+            _ => None,
+        }) else {
+            return;
+        };
+        let from = self
+            .state
+            .pointer
+            .unwrap_or_else(|| rect.pixel(pressed.0, pressed.1));
+        let leg = {
+            let mut rng = rand::rng();
+            let (x, y) = crate::autoplay::pointer::rest_point(&mut rng);
+            crate::autoplay::pointer::leave(from, rect.pixel(x, y), rect.width / 16.0, &mut rng)
+        };
+        tokio::time::sleep(Duration::from_millis(u64::from(leg.dwell_ms))).await;
+        self.move_pointer(leg.to, leg.travel_ms, leg.bend).await;
+    }
+
+    /// Move the pointer to `to` over `travel_ms`. False when it could not
+    /// be moved.
+    async fn move_pointer(&mut self, to: (f64, f64), travel_ms: u32, bend: f64) -> bool {
+        let from = self.state.pointer.unwrap_or(to);
+        let page_guard = self.ctx.page.read().await;
+        let Some(page) = page_guard.as_ref() else {
+            warn!("autoplay: no page handle — cannot move the pointer");
+            return false;
+        };
+        if let Err(e) = crate::autoplay::cdp_input::travel(page, from, to, travel_ms, bend).await {
+            warn!("autoplay: moving the pointer failed: {e:#}");
+            return false;
+        }
+        drop(page_guard);
+        self.state.pointer = Some(to);
+        true
     }
 
     /// Wait until the client is taking input, or give up.
@@ -859,6 +1030,7 @@ impl AutoplayManager {
     }
 
     fn handle_mjai_event(&mut self, ev: &MjaiEvent) {
+        self.advisor.note(ev);
         match ev {
             MjaiEvent::StartGame { id, .. } => {
                 // Capture our seat directly from the StartGame event rather

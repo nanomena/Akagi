@@ -2,7 +2,8 @@ import { relativeKind, type RelativeKind } from '@/lib/format'
 import { pickShow, visibleItems } from '@/lib/botShow'
 import type { BotResponse, BotStatus, CaptureStatus, GameStateSnapshot, MahgenView, MeldSnapshot, MjaiEvent, ShowItem } from '@/types'
 
-export type MonitorConfig = { always_on_top: boolean }
+/** The window's own options, and which build it is (`version` comes from the shell). */
+export type MonitorConfig = { always_on_top: boolean; version?: string }
 export const MONITOR_DEFAULTS: MonitorConfig = { always_on_top: false }
 export type DecisionContext = { game: number; round: number; event_seq: number }
 export type MonitorDecision = {
@@ -15,6 +16,9 @@ export type MonitorDecision = {
 export type PublicHand = { seat: number; tiles: string[]; winning_tile: string | null; target: number | null; ura_markers: string[] }
 export type RoundResult = { kind: string; hands: PublicHand[]; scores: number[] | null; deltas: number[] | null }
 export type MonitorEvent = { seq: number; ts_ms: number; event: MjaiEvent }
+/** One hand of the current game: which it was and how it ended (`null` while it
+ *  is played). Its events are asked for by `round` (`get_hand_events`). */
+export type HandSummary = { round: number; bakaze: string; kyoku: number; honba: number; result: RoundResult | null; events: number }
 /** One thing a bot or its service says about itself. Shown as written: this
  *  window does not know what any of it means. */
 export type Fact = { name: string; value: string; note?: string }
@@ -34,6 +38,8 @@ export type MonitorSnapshot = {
   brand: string; facts: Fact[]; autoplay_enabled: boolean
   decision: MonitorDecision | null; previous_decision: MonitorDecision | null
   result: RoundResult | null; previous_result: RoundResult | null
+  /** The hands of this game in the order dealt, the one in play last. */
+  hands: HandSummary[]
   events: MonitorEvent[]; last_event_ms: number | null
 }
 
@@ -86,6 +92,10 @@ export function seatLabel(seat: number, t: Table): string {
 }
 export function seatWind(seat: number, game: GameStateSnapshot): string {
   return WIND['ESWN'[(seat - game.oya + game.num_players) % game.num_players]]
+}
+/** A hand by its place in the game: 东1局 2 本场. */
+export function handLabel(h: { bakaze: string; kyoku: number; honba: number }): string {
+  return `${WIND[h.bakaze] ?? h.bakaze}${h.kyoku}局 ${h.honba} 本场`
 }
 export function roundLabel(game: GameStateSnapshot): string {
   return `${WIND[game.bakaze] ?? game.bakaze}${game.kyoku}局`
@@ -346,6 +356,21 @@ export function healthOf(s: MonitorSnapshot | null): Health[] {
 }
 
 export type Alert = { key: string; title: string; message: string; hint?: string }
+
+/** The four links as one light. Everything here is run by the application
+ *  itself, so there is one question — is it all up — and the links tab has the
+ *  rest. A fault outranks a link still coming up; a Bot process with no game
+ *  to play and a table with no game on it are not faults. */
+export function linkOf(health: Health[]): { tone: Tone; summary: string } {
+  const say = (h: Health) => `${h.name}${h.state}`
+  const faulty = health.find(h => h.tone === 'bad')
+  if (faulty) return { tone: 'bad', summary: say(faulty) }
+  const coming = health.find(h => h.tone === 'busy' || h.tone === 'wait')
+  if (coming) return { tone: 'busy', summary: say(coming) }
+  const down = health.find(h => (h.key === 'capture' || h.key === 'service') && h.tone !== 'ok')
+  if (down) return { tone: 'idle', summary: say(down) }
+  return { tone: 'ok', summary: '全部正常' }
+}
 
 export function alertsOf(s: MonitorSnapshot | null, local: { ui: string | null; bridge: string | null }): Alert[] {
   const out: Alert[] = []

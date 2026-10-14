@@ -942,6 +942,7 @@ impl TenhouBridge {
         let ura_markers = msg.get("doraHaiUra").and_then(parse_tile_csv);
 
         let mut events = vec![MjaiEvent::Hora {
+            score: None,
             actor,
             target,
             deltas: Some(deltas_abs),
