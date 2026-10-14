@@ -12,7 +12,7 @@ pub struct MonitorConfig {
     pub pointer_trail: bool,
     /// While the others play, rest autoplay's pointer on the tiles the bot
     /// expects to throw next, as a person's eye already would be (see
-    /// `autoplay::lean`). Asks the bot between turns, so only a bot that
-    /// answers with a lean gives the pointer anywhere to go.
+    /// `autoplay::pointer::lean`). Asks the bot between turns, so only a bot
+    /// that answers with a lean gives the pointer anywhere to go.
     pub pointer_lean: bool,
 }
