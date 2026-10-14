@@ -418,7 +418,7 @@ impl BotManager {
     /// the pointer's lean on, at every other seat's discard, so that a bot
     /// playing its next turn out ahead can say what it expects of it (see
     /// `autoplay::lean`).
-    async fn peeks(&self, e: &MjaiEvent) -> bool {
+    async fn peeks(&mut self, e: &MjaiEvent) -> bool {
         let Some(me) = self.actor_id else {
             return false;
         };
