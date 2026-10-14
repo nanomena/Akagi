@@ -729,10 +729,8 @@ impl AutoplayManager {
             *duration_ms,
             from,
             rect.pixel(*x_norm, *y_norm),
-            glance.map(|(x, y)| crate::autoplay::pointer::Look {
-                at: rect.pixel(x, y),
-                rest_ms,
-            }),
+            glance.map(|(x, y)| rect.pixel(x, y)),
+            rest_ms,
             rect.width / 16.0,
             &mut rng,
         );
