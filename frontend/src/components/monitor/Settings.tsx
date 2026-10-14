@@ -38,7 +38,7 @@ export function Settings({ snapshot: s, options, now, onPin, onAutoplay, onTrail
         <Row name={tr('窗口置顶')} about={tr('让这个窗口保持在其他窗口之上')} on={options.always_on_top} onChange={onPin} />
         <Row name={tr('自动操作')} about={tr('关掉后只显示建议，不替你操作')} on={!!s?.autoplay_enabled} onChange={s ? onAutoplay : null} />
         <Row name={tr('光标轨迹')} about={tr('在游戏画面上画出自动操作的光标和点击')} on={!!options.pointer_trail} onChange={onTrail} />
-        <Row name={tr('预判光标')} about={tr('别家行动时，光标停在下一手可能要打的牌上')} on={!!options.pointer_lean} onChange={onLean} />
+        <Row name={tr('预推理')} about={tr('别家行动时，光标停在下一手可能要打的牌上')} on={!!options.pointer_lean} onChange={onLean} />
         <div className="mset-row">
           <div><strong>{tr('界面语言')}</strong><small>{tr('只改变这个窗口里的文字')}</small></div>
           {/* Each language under its own name, whatever language is showing. */}
