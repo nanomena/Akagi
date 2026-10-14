@@ -1075,9 +1075,13 @@ impl AutoplayManager {
     /// one the plan was made for: if our action did land and the answer was
     /// merely slow, the server's echo closes that window and the retry is
     /// dropped rather than pressed into the next decision.
+    ///
+    /// Each retry measures the canvas again before it presses: a window
+    /// resized or moved since the first press would otherwise put every retry
+    /// where the target used to be.
     #[allow(clippy::too_many_arguments)]
     async fn verify_and_retry(
-        &self,
+        &mut self,
         rect: CanvasRect,
         plan: &crate::autoplay::PlanResult,
         ticket: InputTicket,
@@ -1102,6 +1106,7 @@ impl AutoplayManager {
             return true;
         }
 
+        let mut rect = rect;
         for attempt in 0..=cfg.click_retries {
             if self
                 .wait_for_input(ticket, cfg.verify_input_ms, require_non_discard)
@@ -1140,6 +1145,16 @@ impl AutoplayManager {
             // longer, the third also nudges the cursor mid-press.
             let hold = retry_hold_ms(cfg.click_hold_ms, attempt);
             let jiggle = attempt >= 1;
+            // Where the canvas is now, not where it was when the plan was
+            // pressed: the same normalised point lands on the same control.
+            if let Some(now) = self.remeasure_canvas_rect().await {
+                if now != rect {
+                    info!(
+                        "autoplay: the canvas moved from {rect:?} to {now:?} since the last press; pressing where the target is now"
+                    );
+                }
+                rect = now;
+            }
             for (i, (x_norm, y_norm)) in again.iter().enumerate() {
                 if i > 0 {
                     tokio::time::sleep(Duration::from_millis(u64::from(cfg.inter_click_delay_ms)))
@@ -1163,6 +1178,8 @@ impl AutoplayManager {
                 {
                     warn!("autoplay: retry dispatch_click failed: {e:#}");
                 }
+                drop(page_guard);
+                self.state.pointer = Some((px, py));
             }
         }
         // The timings are in the message because a config written before a
@@ -1334,7 +1351,13 @@ impl AutoplayManager {
                 }
             }
         }
-        // Re-query.
+        self.remeasure_canvas_rect().await
+    }
+
+    /// The canvas measured afresh, whatever the cache holds, and cached for
+    /// the presses that follow. `None` when the page cannot say.
+    async fn remeasure_canvas_rect(&mut self) -> Option<CanvasRect> {
+        let now = Instant::now();
         let page_guard = self.ctx.page.read().await;
         let page = page_guard.as_ref()?.clone();
         drop(page_guard);
