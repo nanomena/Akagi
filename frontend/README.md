@@ -21,6 +21,8 @@ src/
   hooks/useMonitor.ts      the snapshot: fetched once, then followed
   lib/monitor.ts           everything the page derives from a snapshot; no React in it
   lib/tileFace.ts          tile faces, drawn once each and cached
+  lib/history.ts           the games on record: rooms, yaku, the figures of the statistics tab
+  lib/i18n.ts              the words on screen in the language chosen; lib/i18n/ has a table a language
   lib/host.ts              the bridge to the shell
   types.ts                 the shapes the core sends
 ```
@@ -31,7 +33,29 @@ Two rules the page keeps:
   changes what a slot shows, never where the slots are, and a tile is one size
   whatever the hand holds.
 - **The bot's words as written.** Numbers and captions a bot supplies are shown
-  as they are; the page neither rescales nor explains them.
+  as they are; the page neither rescales nor explains them — nor translates
+  them.
+
+## Languages
+
+The page is written in Simplified Chinese, and that text is the key: a text on
+screen is `tr('对局开始')`, or `tr('另有 {0} 项', n)` with values put in by
+position, and `lib/i18n/en.ts`, `ja.ts` and `zh-TW.ts` each give it in their
+language. A table of words defined outside any function is wrapped in
+`localized(...)` so that it answers in the language of the moment. The choice
+is on the settings tab and is kept in the browser's storage; it starts from
+the language the browser asks for.
+
+To add a text, write it in Chinese through `tr` and run the tests:
+`lib/i18n.test.ts` reads every such text off the sources and fails, naming
+them, for any a table lacks (or still has after the page dropped it), and
+`Monitor.test.tsx` draws every tab in English and fails on any Chinese left.
+
+Fixed places hold per language. The canvas is drawn for two-character Chinese
+words; a language with longer ones has its own widths for the cells they sit
+in, under `.mon[data-lang='…']` at the end of `Monitor.css`. A word and its
+other state — on / off, a step's name plain and bold — reserve the wider of
+the two, so nothing shifts as it changes.
 
 ## Commands
 
