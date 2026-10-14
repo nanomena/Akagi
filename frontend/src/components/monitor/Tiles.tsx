@@ -2,6 +2,7 @@ import type { CSSProperties } from 'react'
 import { faceSeq, useFace } from '@/lib/tileFace'
 import { meldsRoom, meldView, SIDE, tileLabel, type Face, type Table } from '@/lib/monitor'
 import type { DiscardEntry, MeldSnapshot } from '@/types'
+import { tr } from '@/lib/i18n'
 
 // Every tile in the monitor is one of these. Size comes from the `--th` (tile
 // height) custom property of whatever row it sits in, so a row scales as a
@@ -12,7 +13,7 @@ const faceUnits = (faces: Face[]) => faces.reduce((sum, f) => sum + (f.side ? SI
 
 export function Tile({ face, pick = false }: { face: Face; pick?: boolean }) {
   const src = useFace(faceSeq(face.tile, face.side, face.back))
-  const name = face.back ? '牌背' : tileLabel(face.tile)
+  const name = face.back ? tr('牌背') : tileLabel(face.tile)
   const cls = `mt${face.side ? ' mt--side' : ''}${face.dim ? ' mt--dim' : ''}${pick ? ' mt--pick' : ''}`
   return <span className={cls} title={name}>
     {src ? <img src={src} alt={name} draggable={false} /> : <span className="mt-ghost" role="img" aria-label={name}>{face.back ? '' : name}</span>}
@@ -67,7 +68,7 @@ export function River({ river, room = 3 }: { river: DiscardEntry[]; room?: numbe
   const faces: Face[] = river.filter(d => !d.called).map(d => ({ tile: d.tile, side: d.is_riichi, dim: !d.tedashi }))
   const rows: Face[][] = []
   for (let i = 0; i < faces.length; i += 6) rows.push(faces.slice(i, i + 6))
-  return <div className="mriver" style={{ '--rows': Math.max(room, rows.length) } as CSSProperties} aria-label={`牌河 ${faces.length} 张`}>
+  return <div className="mriver" style={{ '--rows': Math.max(room, rows.length) } as CSSProperties} aria-label={tr('牌河 {0} 张', faces.length)}>
     {rows.map((row, i) => <Faces key={i} faces={row} />)}
   </div>
 }
