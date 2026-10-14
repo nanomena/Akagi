@@ -10,7 +10,46 @@ use chromiumoxide::cdp::browser_protocol::input::{
 };
 use chromiumoxide::layout::Point;
 use chromiumoxide::page::Page;
+use serde::Serialize;
+use std::sync::OnceLock;
 use std::time::Duration;
+use tokio::sync::broadcast;
+
+/// Where the pointer autoplay drives is, in the page's CSS pixels, and whether
+/// it is pressed. The page shows no cursor for input sent over CDP; these are
+/// for whoever wants to draw one.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct PointerMark {
+    pub x: f64,
+    pub y: f64,
+    pub down: bool,
+}
+
+static MARKS: OnceLock<broadcast::Sender<PointerMark>> = OnceLock::new();
+
+fn marks() -> &'static broadcast::Sender<PointerMark> {
+    MARKS.get_or_init(|| broadcast::channel(256).0)
+}
+
+/// Every mark from now on. Marks are sent and forgotten: with no one
+/// listening they cost nothing, and a listener that falls behind loses the
+/// oldest.
+pub fn pointer_marks() -> broadcast::Receiver<PointerMark> {
+    marks().subscribe()
+}
+
+fn mark(x: f64, y: f64, down: bool) {
+    let _ = marks().send(PointerMark { x, y, down });
+}
+
+/// Move the pointer, and say so.
+async fn move_to(page: &Page, x: f64, y: f64) -> Result<()> {
+    page.move_mouse(Point::new(x, y))
+        .await
+        .context("CDP move_mouse")?;
+    mark(x, y, false);
+    Ok(())
+}
 
 /// Dispatch a single mouse click at `(x, y)` (CSS pixels) as four CDP
 /// events, with mandatory hover before press:
@@ -50,7 +89,7 @@ pub async fn dispatch_click_shaped(
     jiggle: bool,
 ) -> Result<()> {
     let pt = Point::new(x, y);
-    page.move_mouse(pt).await.context("CDP move_mouse")?;
+    move_to(page, x, y).await?;
     if hover_delay_ms > 0 {
         tokio::time::sleep(Duration::from_millis(hover_delay_ms as u64)).await;
     }
@@ -64,6 +103,7 @@ pub async fn dispatch_click_shaped(
         .build()
         .map_err(|e| anyhow!("build mousePressed: {e}"))?;
     page.execute(press).await.context("CDP mousePressed")?;
+    mark(x, y, true);
 
     if jiggle {
         // Split the hold around the nudge so its total stays what the
@@ -97,6 +137,7 @@ pub async fn dispatch_click_shaped(
         .build()
         .map_err(|e| anyhow!("build mouseReleased: {e}"))?;
     page.execute(release).await.context("CDP mouseReleased")?;
+    mark(x, y, false);
 
     Ok(())
 }
@@ -126,15 +167,10 @@ pub async fn travel(
         }
         let t = elapsed.as_secs_f64() / total.as_secs_f64();
         let (x, y) = crate::autoplay::pointer::along(from, to, bend, t);
-        page.move_mouse(Point::new(x, y))
-            .await
-            .context("CDP move_mouse")?;
+        move_to(page, x, y).await?;
         tokio::time::sleep(FRAME.min(total.saturating_sub(started.elapsed()))).await;
     }
-    page.move_mouse(Point::new(to.0, to.1))
-        .await
-        .context("CDP move_mouse")?;
-    Ok(())
+    move_to(page, to.0, to.1).await
 }
 
 /// Read the game canvas's `getBoundingClientRect()` via `Runtime.evaluate`.

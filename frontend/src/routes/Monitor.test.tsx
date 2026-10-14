@@ -5,7 +5,7 @@ import { setLang } from '@/lib/i18n'
 
 const fixture = vi.hoisted(() => ({
   snapshot: null as MonitorSnapshot | null,
-  options: { always_on_top: false },
+  options: { always_on_top: false } as { always_on_top: boolean; pointer_trail?: boolean },
   calls: [] as Array<[string, unknown]>,
   /** What the core answers when an earlier hand's events are asked for. */
   handEvents: [] as MonitorEvent[],
@@ -17,10 +17,11 @@ vi.mock('@/lib/host', () => ({
   listen: vi.fn(() => () => {}),
   invoke: vi.fn(async (cmd: string, args?: unknown) => {
     fixture.calls.push([cmd, args])
-    if (cmd === 'set_monitor_pinned') fixture.options = { always_on_top: (args as { pinned: boolean }).pinned }
+    if (cmd === 'set_monitor_pinned') fixture.options = { ...fixture.options, always_on_top: (args as { pinned: boolean }).pinned }
+    if (cmd === 'set_monitor_trail') fixture.options = { ...fixture.options, pointer_trail: (args as { enabled: boolean }).enabled }
     if (cmd === 'get_hand_events') return fixture.handEvents
     if (cmd === 'get_history') return fixture.history
-    return cmd === 'get_monitor_options' || cmd === 'set_monitor_pinned' ? fixture.options : undefined
+    return ['get_monitor_options', 'set_monitor_pinned', 'set_monitor_trail'].includes(cmd) ? fixture.options : undefined
   }),
 }))
 // No canvas under jsdom, so mahgen cannot draw. A tile is then an <img> whose
@@ -347,6 +348,13 @@ describe('the settings', () => {
 
     fireEvent.click(screen.getAllByRole('switch', { name: /自动操作/ }).at(-1)!)
     expect(fixture.calls).toContainEqual(['set_monitor_autoplay', { enabled: false }])
+
+    // The pointer's trail is the shell's to draw: the switch asks it, and shows what it saved.
+    const trail = screen.getByRole('switch', { name: '光标轨迹' })
+    expect(trail.getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(trail)
+    await waitFor(() => expect(screen.getByRole('switch', { name: '光标轨迹' }).getAttribute('aria-checked')).toBe('true'))
+    expect(fixture.calls).toContainEqual(['set_monitor_trail', { enabled: true }])
   })
 })
 
