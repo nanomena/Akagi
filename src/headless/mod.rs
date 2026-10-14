@@ -21,6 +21,7 @@
 //! | Method                 | Params               | Result                  |
 //! |------------------------|----------------------|-------------------------|
 //! | `get_monitor`          | —                    | `MonitorSnapshot`       |
+//! | `get_hand_events`      | `{round}`            | `[MonitorEvent]`        |
 //! | `set_monitor_pinned`   | `{pinned}`           | `MonitorConfig`         |
 //! | `set_monitor_autoplay` | `{enabled}`          | `null`                  |
 //! | `open_game`            | `{port, target}`     | `null`                  |
@@ -88,6 +89,11 @@ struct Ready {
 #[derive(Debug, Deserialize)]
 struct Pinned {
     pinned: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct Hand {
+    round: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -276,6 +282,13 @@ async fn serve(
 async fn answer(state: &AppState, method: &str, params: Value) -> Result<Value, String> {
     match method {
         "get_monitor" => reply(state.monitor.snapshot()),
+        "get_hand_events" => {
+            let Hand { round } = parse(params)?;
+            state
+                .monitor
+                .hand_events(round)
+                .map_or_else(|| Err(format!("this game has no hand {round}")), reply)
+        }
         "set_monitor_pinned" => {
             let Pinned { pinned } = parse(params)?;
             let config = state
