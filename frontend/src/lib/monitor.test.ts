@@ -117,6 +117,13 @@ describe('candidates', () => {
     const rows = candidatesOf(d, table)
     expect(rows.map(r => r.verb)).toEqual(['立直', '打', '暗杠', '加杠', '自摸'])
     expect(rows.map(r => r.chosen)).toEqual([true, false, false, false, false])
+    // A riichi row shows the tile its declaration throws when the bot names it, and its copy.
+    const named = candidatesOf(decision({ type: 'reach', actor: 0, pai: '3p', tsumogiri: true }, [
+      { label: 'Riichi', pais: ['3p'], value: '70%', tsumogiri: true }, { label: 'Discard', pais: ['3p'], value: '20%', tsumogiri: true },
+    ]), table)
+    expect(tiles(named[0].faces)).toBe('3p')
+    expect(named[0].note).toBe('摸切')
+    expect(rows[0].faces).toEqual([])
   })
 })
 
