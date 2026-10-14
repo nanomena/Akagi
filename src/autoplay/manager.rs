@@ -826,6 +826,10 @@ impl AutoplayManager {
         let Some(spot) = spot else {
             return;
         };
+        // The user's hand is on the mouse over the game: this look can wait for the next.
+        if crate::autoplay::cdp_input::user_active() {
+            return;
+        }
         // Where the draw lands is empty until the draw: a hand goes there
         // only once its turn is next, not with the tile still in the wall.
         if spot == crate::autoplay::lean::Spot::Draw && self.state.last_turn != self.kamicha() {
