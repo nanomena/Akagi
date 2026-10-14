@@ -40,6 +40,7 @@ function snapshot() {
 const answers = {
   get_monitor: snapshot,
   get_hand_events: () => [],
+  get_history: () => [],
   set_monitor_pinned: ({ pinned }) => { monitor.always_on_top = pinned === true; return monitor },
   set_monitor_autoplay: () => null,
   open_game: ({ port, target }) => {

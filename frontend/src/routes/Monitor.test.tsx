@@ -8,6 +8,8 @@ const fixture = vi.hoisted(() => ({
   calls: [] as Array<[string, unknown]>,
   /** What the core answers when an earlier hand's events are asked for. */
   handEvents: [] as MonitorEvent[],
+  /** The games on record. */
+  history: [] as unknown[],
 }))
 vi.mock('@/hooks/useMonitor', () => ({ useMonitor: () => ({ snapshot: fixture.snapshot, error: null }) }))
 vi.mock('@/lib/host', () => ({
@@ -16,6 +18,7 @@ vi.mock('@/lib/host', () => ({
     fixture.calls.push([cmd, args])
     if (cmd === 'set_monitor_pinned') fixture.options = { always_on_top: (args as { pinned: boolean }).pinned }
     if (cmd === 'get_hand_events') return fixture.handEvents
+    if (cmd === 'get_history') return fixture.history
     return cmd === 'get_monitor_options' || cmd === 'set_monitor_pinned' ? fixture.options : undefined
   }),
 }))
@@ -272,5 +275,51 @@ describe('the game as a whole', () => {
     expect(fixture.calls).toContainEqual(['get_hand_events', { round: 1 }])
     fireEvent.click(screen.getByRole('button', { name: /东1局 0 本场/ }))
     expect(screen.queryByText('手切')).toBeNull()
+  })
+})
+
+describe('the record', () => {
+  const game = (rank: number, points: number | null, room: number, stats: Record<string, number>, yaku: Record<string, number> = {}) => ({
+    id: `G${rank}${room}`, ended_at: '2026-01-01T00:00:00Z', platform: 'majsoul', num_players: 4, our_seat: 0,
+    final_scores: [25000, 25000, 25000, 25000], our_rank: rank, stats, yaku,
+    match_info: { platform: 'majsoul', mode_id: room }, ...(points == null ? {} : { our_rank_points: points }),
+  })
+  beforeEach(() => {
+    fixture.snapshot = state(); fixture.options = { always_on_top: false }; fixture.calls = []; fixture.handEvents = []
+    fixture.history = [
+      game(1, 120, 9, { round: 10, agari: 3, houjuu: 1, riichi: 2 }, { 2: 2, 12: 1 }),
+      game(4, -165, 9, { round: 10, agari: 1, houjuu: 3, riichi: 1 }, { 2: 1 }),
+      // A friends' table: no rank points to speak of, and a record from before yaku were kept.
+      game(2, 0, 0, { round: 8, agari: 2, houjuu: 0, riichi: 1 }),
+    ]
+  })
+
+  it('adds up rank points, placement, the usual figures and yaku, and narrows to a room', async () => {
+    render(<Monitor />)
+    fireEvent.click(screen.getByRole('tab', { name: '统计' }))
+    // Three games: 120 - 165 + 0.
+    expect(await screen.findByText('−45')).toBeTruthy()
+    expect(screen.getByText('3 场的段位分变化')).toBeTruthy()
+    const figure = (name: string) => screen.getByText(name).closest('.mfact')!.querySelector('dd')!.textContent
+    expect(figure('和了率')).toBe('21.4%')
+    expect(figure('放铳率')).toBe('14.3%')
+    // Yaku count against the wins of the games that record them: 3 of 4.
+    const yaku = screen.getByText('立直').closest('li')!
+    expect(yaku.textContent).toBe('立直375.0%')
+    expect(screen.getByText('平均顺位').textContent).toBe('平均顺位 2.33')
+
+    fireEvent.change(screen.getByRole('combobox', { name: '统计范围' }), { target: { value: 'gold' } })
+    expect(screen.getByText('2 场的段位分变化')).toBeTruthy()
+    expect(figure('和了率')).toBe('20.0%')
+    expect(screen.getByText('平均顺位').textContent).toBe('平均顺位 2.50')
+  })
+
+  it('keeps its three panels in place with nothing on record', async () => {
+    fixture.history = []
+    render(<Monitor />)
+    fireEvent.click(screen.getByRole('tab', { name: '统计' }))
+    expect(await screen.findByText('还没有记录到段位分')).toBeTruthy()
+    expect(screen.getByText('役种从记录它的版本起开始累计')).toBeTruthy()
+    expect(screen.getByText('和了率').closest('.mfact')!.querySelector('dd')!.textContent).toBe('—')
   })
 })

@@ -249,6 +249,7 @@ function running() {
 const commands = {
   get_monitor: () => running().call('get_monitor'),
   get_hand_events: ({ round }) => running().call('get_hand_events', { round: Number(round) }),
+  get_history: () => running().call('get_history'),
   get_monitor_options: async () => options,
   set_monitor_autoplay: ({ enabled }) => running().call('set_monitor_autoplay', { enabled: enabled === true }),
   async set_monitor_pinned({ pinned }) {

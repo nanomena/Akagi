@@ -3,6 +3,7 @@ import { LoaderCircle, Pin, PinOff, X } from 'lucide-react'
 import { CandidateList, DecisionCard } from '@/components/monitor/Decision'
 import { HandStrip, ResultCard, ResultPages, ScoreStrip, SeatColumns } from '@/components/monitor/Table'
 import { Diagnostics, EventList, FaultCard } from '@/components/monitor/Details'
+import { Statistics } from '@/components/monitor/Stats'
 import { Faces } from '@/components/monitor/Tiles'
 import { useMonitor } from '@/hooks/useMonitor'
 import { pickShow } from '@/lib/botShow'
@@ -23,8 +24,8 @@ import './Monitor.css'
 const STAGE = { w: 1280, h: 720 }
 const DOCK = { w: 1280, h: 240 }
 
-type Tab = 'decision' | 'table' | 'result' | 'events' | 'link'
-const TABS: Array<[Tab, string]> = [['decision', '决策'], ['table', '牌桌'], ['result', '结果'], ['events', '事件'], ['link', '连接']]
+type Tab = 'decision' | 'table' | 'result' | 'events' | 'stats' | 'link'
+const TABS: Array<[Tab, string]> = [['decision', '决策'], ['table', '牌桌'], ['result', '结果'], ['events', '事件'], ['stats', '统计'], ['link', '连接']]
 
 /** The stage the game is shown in may not be smaller than this; `resize_monitor_game` rejects less than 100. */
 const STAGE_MIN = 160
@@ -123,6 +124,8 @@ function Dock({ m, tab, setTab, tools, onAutoplay }: { m: Model; tab: Tab; setTa
       {tab === 'table' && (s?.game ? <SeatColumns snapshot={s} /> : <p className="mslot-empty md-wide">对局开始后，这里显示公开的牌河、副露和点数</p>)}
       {tab === 'result' && (s ? <ResultPages key={s.context.game} snapshot={s} /> : <p className="mslot-empty md-wide">正在连接监视数据</p>)}
       {tab === 'events' && (s ? <EventList key={s.context.game} snapshot={s} /> : <p className="mslot-empty md-wide">正在连接监视数据</p>)}
+      {/* The record can change when a game starts or ends, and at no other time. */}
+      {tab === 'stats' && <Statistics refresh={`${s?.context.game ?? 0}:${s?.game_ended ?? true}`} />}
       {tab === 'link' && <Diagnostics snapshot={s} health={m.health} now={m.now} />}
     </div>
   </aside>
