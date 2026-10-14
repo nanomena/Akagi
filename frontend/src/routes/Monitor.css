@@ -492,7 +492,7 @@
 .md { display: grid; grid-template: 36px minmax(0, 1fr) / minmax(0, 1fr); width: 1280px; height: 240px; border-top: 1px solid var(--m-line); }
 /* 1280 × 36, seven places of fixed width: round, dora, tabs, links, switch,
  * the service's name, tools. What one of them shows never moves another. */
-.md-bar { display: grid; grid-template-columns: 244px 122px 312px 114px minmax(0, 1fr) 28px; align-items: center; column-gap: 8px; min-width: 0; padding: 0 9px 0 16px; }
+.md-bar { display: grid; grid-template-columns: 244px 122px 360px 114px minmax(0, 1fr) 28px; align-items: center; column-gap: 8px; min-width: 0; padding: 0 9px 0 16px; }
 .md-bar > .mround { grid-column: 1; }
 .md-bar > .mdora { grid-column: 2; }
 .md-bar > .md-tabs { grid-column: 3; }
@@ -591,3 +591,16 @@
 .mstat-yaku b, .mstat-yaku small { text-align: right; font-variant-numeric: tabular-nums; }
 .mstat-yaku b { font-weight: 600; }
 .mstat-yaku small { font-size: 11.5px; color: var(--m-dim); }
+
+/* ------------------------------------------------------------ settings ---- */
+
+/* The same three panels as the record: what the window can be told, what it
+ * runs, and which build it is. */
+.msets { grid-template-columns: 300px minmax(0, 1fr) 232px; }
+.mset-rows { display: grid; grid-template-rows: repeat(3, minmax(0, 1fr)); min-height: 0; }
+.mset-row { display: grid; grid-template-columns: minmax(0, 1fr) 62px; align-items: center; column-gap: 10px; min-height: 0; }
+.mset-row + .mset-row { border-top: 1px solid var(--m-line); }
+.mset-row > div { display: grid; row-gap: 3px; min-width: 0; }
+.mset-row strong { font-size: 13px; font-weight: 500; }
+.mset-row small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--m-dim); }
+.mset-row .mswitch { justify-self: end; }

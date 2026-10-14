@@ -3,6 +3,7 @@ import { LoaderCircle, Pin, PinOff, X } from 'lucide-react'
 import { CandidateList, DecisionCard } from '@/components/monitor/Decision'
 import { HandStrip, ResultCard, ResultPages, ScoreStrip, SeatColumns } from '@/components/monitor/Table'
 import { Diagnostics, EventList, FaultCard } from '@/components/monitor/Details'
+import { Settings } from '@/components/monitor/Settings'
 import { Statistics } from '@/components/monitor/Stats'
 import { Faces } from '@/components/monitor/Tiles'
 import { useMonitor } from '@/hooks/useMonitor'
@@ -24,8 +25,8 @@ import './Monitor.css'
 const STAGE = { w: 1280, h: 720 }
 const DOCK = { w: 1280, h: 240 }
 
-type Tab = 'decision' | 'table' | 'result' | 'events' | 'stats' | 'link'
-const TABS: Array<[Tab, string]> = [['decision', '决策'], ['table', '牌桌'], ['result', '结果'], ['events', '事件'], ['stats', '统计'], ['link', '连接']]
+type Tab = 'decision' | 'table' | 'result' | 'events' | 'stats' | 'link' | 'settings'
+const TABS: Array<[Tab, string]> = [['decision', '决策'], ['table', '牌桌'], ['result', '结果'], ['events', '事件'], ['stats', '统计'], ['link', '连接'], ['settings', '设置']]
 
 /** The stage the game is shown in may not be smaller than this; `resize_monitor_game` rejects less than 100. */
 const STAGE_MIN = 160
@@ -88,7 +89,13 @@ function Slot({ m, onDetails }: { m: Model; onDetails: () => void }) {
 
 /** 1280 × 240, under the game. The decision never leaves its place on the
  *  left; the tabs change what stands to the right of it. */
-function Dock({ m, tab, setTab, tools, onAutoplay }: { m: Model; tab: Tab; setTab: (tab: Tab) => void; tools: React.ReactNode; onAutoplay: ((enabled: boolean) => void) | null }) {
+type DockProps = {
+  m: Model; tab: Tab; setTab: (tab: Tab) => void; tools: React.ReactNode
+  options: MonitorConfig
+  onAutoplay: ((enabled: boolean) => void) | null
+  onPin: ((pinned: boolean) => void) | null
+}
+function Dock({ m, tab, setTab, tools, options, onAutoplay, onPin }: DockProps) {
   const { s, view } = m
   const game = s?.game ?? null
   const link = linkOf(m.health)
@@ -127,6 +134,7 @@ function Dock({ m, tab, setTab, tools, onAutoplay }: { m: Model; tab: Tab; setTa
       {/* The record can change when a game starts or ends, and at no other time. */}
       {tab === 'stats' && <Statistics refresh={`${s?.context.game ?? 0}:${s?.game_ended ?? true}`} />}
       {tab === 'link' && <Diagnostics snapshot={s} health={m.health} now={m.now} />}
+      {tab === 'settings' && <Settings snapshot={s} options={options} now={m.now} onPin={onPin} onAutoplay={onAutoplay} />}
     </div>
   </aside>
 }
@@ -208,7 +216,7 @@ export function Monitor() {
   const d = s?.decision ?? null
   const view = decisionView(s)
   const thinking = view.phase === 'thinking'
-  const now = useNow(thinking || tab === 'link', thinking ? 100 : 1000)
+  const now = useNow(thinking || tab === 'link' || tab === 'settings', thinking ? 100 : 1000)
   const alerts = alertsOf(s, { ui: uiError, bridge: bridgeError })
   const local = alerts.filter(a => a.key === 'ui' || a.key === 'bridge')
   const faults = alerts.filter(a => a.key !== 'ui' && a.key !== 'bridge')
@@ -253,7 +261,8 @@ export function Monitor() {
       </div>
 
       <div className="mon-canvas mon-canvas--dock">
-        <Dock m={m} tab={tab} setTab={setTab} tools={tools} onAutoplay={ready ? setAutoplay : null} />
+        <Dock m={m} tab={tab} setTab={setTab} tools={tools} options={options}
+          onAutoplay={ready ? setAutoplay : null} onPin={ready && !busy ? pinned => void pin(pinned) : null} />
         {local.length > 0 && <div className="mtoast" role="alert">
           <div><strong>{local[0].title}</strong><p>{local[0].message}</p></div>
           {uiError && <button aria-label="知道了" onClick={() => setUiError(null)}><X size={13} /></button>}

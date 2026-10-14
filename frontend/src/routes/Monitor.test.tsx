@@ -323,3 +323,28 @@ describe('the record', () => {
     expect(screen.getByText('和了率').closest('.mfact')!.querySelector('dd')!.textContent).toBe('—')
   })
 })
+
+describe('the settings', () => {
+  beforeEach(() => { fixture.snapshot = state(); fixture.options = { always_on_top: false }; fixture.calls = []; fixture.handEvents = []; fixture.history = [] })
+
+  it('has the switches of the window with their words, and says what it runs', async () => {
+    fixture.snapshot!.server = { state: 'ready', bot: 'demo', label: 'Model A', facts: [{ name: 'Device', value: 'CPU' }], since_ms: 0, startup_ms: 900 }
+    Object.assign(fixture.options, { version: '0.1.0' })
+    render(<Monitor />)
+    fireEvent.click(screen.getByRole('tab', { name: '设置' }))
+    const line = (name: string) => screen.getByText(name).closest('.mfact')!.querySelector('dd')!.textContent
+    expect(line('模型')).toBe('Model A')
+    expect(line('Device')).toBe('CPU')
+    await waitFor(() => expect(line('版本')).toBe('0.1.0'))
+
+    // The same two switches the bar has: one setting, two places to change it.
+    const pin = screen.getByRole('switch', { name: '窗口置顶' })
+    expect(pin.getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(pin)
+    await waitFor(() => expect(screen.getByRole('switch', { name: '窗口置顶' }).getAttribute('aria-checked')).toBe('true'))
+    expect(fixture.calls).toContainEqual(['set_monitor_pinned', { pinned: true }])
+
+    fireEvent.click(screen.getAllByRole('switch', { name: /自动操作/ }).at(-1)!)
+    expect(fixture.calls).toContainEqual(['set_monitor_autoplay', { enabled: false }])
+  })
+})
