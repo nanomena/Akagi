@@ -6,7 +6,8 @@
 -- playing with its built-in model and logs the reason once.
 --
 -- decide_delay(ctx) returns
---   { delay_ms = <number>, allow_bank = <bool>, hesitate = <bool> }.
+--   { delay_ms = <number>, allow_bank = <bool>, hesitate = <bool>,
+--     look_ms = <number> }.
 --
 -- delay_ms is the target TOTAL thinking time for the decision window —
 -- the time the SERVER observes between offering the decision and
@@ -17,7 +18,10 @@
 -- is pressed. It is a wish: it is shown only when the bot's two likeliest
 -- candidates are discards of different tiles (the bot has to say so —
 -- `type` and `prob` on its candidates), and only inside delay_ms, which
--- it never lengthens. This default never asks for it.
+-- it never lengthens; and only between tiles that sit within three of
+-- each other, not across the hand. look_ms is how long the pointer then
+-- rests on a tile it looks at (100 to 5000; left out, Akagi's own). This
+-- default never asks for a look.
 --
 -- Akagi always enforces on top of whatever this script returns:
 --   * a minimum delay (config `min_delay_ms`; the higher

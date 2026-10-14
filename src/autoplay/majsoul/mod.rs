@@ -68,7 +68,9 @@ impl PlatformAutoplay for MajsoulAutoplay {
                 // The dealer-opening hand-sort animation wait (clicks
                 // issued during it are dropped) is folded into the delay
                 // model as the `opening_animation` functional floor.
-                result.hesitate = push_pre_delay(&mut result.steps, ctx, DecisionKind::Dahai, 0);
+                let paced = push_pre_delay(&mut result.steps, ctx, DecisionKind::Dahai, 0);
+                result.hesitate = paced.hesitate;
+                result.look_ms = paced.look_ms;
                 if let Some(click) = plan_dahai_click(pai, ctx) {
                     result.steps.push(click);
                 }
@@ -249,13 +251,13 @@ impl PlatformAutoplay for MajsoulAutoplay {
 /// (candidate disambiguation, riichi tile). It sizes the click-sequence
 /// overhead the budget layer must reserve.
 ///
-/// Returns whether the delay model asked for a look at the runner-up.
+/// Returns the delay model's decision, for what it says besides the pause.
 fn push_pre_delay(
     steps: &mut Vec<Step>,
     ctx: &ActionContext,
     kind: DecisionKind,
     extra_clicks: u32,
-) -> bool {
+) -> delay::DelayDecision {
     let cfg = ctx.cfg;
     let per_click = cfg.hover_delay_ms + cfg.click_hold_ms;
     let click_overhead_ms = per_click + extra_clicks * (per_click + cfg.inter_click_delay_ms);
@@ -359,7 +361,7 @@ fn push_pre_delay(
     let elapsed = ctx.budget.map_or(0, |b| b.elapsed_ms);
     let sleep = sleep.max(delay::functional_floor(&input).saturating_sub(elapsed));
     steps.push(Step::Sleep { duration_ms: sleep });
-    decision.hesitate
+    decision
 }
 
 /// Where `pai` sits in our hand, as a normalised 16:9 point — the place a
