@@ -606,7 +606,8 @@
 
 /* The same three panels as the record: what the window can be told, what it
  * runs, and which build it is. */
-.mset-rows { display: grid; grid-template-rows: repeat(3, minmax(0, 1fr)); min-height: 0; }
+/* Rows of one height, as many as there are: what does not fit scrolls, like the columns beside it. */
+.mset-rows { display: grid; grid-auto-rows: 48px; align-content: start; min-height: 0; overflow: hidden auto; scrollbar-width: thin; scrollbar-color: var(--m-line-strong) transparent; }
 .mset-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 10px; min-height: 0; }
 .mset-row + .mset-row { border-top: 1px solid var(--m-line); }
 .mset-row > div { display: grid; row-gap: 3px; min-width: 0; }

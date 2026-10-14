@@ -80,6 +80,17 @@ export function restoredBounds(saved, workAreas) {
 }
 
 /**
+ * Where the pointer's trail goes on screen: exactly over the game view, which
+ * sits at `game` in the window's content.
+ * @param {Rect} content the window's content area, on screen
+ * @param {Rect} game the game view, in the content
+ * @returns {Rect}
+ */
+export function trailBounds(content, game) {
+  return { x: content.x + game.x, y: content.y + game.y, width: game.width, height: game.height }
+}
+
+/**
  * Where the page wants the game view. The page measures its stage element and
  * says so; nothing it says is trusted further than this.
  * @param {unknown} value
