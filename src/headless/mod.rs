@@ -25,6 +25,7 @@
 //! | `get_history`          | —                    | `[GameRecord]`          |
 //! | `set_monitor_pinned`   | `{pinned}`           | `MonitorConfig`         |
 //! | `set_monitor_trail`    | `{enabled}`          | `MonitorConfig`         |
+//! | `set_monitor_lean`     | `{enabled}`          | `MonitorConfig`         |
 //! | `set_monitor_autoplay` | `{enabled}`          | `null`                  |
 //! | `open_game`            | `{port, target}`     | `null`                  |
 //!
@@ -315,6 +316,13 @@ async fn answer(state: &AppState, method: &str, params: Value) -> Result<Value, 
             TRAIL.store(enabled, Ordering::Relaxed);
             reply(config.monitor)
         }
+        "set_monitor_lean" => {
+            let Enabled { enabled } = parse(params)?;
+            let config = state
+                .save_config(|c| c.monitor.pointer_lean = enabled)
+                .await?;
+            reply(config.monitor)
+        }
         "set_monitor_autoplay" => {
             let Enabled { enabled } = parse(params)?;
             state.save_config(|c| c.autoplay.enabled = enabled).await?;
@@ -538,12 +546,13 @@ mod tests {
             monitor: MonitorConfig {
                 always_on_top: true,
                 pointer_trail: false,
+                pointer_lean: false,
             },
             version: "1.2.3",
         };
         assert_eq!(
             serde_json::to_value(ready).unwrap(),
-            json!({ "brand": "Akagi", "monitor": { "always_on_top": true, "pointer_trail": false }, "version": "1.2.3" })
+            json!({ "brand": "Akagi", "monitor": { "always_on_top": true, "pointer_trail": false, "pointer_lean": false }, "version": "1.2.3" })
         );
     }
 }

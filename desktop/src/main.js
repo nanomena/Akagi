@@ -62,7 +62,7 @@ let trail = null
 /** @type {import('./layout.js').Rect | null} */
 let gameAt = null
 /** The window's options as the core last saved them. */
-/** @type {{ always_on_top: boolean, pointer_trail?: boolean, version?: string }} */
+/** @type {{ always_on_top: boolean, pointer_trail?: boolean, pointer_lean?: boolean, version?: string }} */
 let options = { always_on_top: false }
 let cdpPort = 0
 let quitting = false
@@ -313,6 +313,11 @@ const commands = {
   get_history: () => running().call('get_history'),
   get_monitor_options: async () => options,
   set_monitor_autoplay: ({ enabled }) => running().call('set_monitor_autoplay', { enabled: enabled === true }),
+  async set_monitor_lean({ enabled }) {
+    const saved = /** @type {{ pointer_lean: boolean }} */ (await running().call('set_monitor_lean', { enabled: enabled === true }))
+    options = { ...options, ...saved }
+    return options
+  },
   async set_monitor_trail({ enabled }) {
     const saved = /** @type {{ pointer_trail: boolean }} */ (await running().call('set_monitor_trail', { enabled: enabled === true }))
     options = { ...options, ...saved }

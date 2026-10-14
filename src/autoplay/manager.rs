@@ -27,6 +27,7 @@ use crate::event_bus::{BotResponseBus, MjaiBus, NotifyBus};
 use crate::game_state::tracker::GameTracker;
 use crate::schema::MjaiEvent;
 use chromiumoxide::page::Page;
+use rand::Rng;
 use riichienv_core::action::Action;
 use riichienv_core::state::legal_actions::GameStateLegalActions;
 use riichienv_core::state_3p::legal_actions::GameState3PLegalActions;
@@ -88,6 +89,19 @@ struct ManagerState {
     /// Where the pointer was last put, in CSS pixels. `None` until the
     /// first press of a session.
     pointer: Option<(f64, f64)>,
+    /// What the bot expects of the seat's next turn (`autoplay::lean`), and
+    /// when the pointer next looks at it. `None` on the seat's own turn and
+    /// outside a hand.
+    lean: Option<crate::autoplay::lean::Lean>,
+    glance_at: Option<Instant>,
+    /// The seat whose turn it last was, by a draw or a call: when it is the
+    /// one before ours, our draw comes next.
+    last_turn: Option<u8>,
+    /// Players at the table, from `start_game`.
+    num_players: u8,
+    /// The pointer went to where the draw lands before the draw came: a
+    /// tsumogiri then leaves it there rather than taking it back to rest.
+    waiting_on_draw: bool,
 }
 
 impl AutoplayManager {
@@ -119,6 +133,7 @@ impl AutoplayManager {
     pub async fn run(mut self, response_bus: BotResponseBus) -> anyhow::Result<()> {
         let mut bot_rx = response_bus.subscribe();
         let mut mjai_rx = self.mjai_bus.subscribe();
+        let mut lean_rx = crate::autoplay::lean::subscribe();
         info!("autoplay manager started");
         // The round-advance watcher runs on its own subscription: at hand
         // end the plan loop is busy draining stale plans and the OK press
@@ -136,7 +151,17 @@ impl AutoplayManager {
         });
 
         loop {
+            // The pointer's own pace between turns, apart from any event.
+            let glance_at = self.state.glance_at;
             tokio::select! {
+                _ = tokio::time::sleep_until(glance_at.unwrap_or_else(Instant::now).into()), if glance_at.is_some() => {
+                    self.glance().await;
+                }
+                msg = lean_rx.recv() => match msg {
+                    Ok(lean) => self.take_lean(lean),
+                    Err(RecvError::Lagged(_)) => {}
+                    Err(RecvError::Closed) => return Ok(()),
+                },
                 msg = bot_rx.recv() => match msg {
                     Ok(resp) => self.handle_bot_response(resp).await,
                     Err(RecvError::Lagged(n)) => warn!("autoplay: bot bus lagged {n}"),
@@ -303,6 +328,14 @@ impl AutoplayManager {
             }
         }
 
+        // Throwing the tile just drawn: see `rest_pointer`.
+        let threw_draw = matches!(
+            resp.action,
+            MjaiEvent::Dahai {
+                tsumogiri: true,
+                ..
+            }
+        );
         let mut plan = platform.plan(&action_ctx);
         if plan.steps.is_empty() {
             return;
@@ -656,10 +689,10 @@ impl AutoplayManager {
                 );
             }
             if registered {
-                self.rest_pointer(rect, &plan).await;
+                self.rest_pointer(rect, &plan, threw_draw).await;
             }
         } else if let Some(rect) = rect {
-            self.rest_pointer(rect, &plan).await;
+            self.rest_pointer(rect, &plan, threw_draw).await;
         }
     }
 
@@ -713,9 +746,165 @@ impl AutoplayManager {
         true
     }
 
+    /// A new lean from the bot. The pointer keeps its own pace; only a
+    /// changed mind brings its next look forward, by a reaction time.
+    fn take_lean(&mut self, lean: crate::autoplay::lean::Lean) {
+        let changed = self.state.lean.as_ref().and_then(|l| l.first()) != lean.first();
+        self.state.lean = Some(lean);
+        if let (true, Some(at)) = (changed, self.state.glance_at) {
+            let reaction = rand::rng().random_range(crate::autoplay::lean::REACTION_MS);
+            let soon = Instant::now() + Duration::from_millis(u64::from(reaction));
+            self.state.glance_at = Some(at.min(soon));
+        }
+    }
+
+    /// The seat before ours, whose turn ends in our draw.
+    fn kamicha(&self) -> Option<u8> {
+        let seat = self.state.cached_our_seat?;
+        let players = self.state.num_players.max(1);
+        Some((seat + players - 1) % players)
+    }
+
+    /// A seat's turn began. Once it is the one before ours, a lean on
+    /// throwing what we draw may look where the draw will land — after a
+    /// reaction time, as a person sees their turn coming.
+    fn took_turn(&mut self, actor: u8) {
+        self.state.last_turn = Some(actor);
+        let draw_next = self.kamicha() == Some(actor);
+        let leans_on_draw = self.state.lean.as_ref().and_then(|lean| lean.first())
+            == Some(crate::autoplay::lean::Spot::Draw);
+        if let (true, true, Some(at)) = (draw_next, leans_on_draw, self.state.glance_at) {
+            let reaction = rand::rng().random_range(crate::autoplay::lean::REACTION_MS);
+            let soon = Instant::now() + Duration::from_millis(u64::from(reaction));
+            self.state.glance_at = Some(at.min(soon));
+        }
+    }
+
+    /// Start looking at the next turn, a while after the pointer was last
+    /// put to rest — if the pointer is to lean at all.
+    fn settle_glances(&mut self) {
+        let settle = rand::rng().random_range(crate::autoplay::lean::SETTLE_MS);
+        self.state.glance_at = Some(Instant::now() + Duration::from_millis(u64::from(settle)));
+    }
+
+    fn stop_glances(&mut self) {
+        self.state.glance_at = None;
+        self.state.lean = None;
+    }
+
+    /// One look between turns: at one of the tiles the bot expects to throw,
+    /// or nowhere new (see `autoplay::lean`). Majsoul only, the seat's hand
+    /// at rest, autoplay on and not in riichi; otherwise the looks stop.
+    async fn glance(&mut self) {
+        let (wanted, platform) = {
+            let cfg = self.cfg.read().await;
+            (
+                cfg.monitor.pointer_lean && cfg.autoplay.enabled,
+                cfg.platform.kind,
+            )
+        };
+        if !wanted
+            || platform != crate::config::Platform::Majsoul
+            || self.state.self_riichi_accepted
+        {
+            self.stop_glances();
+            return;
+        }
+        let (spot, wait) = {
+            let mut rng = rand::rng();
+            let spot = self
+                .state
+                .lean
+                .as_ref()
+                .and_then(|lean| crate::autoplay::lean::glance(lean, &mut rng));
+            (
+                spot,
+                crate::autoplay::lean::wait_ms(self.state.lean.as_ref(), &mut rng),
+            )
+        };
+        self.state.glance_at = Some(Instant::now() + Duration::from_millis(u64::from(wait)));
+        let Some(spot) = spot else {
+            return;
+        };
+        // Where the draw lands is empty until the draw: a hand goes there
+        // only once its turn is next, not with the tile still in the wall.
+        if spot == crate::autoplay::lean::Spot::Draw && self.state.last_turn != self.kamicha() {
+            return;
+        }
+        let Some(seat) = self.state.cached_our_seat else {
+            return;
+        };
+        let tehai = {
+            let tracker = self.tracker.lock().await;
+            match tracker
+                .snapshot()
+                .and_then(|s| s.players.get(seat as usize).map(|p| p.tehai.clone()))
+            {
+                Some(tehai) => tehai,
+                None => return,
+            }
+        };
+        // Between turns a hand holds 13, 10, 7, 4 or 1 tiles.
+        if tehai.len() % 3 != 1 {
+            return;
+        }
+        let Some(rect) = self.canvas_rect_resolve().await else {
+            return;
+        };
+        let leg = {
+            let mut rng = rand::rng();
+            let point =
+                |spot: &crate::autoplay::lean::Spot, rng: &mut rand::rngs::ThreadRng| match spot {
+                    crate::autoplay::lean::Spot::Hand(pai) => {
+                        crate::autoplay::majsoul::hand_point(pai, &tehai, rng)
+                    }
+                    crate::autoplay::lean::Spot::Draw => {
+                        Some(crate::autoplay::majsoul::draw_point(tehai.len()))
+                    }
+                };
+            let Some(mut at) = point(&spot, &mut rng) else {
+                return;
+            };
+            // Weighing two tiles is a look between neighbours: one far from
+            // the likeliest is not looked at, the likeliest is.
+            let first = self.state.lean.as_ref().and_then(|lean| lean.first());
+            if let Some(main) = first
+                .filter(|main| *main != spot)
+                .and_then(|main| point(&main, &mut rng))
+            {
+                if (at.0 - main.0).abs() > crate::autoplay::pointer::LOOK_REACH {
+                    at = main;
+                }
+            }
+            // Not the middle of the tile every time.
+            let at = (
+                at.0 + rng.random_range(-0.2..0.2),
+                at.1 + rng.random_range(-0.3..0.3),
+            );
+            let to = rect.pixel(at.0, at.1);
+            let from = self.state.pointer.unwrap_or(to);
+            crate::autoplay::pointer::leave(from, to, rect.width / 16.0, &mut rng)
+        };
+        if self.move_pointer(leg.to, leg.travel_ms, leg.bend).await {
+            self.state.waiting_on_draw = spot == crate::autoplay::lean::Spot::Draw;
+        }
+    }
+
     /// Take the pointer off what the plan last pressed, to somewhere the
     /// client draws nothing under it (see `autoplay::pointer`).
-    async fn rest_pointer(&mut self, rect: CanvasRect, plan: &crate::autoplay::PlanResult) {
+    ///
+    /// Not after a tsumogiri the pointer was already waiting for: a hand that
+    /// threw the tile it drew stays where it drew it.
+    async fn rest_pointer(
+        &mut self,
+        rect: CanvasRect,
+        plan: &crate::autoplay::PlanResult,
+        threw_draw: bool,
+    ) {
+        if std::mem::take(&mut self.state.waiting_on_draw) && threw_draw {
+            self.settle_glances();
+            return;
+        }
         let Some(pressed) = plan.steps.iter().rev().find_map(|s| match s {
             Step::Click { x_norm, y_norm } => Some((*x_norm, *y_norm)),
             _ => None,
@@ -733,6 +922,8 @@ impl AutoplayManager {
         };
         tokio::time::sleep(Duration::from_millis(u64::from(leg.dwell_ms))).await;
         self.move_pointer(leg.to, leg.travel_ms, leg.bend).await;
+        // From the rest the eye goes on to the next turn, if it is the others'.
+        self.settle_glances();
     }
 
     /// Move the pointer to `to` over `travel_ms`. False when it could not
@@ -1032,7 +1223,9 @@ impl AutoplayManager {
     fn handle_mjai_event(&mut self, ev: &MjaiEvent) {
         self.advisor.note(ev);
         match ev {
-            MjaiEvent::StartGame { id, .. } => {
+            MjaiEvent::StartGame {
+                id, num_players, ..
+            } => {
                 // Capture our seat directly from the StartGame event rather
                 // than going through the tracker. This avoids the try_lock
                 // race entirely and makes cached_our_seat available from
@@ -1040,6 +1233,7 @@ impl AutoplayManager {
                 let seat = *id;
                 self.state = ManagerState::default();
                 self.state.cached_our_seat = seat;
+                self.state.num_players = *num_players;
             }
             MjaiEvent::EndGame { .. } => {
                 self.state = ManagerState::default();
@@ -1055,15 +1249,20 @@ impl AutoplayManager {
                 // boundary, and zeroing it here would need the failures to
                 // land inside one hand before anything recovered them.
                 let dead_clicks = self.state.dead_clicks;
+                let num_players = self.state.num_players;
                 self.state = ManagerState::default();
                 self.state.canvas_rect_at = canvas_at;
                 self.state.cached_our_seat = cached_seat;
                 self.state.dead_clicks = dead_clicks;
+                self.state.num_players = num_players;
             }
             MjaiEvent::Tsumo { actor, pai } => {
+                self.took_turn(*actor);
                 if let Some(seat) = self.our_seat_cached() {
                     if *actor == seat {
                         self.state.last_self_tsumo = Some(pai.clone());
+                        // The seat's own turn: no more looking ahead to it.
+                        self.stop_glances();
                     }
                 }
             }
@@ -1087,6 +1286,10 @@ impl AutoplayManager {
             | MjaiEvent::Daiminkan { actor, .. }
             | MjaiEvent::Ankan { actor, .. }
             | MjaiEvent::Kakan { actor, .. } => {
+                // A call is a turn too: after the seat before ours calls, our draw is next.
+                if matches!(ev, MjaiEvent::Chi { .. } | MjaiEvent::Pon { .. }) {
+                    self.took_turn(*actor);
+                }
                 if let Some(seat) = self.our_seat_cached() {
                     if *actor == seat {
                         self.state.last_self_tsumo = None;
