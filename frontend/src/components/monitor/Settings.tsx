@@ -1,4 +1,4 @@
-import { factsOf, serverLine, type MonitorConfig, type MonitorSnapshot } from '@/lib/monitor'
+import { serverLine, type MonitorConfig, type MonitorSnapshot } from '@/lib/monitor'
 import { LANGS, setLang, tr, useLang, type Lang } from '@/lib/i18n'
 
 type Props = {
@@ -30,6 +30,8 @@ const Line = ({ name, value, note }: { name: string; value: string; note?: strin
 export function Settings({ snapshot: s, options, now, onPin, onAutoplay, onTrail, onLean }: Props) {
   const server = s?.server ?? { state: 'none' as const }
   const bot = s && 'bot' in s.bot ? s.bot.bot : null
+  // The model service runs from the app's start; the bot itself joins each game as it starts.
+  const waiting = !bot && server.state !== 'none' ? server.bot : null
   const lang = useLang()
   return <div className="mstats msets">
     <section className="mstat">
@@ -52,11 +54,14 @@ export function Settings({ snapshot: s, options, now, onPin, onAutoplay, onTrail
     <section className="mstat">
       <header className="msec-head"><h3>{tr('模型与服务')}</h3></header>
       <dl className="mstat-scroll">
-        <Line name="Bot" value={bot ?? tr('未启动')} />
+        <Line name="Bot" value={bot ?? (waiting ? tr('{0} · 对局开始时连接', waiting) : tr('未启动'))} />
         <Line name={tr('模型')} value={server.state === 'ready' ? server.label ?? '—' : '—'} />
         {/* Longer than its cell once the server is up: the whole of it is there on hover. */}
-        <Line name={tr('模型服务')} value={serverLine(s, now)} note={serverLine(s, now)} />
-        {factsOf(s, 12).map(fact => <Line key={fact.name} name={fact.name} value={fact.value} note={fact.note} />)}
+        {/* The model's name is the line above. */}
+        <Line name={tr('模型服务')} value={serverLine(s, now, false)} note={serverLine(s, now, false)} />
+        {/* What the service was started with first; what goes with the latest decision after. */}
+        {[...(server.state === 'ready' ? server.facts : []), ...(s?.facts ?? [])].slice(0, 12)
+          .map(fact => <Line key={fact.name} name={fact.name} value={fact.value} note={fact.note} />)}
       </dl>
     </section>
 
