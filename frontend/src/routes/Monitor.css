@@ -501,14 +501,16 @@
 
 /* -------------------------------------------------------------- dock ---- */
 
-/* 1280 × 240: a 36 bar, then 192 of content 12 off the bottom edge. */
-.md { display: grid; grid-template: 36px minmax(0, 1fr) / minmax(0, 1fr); width: 1280px; height: 240px; border-top: 1px solid var(--m-line); }
-/* One grid for the bar and the panels under it — the decision's column, the
- * tabs' column over what the tabs change, and a third — so that every panel's
- * edge stands under an edge of the bar. The widths are the same in every
+/* 1280 × 240: 192 of content 12 under the game, then the 36 bar at the
+ * bottom edge — away from the game, so that a press meant for the hand above
+ * does not land on a tab or the autoplay switch. The bar comes first in the
+ * page all the same: the tabs, then what they show. */
+.md { display: grid; grid-template: minmax(0, 1fr) 36px / minmax(0, 1fr); width: 1280px; height: 240px; border-top: 1px solid var(--m-line); }
+/* One grid for the bar and the panels over it — the decision's column, the
+ * tabs' column under what the tabs change, and a third — so that every panel's
+ * edge stands over an edge of the bar. The widths are the same in every
  * language: each cell is as wide as its widest words. */
-.md-bar { display: grid; grid-template-columns: 344px 424px minmax(0, 1fr); align-items: center; column-gap: 12px; min-width: 0; padding: 0 16px; }
-/* Over the hand: the dora indicators, the switch, the service's name, the tools. */
+.md-bar { grid-row: 2; display: grid; grid-template-columns: 344px 424px minmax(0, 1fr); align-items: center; column-gap: 12px; min-width: 0; padding: 0 16px; }
 /* The middle column ends with what the window may do: autoplay, and the tools. */
 .md-controls { display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; }
 /* The round's dora indicators: five fit, the most a hand turns over. */
@@ -523,7 +525,7 @@
 
 /* Decision 344 · candidates 424 · hand and scores 456, 12 apart: the bar's own
  * columns. The decision keeps the first on every tab; the tabs own the other two. */
-.md-body { display: grid; grid-template: minmax(0, 1fr) / 344px 424px minmax(0, 1fr); column-gap: 12px; min-height: 0; padding: 0 16px 12px; }
+.md-body { grid-row: 1; display: grid; grid-template: minmax(0, 1fr) / 344px 424px minmax(0, 1fr); column-gap: 12px; min-height: 0; padding: 12px 16px 0; }
 .md-wide { grid-column: 2 / -1; }
 .md-side { display: grid; grid-template: 104px minmax(0, 1fr) / minmax(0, 1fr); row-gap: 8px; min-width: 0; min-height: 0; }
 
@@ -545,7 +547,7 @@
 /* A failed window operation is ours to report, not the game's: it floats over
  * the bottom of the canvas until dismissed and moves nothing. */
 .mtoast {
-  position: absolute; right: 16px; bottom: 12px; width: 448px; z-index: 2; display: flex; align-items: flex-start; gap: 8px;
+  position: absolute; right: 16px; bottom: 48px; width: 448px; z-index: 2; display: flex; align-items: flex-start; gap: 8px;
   padding: 9px 10px 9px 12px; border-radius: 8px; background: color-mix(in srgb, var(--m-bad) 9%, var(--m-panel));
   border: 1px solid hsl(0 60% 50% / 0.4); box-shadow: 0 6px 20px hsl(35 15% 8% / 0.18);
 }
