@@ -482,6 +482,7 @@ impl NativeBot {
                     ev = MjaiEvent::Reach {
                         actor: self.seat,
                         pai: Some(discard),
+                        tsumogiri: None,
                     };
                 }
                 // Couldn't resolve the riichi discard (the follow-up call failed
@@ -979,6 +980,7 @@ fn bot_action_to_mjai(a: BotAction, actor: u8) -> MjaiEvent {
         BotAction::Reach { pai } => MjaiEvent::Reach {
             actor,
             pai: Some(pai),
+            tsumogiri: None,
         },
         BotAction::Pon {
             target,
@@ -1386,6 +1388,7 @@ mod tests {
                 MjaiEvent::Reach {
                     actor: 1,
                     pai: None,
+                    tsumogiri: None,
                 },
                 MjaiEvent::Dahai {
                     actor: 1,
@@ -1466,6 +1469,7 @@ mod tests {
             MjaiEvent::Reach {
                 actor: 0,
                 pai: Some("1p".into()),
+                tsumogiri: None,
             }
         );
 
@@ -1500,7 +1504,7 @@ mod tests {
 
         let resp = bot.react(&opening()).await.unwrap();
         match resp.action {
-            MjaiEvent::Reach { actor, pai } => {
+            MjaiEvent::Reach { actor, pai, .. } => {
                 assert_eq!(actor, 0);
                 let pai = pai.expect("a reach must name its discard");
                 assert!(!pai.is_empty(), "a reach must name its discard");
@@ -1549,6 +1553,7 @@ mod tests {
             MjaiEvent::Reach {
                 actor: 0,
                 pai: None,
+                tsumogiri: None,
             },
             MjaiEvent::Dahai {
                 actor: 0,
@@ -1929,6 +1934,7 @@ mod tests {
         let r = MjaiEvent::Reach {
             actor: 0,
             pai: Some("5p".into()),
+            tsumogiri: None,
         };
         let v = to_api_event(&r, 0, 4);
         assert_eq!(v["type"], "reach");

@@ -667,7 +667,7 @@ fn confirm(s: &mut MonitorSnapshot) {
     let actual = events
         .iter()
         .find(|e| action_actor(&e.event) == actor && actor.is_some());
-    if let MjaiEvent::Reach { actor, pai } = &response.action {
+    if let MjaiEvent::Reach { actor, pai, .. } = &response.action {
         let declared = events
             .iter()
             .any(|e| matches!(&e.event, MjaiEvent::Reach { actor: a, .. } if a == actor));

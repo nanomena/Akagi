@@ -50,6 +50,10 @@ describe('actions in words and tiles', () => {
   })
   it('keeps a red five face up in a concealed kan', () => {
     expect(tiles(describeAction({ type: 'ankan', actor: 0, consumed: ['5m', '5m', '5mr', '5m'] }, table)!.faces)).toBe('# 5mr 5m #')
+    // A riichi says how its tile leaves the hand when its bot names the copy, and says nothing when it does not.
+    expect(describeAction({ type: 'reach', actor: 0, pai: '5mr', tsumogiri: false }, table)!.note).toBe('手切')
+    expect(describeAction({ type: 'reach', actor: 0, pai: '5mr', tsumogiri: true }, table)!.note).toBe('摸切')
+    expect(describeAction({ type: 'reach', actor: 0, pai: '5mr' }, table)!.note).toBeUndefined()
   })
   it('draws a meld from the tracker record, not from one repeated tile', () => {
     expect(tiles(meldView({ kind: 'pon', tiles: ['5sr', '5s', '5s'], from_who: 2, called_tile: '5sr' }, 3, { self: 0, players: 4 }))).toBe('_5sr 5s 5s')

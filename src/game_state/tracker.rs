@@ -919,6 +919,7 @@ mod tests {
         t.handle(&AkagiEvent::Reach {
             actor: 0,
             pai: None,
+            tsumogiri: None,
         })
         .unwrap();
         t.handle(&AkagiEvent::Dahai {
