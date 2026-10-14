@@ -194,7 +194,11 @@ function candidateOf(item: ShowItem, d: MonitorDecision, t: Table): Omit<Candida
         matches: r => r.type === 'dahai' && r.pai === pais[0] && (giri === null || r.tsumogiri === giri),
       }
     }
-    case 'Riichi': return { tone: 'riichi', verb: tr('立直'), faces: [], matches: r => r.type === 'reach' }
+    case 'Riichi': {
+      // The tile the declaration throws, and its copy, when the bot names them.
+      const giri = typeof item.tsumogiri === 'boolean' ? item.tsumogiri : null
+      return { tone: 'riichi', verb: tr('立直'), faces: pais.map(tile => ({ tile })), note: giri ? tr('摸切') : '', matches: r => r.type === 'reach' }
+    }
     case 'Chi': return { tone: 'call', verb: tr('吃'), faces: meldFaces(called, own, from, self, t), matches: claims('chi') }
     case 'Pon': return { tone: 'call', verb: tr('碰'), faces: meldFaces(called, own, from, self, t), matches: claims('pon') }
     case 'Kan':
