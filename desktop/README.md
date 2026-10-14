@@ -40,6 +40,37 @@ transparent window of its own over the game view (`src/trail.*`), which takes
 no input: clicks pass through it to the game. Nothing is added to the game's
 page.
 
+## Streaming the game
+
+With `stream_output` on, the shell offers the game view to a streaming program
+on the same computer — the game alone: not the dock, not the pointer's trail,
+not the system cursor (`src/stream.js`):
+
+```text
+http://127.0.0.1:<port>/<token>/              a page that shows the stream filling its window, for a browser source
+http://127.0.0.1:<port>/<token>/stream.mjpg   the frames themselves, as Motion JPEG
+```
+
+The token is a random secret: without it every address is a 404, and a request
+under any host name but `127.0.0.1` or `localhost` is refused. The port and the
+token are kept in the configuration, so the address stays the same from run to
+run; the settings tab shows it and copies it.
+
+Frames are made only while something watches (`src/frames.js`): screenshots of
+the game view, up to 30 a second, of exactly what it shows — its own size in
+screen pixels. Nothing about the game's page is changed to take them: not its
+scale, not its size, so the window looks the same and every position autoplay
+clicks at stays where it is. A stream wants 1920 × 1080; a game view with fewer
+pixels than that is scaled up by the page that shows it. (Telling the page it
+is on a denser screen would draw more pixels, but it changes the page while it
+is played: its device pixel ratio, and after a move to a screen of another
+scale even its layout.)
+
+In OBS, add a **Browser** source with the address, 1920 × 1080. The page picks
+the stream up again by itself when the application restarts. A Media source
+can open `stream.mjpg` too, but Motion JPEG carries no timing, and ffmpeg
+plays it at 25 frames a second whatever comes in.
+
 ## Running it from a checkout
 
 ```sh
@@ -78,7 +109,7 @@ executables:
 
 ```sh
 npm run check   # type-check the JavaScript (JSDoc types, no build step)
-npm test        # the window's geometry, the content policy, and the shell's end of the protocol against a stand-in core
+npm test        # the window's geometry, the content policy, the stream's server and frames, and the shell's end of the protocol against a stand-in core
 npm run smoke   # the shell for real — Electron, the built interface, a stand-in core — looked at over its DevTools port
 ```
 
