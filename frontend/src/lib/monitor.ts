@@ -2,7 +2,8 @@ import { relativeKind, type RelativeKind } from '@/lib/format'
 import { pickShow, visibleItems } from '@/lib/botShow'
 import type { BotResponse, BotStatus, CaptureStatus, GameStateSnapshot, MahgenView, MeldSnapshot, MjaiEvent, ShowItem } from '@/types'
 
-export type MonitorConfig = { always_on_top: boolean }
+/** The window's own options, and which build it is (`version` comes from the shell). */
+export type MonitorConfig = { always_on_top: boolean; version?: string }
 export const MONITOR_DEFAULTS: MonitorConfig = { always_on_top: false }
 export type DecisionContext = { game: number; round: number; event_seq: number }
 export type MonitorDecision = {
