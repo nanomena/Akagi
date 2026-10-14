@@ -357,9 +357,9 @@ describe('the settings', () => {
     await waitFor(() => expect(screen.getByRole('switch', { name: '光标轨迹' }).getAttribute('aria-checked')).toBe('true'))
     expect(fixture.calls).toContainEqual(['set_monitor_trail', { enabled: true }])
 
-    const lean = screen.getByRole('switch', { name: '预判光标' })
+    const lean = screen.getByRole('switch', { name: '预推理' })
     fireEvent.click(lean)
-    await waitFor(() => expect(screen.getByRole('switch', { name: '预判光标' }).getAttribute('aria-checked')).toBe('true'))
+    await waitFor(() => expect(screen.getByRole('switch', { name: '预推理' }).getAttribute('aria-checked')).toBe('true'))
     expect(fixture.calls).toContainEqual(['set_monitor_lean', { enabled: true }])
   })
 })
