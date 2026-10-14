@@ -116,16 +116,25 @@ fn bend<R: Rng + ?Sized>(rng: &mut R) -> f64 {
     rng.random_range(-0.12..0.12)
 }
 
-/// The pointer leaving a press for `to`: a short wait first — a hand does
-/// not spring off the tile it has just let go — given as the leg's dwell,
-/// which here comes *before* the travel.
+/// The pointer leaving a press for `to`: a wait first — a hand does not
+/// spring off the tile it has just let go, and how long it stays varies a
+/// great deal: mostly about half a second, now and then at once, now and
+/// then a second or two — given as the leg's dwell, which here comes
+/// *before* the travel.
 pub fn leave<R: Rng + ?Sized>(from: Point, to: Point, unit: f64, rng: &mut R) -> Leg {
     Leg {
         to,
         travel_ms: travel_ms(distance(from, to), unit),
-        dwell_ms: rng.random_range(90..320),
+        dwell_ms: linger_ms(rng),
         bend: bend(rng),
     }
+}
+
+/// How long a hand stays on what it pressed: log-normal around 550 ms.
+fn linger_ms<R: Rng + ?Sized>(rng: &mut R) -> u32 {
+    use rand_distr::{Distribution, LogNormal};
+    let wait = LogNormal::new(550f64.ln(), 0.6).map_or(550.0, |d| d.sample(rng));
+    wait.clamp(120.0, 2500.0) as u32
 }
 
 /// Plan the pointer's way from `from` to a press at `press`, to take exactly
@@ -451,6 +460,24 @@ mod tests {
         };
         assert_eq!(runner_up(&[discard("5p", 0.5), unnamed], "5p"), None);
         assert_eq!(runner_up(&[discard("5p", 1.0)], "5p"), None);
+    }
+
+    #[test]
+    fn a_hand_stays_on_its_press_for_a_varying_while_before_it_leaves() {
+        let mut rng = StdRng::seed_from_u64(9);
+        let mut waits: Vec<u32> = (0..600)
+            .map(|_| leave((0.0, 0.0), (100.0, 0.0), UNIT, &mut rng).dwell_ms)
+            .collect();
+        waits.sort_unstable();
+        assert!(waits.iter().all(|w| (120..=2500).contains(w)));
+        let median = waits[waits.len() / 2];
+        assert!((420..=700).contains(&median), "median {median}");
+        // Now and then at once, now and then a second or more.
+        assert!(
+            waits[30] < 250 && waits[waits.len() - 30] > 1_100,
+            "{:?}",
+            (waits[30], waits[waits.len() - 30])
+        );
     }
 
     #[test]
