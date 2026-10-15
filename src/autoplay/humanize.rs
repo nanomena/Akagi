@@ -182,6 +182,19 @@ pub const TURN_STOP: Tail = Tail {
     low: 180.0,
     high: 600.0,
 };
+/// After throwing the tile it drew, as it meant to, a hand expecting to do
+/// the same next turn lifts off the hand rather than going to the buttons:
+/// how far up, in 16:9 units — clear of the tiles, so it never rests where
+/// the next draw lands before the tile is there, and nearer the hand than a
+/// rest by the buttons ...
+pub const LIFT_UP: Tail = Tail {
+    median: 1.2,
+    spread: 0.3,
+    low: 0.8,
+    high: 2.4,
+};
+/// ... and how far to either side it drifts on the way: straight up, all but.
+pub const LIFT_SIDE: Spread = Spread { sd: 0.1, most: 0.3 };
 /// On what it pressed, before leaving it.
 pub const LINGER: Tail = Tail {
     median: 550.0,
