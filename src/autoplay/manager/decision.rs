@@ -139,7 +139,8 @@ impl AutoplayManager {
         info!(action = ?resp.action, ?probs, ?reading, "autoplay: decision read");
 
         // Where the pointer is now: a discard of the tile it rests on presses
-        // that copy, not its twin.
+        // that copy, not its twin. The user's own mouse may have left it somewhere.
+        self.hand.sync_with_user();
         let pointer = match self.hand.at() {
             Some((px, py)) => Canvas::cached(&self.ctx)
                 .await

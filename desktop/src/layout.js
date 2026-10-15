@@ -108,6 +108,29 @@ export function handOnGame(point, area, movedAt, now, stillMs) {
 }
 
 /**
+ * How long the user's hand rests before autoplay has the pointer back: a while
+ * of its own each time, half a second to a second.
+ * @param {() => number} [random]
+ * @returns {number} ms
+ */
+export function restFor(random = Math.random) {
+  return 500 + Math.floor(random() * 501)
+}
+
+/**
+ * Where on the game view the system cursor is, in the view's own pixels (the
+ * game page's CSS pixels: the view is never zoomed); `null` off the view.
+ * @param {{ x: number, y: number }} point the system cursor, on screen
+ * @param {Rect | null} area the game view, on screen
+ * @returns {{ x: number, y: number } | null}
+ */
+export function onGame(point, area) {
+  if (!area) return null
+  const inside = point.x >= area.x && point.x < area.x + area.width && point.y >= area.y && point.y < area.y + area.height
+  return inside ? { x: point.x - area.x, y: point.y - area.y } : null
+}
+
+/**
  * Where the page wants the game view. The page measures its stage element and
  * says so; nothing it says is trusted further than this.
  * @param {unknown} value
