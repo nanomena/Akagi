@@ -359,7 +359,8 @@ impl Hand {
             to: leg.to,
             travel_ms: leg.travel_ms,
             bend: leg.bend,
-            not_before: Instant::now() + Duration::from_millis(u64::from(leg.dwell_ms)),
+            not_before: Instant::now()
+                + Duration::from_millis(u64::from(leg.dwell_ms.min(humanize::LIFT_LINGER_MOST_MS))),
         });
     }
 

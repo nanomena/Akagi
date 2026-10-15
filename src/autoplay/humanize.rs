@@ -195,6 +195,10 @@ pub const LIFT_UP: Tail = Tail {
 };
 /// ... and how far to either side it drifts on the way: straight up, all but.
 pub const LIFT_SIDE: Spread = Spread { sd: 0.1, most: 0.3 };
+/// The longest the hand lingers on the tile it threw before it lifts: up
+/// well before the next draw can land under it, however quick the turns
+/// between.
+pub const LIFT_LINGER_MOST_MS: u32 = 900;
 /// On what it pressed, before leaving it.
 pub const LINGER: Tail = Tail {
     median: 550.0,
