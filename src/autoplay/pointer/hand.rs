@@ -280,6 +280,12 @@ impl Hand {
                     }
                 }
             }
+            // Where the draw lands is not looked at before the tile is there
+            // (see [`Self::may_look_at`]), not even in place of a tile too far
+            // from it: with a tsumogiri the likeliest, that look is no look.
+            if !self.may_look_at(&spot) {
+                return;
+            }
             // A look at the tile the hand is already on is a look that stays.
             if crate::autoplay::majsoul::on_tile(at, pointer) {
                 self.looked_at = Some(spot);
