@@ -103,6 +103,13 @@
 .mt > img { display: block; width: 100%; height: 100%; max-width: none; pointer-events: none; }
 .mt--side { width: calc(var(--th) * 0.92); height: calc(var(--th) * 0.77); }
 .mt--dim > img { filter: brightness(0.7) saturate(0.7); }
+/* A discard another seat called: still where it lay, a dashed outline with its face faint. */
+.mt--called::before {
+  content: ''; position: absolute; inset: 2% 1% 0; z-index: 1;
+  border-radius: 14% / 10%; border: 1.5px dashed var(--m-dim);
+}
+.mt--called > img, .mt--called > .mt-ghost { opacity: 0.28; }
+.mt--called > .mt-ghost { border-color: transparent; background: none; }
 .mt-ghost {
   position: absolute; inset: 2% 1% 0; display: grid; place-items: center; overflow: hidden;
   border-radius: 14% / 10%; border: 1px solid var(--m-line-strong); background: #f6f4ef; color: var(--m-ink);
