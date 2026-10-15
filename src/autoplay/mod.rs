@@ -31,6 +31,8 @@
 //! Module layout:
 //! - [`context`] — shared state between the chromium capture backend
 //!   and this manager (page handle + canvas rect cache).
+//! - [`canvas`] — where the game's canvas is on the page, measured and
+//!   cached for the presses.
 //! - [`platform`] — `PlatformAutoplay` trait + the `Step` types
 //!   (`Click` / `Sleep` / `AwaitReady` / `DomClick` / `Discard`).
 //! - [`majsoul`] — the production Majsoul implementation: 16:9
@@ -49,6 +51,9 @@
 //!   discard handler).
 //! - [`manager`] — the long-lived `AutoplayManager` task that owns
 //!   per-game state and drives the plan.
+//! - [`pointer`] — how the pointer moves: its way to a press, its looks
+//!   between turns ([`pointer::lean`]) and its rests.
+//! - [`riichi_city`] — Riichi City: protocol frames instead of presses.
 //! - [`verify`] — did the click land? Counts the client's own uplink
 //!   input commands (bumped by the Majsoul bridge) so the manager can
 //!   tell a click that registered from one the UI swallowed, and retry.
@@ -59,11 +64,11 @@
 
 pub mod advisor;
 pub mod budget;
+pub mod canvas;
 pub mod cdp_input;
 pub mod context;
 pub mod delay;
 pub mod inject;
-pub mod lean;
 pub mod majsoul;
 pub mod manager;
 pub mod platform;
