@@ -14,7 +14,9 @@ export type MonitorDecision = {
   state: 'thinking' | 'awaiting' | 'confirmed' | 'expired' | 'failed' | 'unavailable' | 'declined'
   response: BotResponse | null; error: string | null; confirmed_seq: number | null
 }
-export type PublicHand = { seat: number; tiles: string[]; winning_tile: string | null; target: number | null; ura_markers: string[] }
+/** A hand the round's end made public. `melds` are its open melds as the round
+ *  ended, kept with it because the table is dealt again at the next round. */
+export type PublicHand = { seat: number; tiles: string[]; melds?: MeldSnapshot[]; winning_tile: string | null; target: number | null; ura_markers: string[] }
 export type RoundResult = { kind: string; hands: PublicHand[]; scores: number[] | null; deltas: number[] | null }
 export type MonitorEvent = { seq: number; ts_ms: number; event: MjaiEvent }
 /** One hand of the current game: which it was and how it ended (`null` while it
