@@ -1,4 +1,7 @@
 //! Replay a local inspector capture through the real bridge, without a client or network.
+//!
+//! With a second argument, every replay opened during the capture is exported
+//! there as a tenhou.net/6 log and NAGA's order-form lines, as the app does.
 use akagi::bridge::{Bridge, Direction, MajsoulBridge};
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -7,12 +10,15 @@ use std::{
     collections::HashMap,
     fs::File,
     io::{BufRead, BufReader},
+    path::PathBuf,
 };
 
 fn main() -> Result<()> {
-    let path = std::env::args()
-        .nth(1)
-        .context("usage: replay_majsoul <inspector.jsonl>")?;
+    let mut args = std::env::args().skip(1);
+    let path = args
+        .next()
+        .context("usage: replay_majsoul <inspector.jsonl> [replay-dir]")?;
+    let replay_dir = args.next().map(PathBuf::from);
     let mut bridges = HashMap::new();
     for line in BufReader::new(File::open(path)?).lines() {
         let row: Value = serde_json::from_str(&line?)?;
@@ -38,7 +44,7 @@ fn main() -> Result<()> {
         )?;
         let bridge = bridges
             .entry(flow.to_owned())
-            .or_insert_with(|| MajsoulBridge::new(None, None));
+            .or_insert_with(|| MajsoulBridge::new(None, None).with_replay_dir(replay_dir.clone()));
         for event in bridge.parse(direction, &bytes).events {
             println!("{}", json!({"flow_id": flow, "event": event}));
         }
