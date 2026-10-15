@@ -159,6 +159,14 @@ pub const SEE_NEXT: Tail = Tail {
     low: 250.0,
     high: 1200.0,
 };
+/// From one press of a plan to the hand setting off for the next, the
+/// configured gap being `configured_ms`: about that, and never shorter than
+/// it takes to see what the press brought up ([`SEE_NEXT`]).
+pub fn next_press_gap<R: Rng + ?Sized>(configured_ms: u32, rng: &mut R) -> u32 {
+    BETWEEN_PRESSES
+        .draw_ms(configured_ms, rng)
+        .max(SEE_NEXT.draw_ms(rng))
+}
 /// Between the presses of one plan, about the configured gap.
 pub const BETWEEN_PRESSES: Scaled = Scaled {
     spread: 0.35,
@@ -184,9 +192,9 @@ pub const TURN_STOP: Tail = Tail {
 };
 /// After throwing the tile it drew, as it meant to, a hand expecting to do
 /// the same next turn lifts off the hand rather than going to the buttons:
-/// how far up, in 16:9 units — clear of the tiles, so it never rests where
-/// the next draw lands before the tile is there, and nearer the hand than a
-/// rest by the buttons ...
+/// how far above the top of the tiles, in 16:9 units — clear of them, so it
+/// never rests where the next draw lands before the tile is there, and
+/// nearer the hand than a rest by the buttons ...
 pub const LIFT_UP: Tail = Tail {
     median: 1.2,
     spread: 0.3,
@@ -199,6 +207,17 @@ pub const LIFT_SIDE: Spread = Spread { sd: 0.1, most: 0.3 };
 /// well before the next draw can land under it, however quick the turns
 /// between.
 pub const LIFT_LINGER_MOST_MS: u32 = 900;
+/// A move shorter than this, in CSS pixels, is a nudge: made in one step,
+/// with no way to turn from.
+pub const NUDGE_PX: f64 = 6.0;
+/// How hard a hand brakes when a press cuts its move short, in CSS pixels
+/// per millisecond squared: from a brisk 1 px/ms to a stop in a tenth of a
+/// second ...
+pub const BRAKE_DECELERATION: f64 = 0.01;
+/// ... never braking longer than this ...
+pub const BRAKE_MOST_MS: f64 = 180.0;
+/// ... and below this speed, in px/ms, as good as still already.
+pub const STILL_SPEED: f64 = 0.05;
 /// On what it pressed, before leaving it.
 pub const LINGER: Tail = Tail {
     median: 550.0,
@@ -355,6 +374,21 @@ pub const AUTO_WIN_ON: Hazard = Hazard {
 pub fn burst_len<R: Rng + ?Sized>(rng: &mut R) -> u32 {
     BURST_LEAST + one_of((BURST_MOST - BURST_LEAST + 1) as usize, rng) as u32
 }
+
+// ---- Who holds the pointer ----
+
+/// How long a press waits for the user's hand to leave the mouse before it
+/// goes ahead anyway: a turn's clock does not wait.
+pub const USER_WAIT_MS: u64 = 1500;
+/// How long the unhurried moves are put off at a time while the user's hand
+/// is on the mouse.
+pub const USER_PUT_OFF_MS: u64 = 300;
+/// How long a press between decisions is put off at a time while the user's
+/// hand is on the mouse, or our own decision is open.
+pub const ACT_PUT_OFF_MS: u64 = 1200;
+/// How long the client takes to draw a toggle's new state after a press,
+/// before it is read again.
+pub const TOGGLE_REDRAW_MS: u64 = 400;
 
 // ---- Shapes of an approach ----
 

@@ -18,13 +18,21 @@
 //!   tiles the bot expects to throw next;
 //! - [`aim`] — where in its target a press lands: scattered in the target's
 //!   middle, never on the same few pixels;
+//! - [`spots`] — where every other move ends: the rest by the buttons, the
+//!   lift off the hand, a look at a tile, a press made again in place;
+//! - [`rules`] — where the pointer may not go now and when it may set off,
+//!   checked for every move and nowhere else;
 //! - [`queue`] — the moves that can wait and be cut short, the rest after a
 //!   press and the looks, queued by priority; a press brakes them;
-//! - [`hand`] — the pointer's state over a game and the moves that send it
-//!   to the page.
+//! - [`hand`] — the pointer's state over a game, and the one place every
+//!   move and every press is sent to the page from.
 //!
-//! Everything outside [`hand`] is arithmetic on points and milliseconds;
-//! sending the moves is [`crate::autoplay::cdp_input::travel`]. The approach
+//! Three things are kept in one place each, so that no kind of move can
+//! slip past what another kind obeys: where a move ends ([`aim`] for
+//! presses, [`spots`] for the rest), whether and when it may go ([`rules`]),
+//! and every time and distance drawn (`humanize`). [`hand`] alone sends
+//! them, through `cdp_input`; everything else is arithmetic on points and
+//! milliseconds. The approach
 //! is made *inside* the thinking time the delay model chose, never after it:
 //! the press lands at the instant it would have without any of this, so no
 //! budget, floor or cap is affected.
@@ -34,9 +42,11 @@ pub mod approach;
 pub mod hand;
 pub mod lean;
 pub mod queue;
+pub mod rules;
+pub mod spots;
 
 pub use approach::{approach, changed_mind, runner_up, wait_to_see, Approach, LOOK_MS, LOOK_REACH};
-pub use hand::Hand;
+pub use hand::{Hand, Touch};
 
 use rand::Rng;
 
