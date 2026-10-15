@@ -91,7 +91,8 @@ bot: `state` has the names, our seat, the round (wind, hand, honba, sticks,
 dealer), each seat's score and riichi, the dora indicators, how each hand of
 this game ended with the hands shown when it did, and the player's own ranks
 (`account`: the four- and three-player `{id, score}` as Mahjong Soul last said
-them, at login, a game's start or after a game, and `at`, when); `results` has
+them, at login, a game's start or after a game, and `at`, when) and when this
+run of the app began (`started_at`); `results` has
 the games on record — scores, placements, rank points, our rank as the game
 began (`our_level`), per-game counts and yaku — without the path of their logs
 or the ids that lead to a replay, and never who the player is. No decision, no
