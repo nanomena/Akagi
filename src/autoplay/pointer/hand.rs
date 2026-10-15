@@ -29,12 +29,9 @@ pub struct Hand {
     /// next looks at it. `None` on the seat's own turn and outside a hand.
     lean: Option<Lean>,
     glance_at: Option<Instant>,
-    /// The seat whose turn it last was, by a draw or a call: when it is the
-    /// one before ours, our draw comes next.
-    last_turn: Option<u8>,
-    /// The pointer went to where the draw lands before the draw came: a
-    /// tsumogiri then leaves it there rather than taking it back to rest.
-    waiting_on_draw: bool,
+    /// When our draw came, the bot expected to throw it: a tsumogiri then
+    /// leaves the pointer where it pressed rather than taking it back to rest.
+    expected_tsumogiri: bool,
     /// The way the pointer last moved, as a unit direction, and when it got
     /// there: a sharp turn from it waits for a stop (see [`turn_wait`]).
     last_move: Option<(Point, Instant)>,
@@ -62,8 +59,7 @@ impl Hand {
             at: None,
             lean: None,
             glance_at: None,
-            last_turn: None,
-            waiting_on_draw: false,
+            expected_tsumogiri: false,
             last_move: None,
             queue: Queue::default(),
             moving: None,
@@ -200,16 +196,11 @@ impl Hand {
         }
     }
 
-    /// A seat's turn began. Once it is `kamicha`, the seat before ours, a
-    /// lean on throwing what we draw may look where the draw will land —
-    /// after a reaction time, as a person sees their turn coming.
-    pub fn took_turn(&mut self, actor: u8, kamicha: Option<u8>) {
-        self.last_turn = Some(actor);
-        let draw_next = kamicha == Some(actor);
-        let leans_on_draw = self.lean.as_ref().and_then(|lean| lean.first()) == Some(Spot::Draw);
-        if let (true, true, Some(at)) = (draw_next, leans_on_draw, self.glance_at) {
-            self.glance_at = Some(at.min(after_a_reaction()));
-        }
+    /// Our draw came: whether the bot expected to throw it, read before the
+    /// looks stop for our turn.
+    pub fn drew(&mut self) {
+        self.expected_tsumogiri =
+            self.lean.as_ref().and_then(|lean| lean.first()) == Some(Spot::Draw);
     }
 
     /// Start looking at the next turn, a while after the pointer was last
@@ -238,11 +229,12 @@ impl Hand {
         spot
     }
 
-    /// Whether `spot` can be looked at now. Where the draw lands is empty
-    /// until the draw: a hand goes there only once its turn is next, when
-    /// the last turn was `kamicha`'s, not with the tile still in the wall.
-    pub fn may_look_at(&self, spot: &Spot, kamicha: Option<u8>) -> bool {
-        !(*spot == Spot::Draw && self.last_turn != kamicha)
+    /// Whether `spot` can be looked at between turns. Where the draw lands
+    /// never is: it is empty until our draw, and pressing what lands there
+    /// is the decision's own way, made once the tile has been seen. A hand
+    /// expecting to throw what it draws waits where it is.
+    pub fn may_look_at(&self, spot: &Spot) -> bool {
+        *spot != Spot::Draw
     }
 
     /// Look at `spot` of a hand at rest holding `tehai`, on the canvas at
@@ -297,8 +289,8 @@ impl Hand {
     /// client draws nothing under it, and look on to the next turn from
     /// there.
     ///
-    /// Not after a tsumogiri the pointer was already waiting for: a hand that
-    /// threw the tile it drew stays where it drew it. Nor after a call: the
+    /// Not after a tsumogiri the bot expected when the tile came: a hand that
+    /// threw the tile it drew, as it meant to, stays where it pressed it. Nor after a call: the
     /// seat's own discard comes next, and a hand goes from the button to the
     /// tile it throws, not up to wait and straight back down.
     pub fn rest_after(&mut self, rect: CanvasRect, plan: &PlanResult, action: &MjaiEvent) {
@@ -309,7 +301,7 @@ impl Hand {
                 ..
             }
         );
-        if std::mem::take(&mut self.waiting_on_draw) && threw_draw {
+        if std::mem::take(&mut self.expected_tsumogiri) && threw_draw {
             self.settle_glances();
             return;
         }
@@ -459,7 +451,7 @@ impl Hand {
         match arrived.motion.errand {
             Errand::Rest { settle: true } => self.settle_glances(),
             Errand::Rest { settle: false } => {}
-            Errand::Look(spot) => self.waiting_on_draw = spot == Spot::Draw,
+            Errand::Look(_) => {}
         }
     }
 
