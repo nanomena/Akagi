@@ -70,6 +70,7 @@ executables:
 <data>/mjai_bot/      installed bots
 <data>/logs/          one folder per run
 <data>/history/       finished games
+<data>/replays/       replays opened in the game, as tenhou.net/6 logs and NAGA lines
 <data>/browser/       the Chromium profile, the game's session included
 <data>/window.json    where the window was left
 ```
