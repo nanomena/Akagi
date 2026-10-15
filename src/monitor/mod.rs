@@ -2,8 +2,10 @@
 //! No UI subscriber can start a bot or mutate game state through this cache.
 
 use crate::bot::{BotResponse, ServiceStatus};
-use crate::game_state::{GameStateSnapshot, MahgenView};
-use crate::schema::{BotStatus, CaptureStatus, MjaiEvent, Notification, NotifyLevel};
+use crate::game_state::{GameStateSnapshot, MahgenView, MeldSnapshot};
+use crate::schema::{
+    AccountLevels, BotStatus, CaptureStatus, MjaiEvent, Notification, NotifyLevel,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -64,6 +66,9 @@ pub struct Decision {
 pub struct PublicHand {
     pub seat: u8,
     pub tiles: Vec<String>,
+    /// The seat's open melds as the round ended. Kept with the hand because
+    /// the table that holds them is dealt again at the next round.
+    pub melds: Vec<MeldSnapshot>,
     pub winning_tile: Option<String>,
     pub target: Option<u8>,
     pub ura_markers: Vec<String>,
@@ -153,6 +158,9 @@ pub struct MonitorSnapshot {
     /// The events of the hand being played.
     pub events: VecDeque<MonitorEvent>,
     pub last_event_ms: Option<i64>,
+    /// The player's own ranks as the platform last said them; kept across
+    /// games. `None` until it has said them.
+    pub account: Option<AccountLevels>,
 }
 
 impl Default for MonitorSnapshot {
@@ -186,6 +194,7 @@ impl Default for MonitorSnapshot {
             hands: vec![],
             events: VecDeque::new(),
             last_event_ms: None,
+            account: None,
         }
     }
 }
@@ -350,6 +359,7 @@ impl MonitorHandle {
                     ura_markers,
                     ..
                 } => {
+                    let melds = melds_of(s.game.as_ref(), *actor);
                     let result = s.result.get_or_insert_with(|| RoundResult {
                         kind: "hora".into(),
                         hands: vec![],
@@ -361,6 +371,7 @@ impl MonitorHandle {
                             result.hands.push(PublicHand {
                                 seat: *actor,
                                 tiles: tiles.clone(),
+                                melds,
                                 winning_tile: pai.clone(),
                                 target: Some(*target),
                                 ura_markers: ura_markers.clone().unwrap_or_default(),
@@ -392,6 +403,7 @@ impl MonitorHandle {
                                         PublicHand {
                                             seat: seat as u8,
                                             tiles: tiles.clone(),
+                                            melds: melds_of(s.game.as_ref(), seat as u8),
                                             winning_tile: None,
                                             target: None,
                                             ura_markers: vec![],
@@ -597,6 +609,10 @@ impl MonitorHandle {
     pub fn set_brand(&self, brand: String) {
         self.update(|i| i.snapshot.brand = brand);
     }
+    /// The player's own ranks, as the platform has just said them.
+    pub fn set_account(&self, levels: AccountLevels) {
+        self.update(|i| i.snapshot.account = Some(levels));
+    }
 
     pub fn notification(&self, notice: &Notification) {
         let Some(id) = notice.id.as_deref() else {
@@ -629,6 +645,13 @@ impl MonitorHandle {
             }
         });
     }
+}
+
+/// A seat's open melds in `game`, which are public.
+fn melds_of(game: Option<&GameStateSnapshot>, seat: u8) -> Vec<MeldSnapshot> {
+    game.and_then(|g| g.players.iter().find(|p| p.seat == seat))
+        .map(|p| p.melds.clone())
+        .unwrap_or_default()
 }
 
 fn public_tiles(tiles: &[String]) -> bool {
@@ -780,6 +803,87 @@ mod tests {
             }),
         };
         m.game_event(&start, None, None);
+    }
+    /// A table in which seat 1 has called a pon of white dragons.
+    fn table_with_a_pon() -> GameStateSnapshot {
+        let player = |seat: u8| {
+            serde_json::json!({
+                "seat": seat, "tehai": [], "river": [], "score": 25000,
+                "riichi_declared": false, "riichi_stage": false, "double_riichi": false,
+                "riichi_declaration_index": null,
+                "melds": if seat == 1 {
+                    serde_json::json!([{ "kind": "pon", "tiles": ["P", "P", "P"], "from_who": 0, "called_tile": "P" }])
+                } else {
+                    serde_json::json!([])
+                },
+            })
+        };
+        serde_json::from_value(serde_json::json!({
+            "bakaze": "E", "kyoku": 1, "honba": 0, "kyotaku": 0, "oya": 0,
+            "current_player": 1, "turn_count": 9, "phase": "wait_act", "is_done": true,
+            "players": [player(0), player(1), player(2), player(3)],
+            "dora_markers": ["1m"], "our_seat": 0,
+        }))
+        .unwrap()
+    }
+
+    /// A revealed hand keeps its open melds after the next round is dealt,
+    /// when the table they were read from holds that round instead.
+    #[test]
+    fn a_revealed_hand_keeps_its_melds_into_the_next_round() {
+        let m = MonitorHandle::default();
+        hand(&m);
+        m.game_event(
+            &event(r#"{"type":"hora","actor":1,"target":1,"pai":"5m","tehai":["2m","3m","4m","5m","6m","7m","1p","1p","9s","9s"],"deltas":[-2600,7800,-2600,-2600]}"#),
+            Some(table_with_a_pon()),
+            None,
+        );
+        play(&m, &[r#"{"type":"end_kyoku"}"#]);
+        deal(&m, 2, 0);
+
+        let s = m.snapshot();
+        let result = s.hands[0].result.as_ref().expect("the first hand ended");
+        let melds: Vec<_> = result.hands[0]
+            .melds
+            .iter()
+            .map(|m| (m.kind.clone(), m.tiles.clone()))
+            .collect();
+        assert_eq!(
+            melds,
+            [(crate::game_state::MeldKind::Pon, vec!["P".to_string(); 3])]
+        );
+    }
+
+    /// The player's own ranks are not a game's: a new game keeps them, and
+    /// what the platform says next replaces them.
+    #[test]
+    fn our_ranks_outlast_a_game() {
+        let m = MonitorHandle::default();
+        assert!(m.snapshot().account.is_none());
+        let first = AccountLevels {
+            level: Some(crate::schema::Level {
+                id: 10203,
+                score: 761,
+            }),
+            level3: None,
+            at: chrono::Utc::now(),
+        };
+        m.set_account(first.clone());
+        hand(&m);
+        assert_eq!(m.snapshot().account, Some(first));
+        let next = AccountLevels {
+            level: Some(crate::schema::Level {
+                id: 10203,
+                score: 800,
+            }),
+            level3: Some(crate::schema::Level {
+                id: 20101,
+                score: 0,
+            }),
+            at: chrono::Utc::now(),
+        };
+        m.set_account(next.clone());
+        assert_eq!(m.snapshot().account, Some(next));
     }
 
     /// A game's hands stay: how each ended in the snapshot, its events on

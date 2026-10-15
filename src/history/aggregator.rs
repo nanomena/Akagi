@@ -365,6 +365,7 @@ pub fn aggregate(input: AggregateInput<'_>) -> Option<GameRecord> {
         our_rank,
         our_delta,
         stats,
+        our_level: game_meta.as_ref().and_then(|meta| meta.our_level),
         match_info: game_meta.and_then(|meta| meta.match_info),
         our_rank_points,
         yaku,
@@ -458,8 +459,8 @@ mod tests {
         }
     }
 
-    /// `match_info` rides the in-process StartGame meta into the persisted
-    /// record.
+    /// `match_info` and where we stood as the game began ride the
+    /// in-process StartGame meta into the persisted record.
     #[test]
     fn match_info_is_copied_into_the_record() {
         let info = MatchInfo::Majsoul {
@@ -474,6 +475,10 @@ mod tests {
                 game_id: Some(1),
                 match_mode: Some(1),
                 match_info: Some(info.clone()),
+                our_level: Some(crate::schema::Level {
+                    id: 10203,
+                    score: 761,
+                }),
             });
         }
         let events = vec![
@@ -493,6 +498,18 @@ mod tests {
         })
         .unwrap();
         assert_eq!(rec.match_info, Some(info));
+        assert_eq!(
+            rec.our_level,
+            Some(crate::schema::Level {
+                id: 10203,
+                score: 761
+            })
+        );
+        let written = serde_json::to_value(&rec).unwrap();
+        assert_eq!(
+            written["our_level"],
+            serde_json::json!({ "id": 10203, "score": 761 })
+        );
     }
 
     #[test]
@@ -616,6 +633,7 @@ mod tests {
                 game_id: Some(7),
                 match_mode: Some(2),
                 match_info: None,
+                our_level: None,
             });
         }
         let events = vec![
@@ -651,6 +669,7 @@ mod tests {
                     game_id: Some(7),
                     match_mode: Some(12),
                     match_info: None,
+                    our_level: None,
                 }),
             },
             MjaiEvent::StartKyoku {
