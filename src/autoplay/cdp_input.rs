@@ -25,12 +25,32 @@ static USER_HAND: AtomicBool = AtomicBool::new(false);
 /// How long a press waits, at most, for the user's mouse to rest.
 const USER_WAIT: Duration = Duration::from_millis(1500);
 
+/// Until when a hand that has come to rest still counts as on the mouse:
+/// autoplay has the pointer back a while after the user stops, a while of its
+/// own each time (`humanize::HAND_BACK`).
+static RESTING_UNTIL: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// The shell's word on the user's mouse: moving over the game, or come to rest.
 pub fn set_user_active(active: bool) {
+    let until = (!active).then(|| {
+        let wait = crate::autoplay::humanize::HAND_BACK.draw_ms(&mut rand::rng());
+        std::time::Instant::now() + Duration::from_millis(u64::from(wait))
+    });
+    if let Ok(mut resting) = RESTING_UNTIL.lock() {
+        *resting = until;
+    }
     USER_HAND.store(active, Ordering::Relaxed);
 }
 
+/// Whether the user's hand is on the mouse over the game: moving, or not yet
+/// rested long enough for autoplay to have the pointer back.
 pub fn user_active() -> bool {
     USER_HAND.load(Ordering::Relaxed)
+        || RESTING_UNTIL
+            .lock()
+            .ok()
+            .and_then(|until| *until)
+            .is_some_and(|until| std::time::Instant::now() < until)
 }
 
 /// Where the user's own mouse last left the game's pointer, when it came to
@@ -140,6 +160,15 @@ pub async fn dispatch_click_shaped(
     jiggle: bool,
 ) -> Result<()> {
     let pt = Point::new(x, y);
+    // About the configured times, each press its own: mostly near them, now and then longer.
+    let (hover_delay_ms, click_hold_ms) = {
+        use crate::autoplay::humanize::{HOLD, HOVER};
+        let mut rng = rand::rng();
+        (
+            HOVER.draw_ms(hover_delay_ms, &mut rng),
+            HOLD.draw_ms(click_hold_ms, &mut rng),
+        )
+    };
     wait_for_user_hand().await;
     move_to(page, x, y).await?;
     if hover_delay_ms > 0 {
@@ -209,7 +238,6 @@ pub async fn travel(
     duration_ms: u32,
     bend: f64,
 ) -> Result<()> {
-    const FRAME: Duration = Duration::from_millis(14);
     let total = Duration::from_millis(u64::from(duration_ms));
     let started = tokio::time::Instant::now();
     loop {
@@ -220,7 +248,9 @@ pub async fn travel(
         let t = elapsed.as_secs_f64() / total.as_secs_f64();
         let (x, y) = crate::autoplay::pointer::along(from, to, bend, t);
         move_to(page, x, y).await?;
-        tokio::time::sleep(FRAME.min(total.saturating_sub(started.elapsed()))).await;
+        // About a display frame between steps, as a real mouse's events come: never quite even.
+        let frame = Duration::from_millis(crate::autoplay::humanize::frame_ms(&mut rand::rng()));
+        tokio::time::sleep(frame.min(total.saturating_sub(started.elapsed()))).await;
     }
     move_to(page, to.0, to.1).await
 }
@@ -410,6 +440,22 @@ mod user_left_tests {
             "the last place"
         );
         assert_eq!(take_user_left_pointer(), None);
+    }
+
+    /// A hand that comes to rest keeps the pointer a while before autoplay
+    /// has it back: half a second at the least.
+    #[test]
+    fn a_hand_that_comes_to_rest_keeps_the_pointer_a_while() {
+        set_user_active(true);
+        assert!(user_active());
+        set_user_active(false);
+        assert!(user_active(), "not handed back at once");
+        let until = RESTING_UNTIL.lock().unwrap().expect("a wait drawn");
+        let left = until.saturating_duration_since(std::time::Instant::now());
+        assert!(
+            left >= Duration::from_millis(450) && left <= Duration::from_millis(1000),
+            "{left:?}"
+        );
     }
 }
 

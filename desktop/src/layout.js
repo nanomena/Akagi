@@ -108,16 +108,6 @@ export function handOnGame(point, area, movedAt, now, stillMs) {
 }
 
 /**
- * How long the user's hand rests before autoplay has the pointer back: a while
- * of its own each time, half a second to a second.
- * @param {() => number} [random]
- * @returns {number} ms
- */
-export function restFor(random = Math.random) {
-  return 500 + Math.floor(random() * 501)
-}
-
-/**
  * Where on the game view the system cursor is, in the view's own pixels (the
  * game page's CSS pixels: the view is never zoomed); `null` off the view.
  * @param {{ x: number, y: number }} point the system cursor, on screen

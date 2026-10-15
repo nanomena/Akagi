@@ -232,6 +232,15 @@ impl AutoplayManager {
         if plan.steps.is_empty() {
             return;
         }
+        // A press lands somewhere in its target's middle, not on its exact middle.
+        if decision.platform == Platform::Majsoul {
+            pointer::aim::scatter(
+                &mut plan,
+                decision.pointer,
+                crate::autoplay::majsoul::reach_of,
+                &mut rand::rng(),
+            );
+        }
         debug!(
             "autoplay: action={:?} steps={}",
             resp.action,

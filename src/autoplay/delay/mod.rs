@@ -335,13 +335,7 @@ fn base_sample<R: Rng + ?Sized>(input: &DelayInput, rng: &mut R) -> u32 {
     }
 
     match input.delay_cfg.distribution {
-        DelayDistribution::Uniform => {
-            if hi == lo {
-                lo
-            } else {
-                rng.random_range(lo..=hi)
-            }
-        }
+        DelayDistribution::Uniform => crate::autoplay::humanize::uniform_ms(lo, hi, rng),
         DelayDistribution::LogNormal => {
             let [mu, sigma] = lognormal_params(input);
             // Invalid parameters from a hand-edited config fall back to
@@ -350,14 +344,10 @@ fn base_sample<R: Rng + ?Sized>(input: &DelayInput, rng: &mut R) -> u32 {
             // (which would collapse every sample to 0 — silently pinning
             // all delays to the floor) and even a negative sigma.
             if !mu.is_finite() || !sigma.is_finite() || sigma < 0.0 {
-                return if hi == lo {
-                    lo
-                } else {
-                    rng.random_range(lo..=hi)
-                };
+                return crate::autoplay::humanize::uniform_ms(lo, hi, rng);
             }
-            match rand_distr::LogNormal::new(mu, sigma) {
-                Ok(dist) => {
+            match crate::autoplay::humanize::log_normal(mu, sigma) {
+                Some(dist) => {
                     let secs: f64 = rng.sample(dist);
                     let ms = (secs * 1000.0).round().clamp(0.0, u32::MAX as f64) as u32;
                     // Loose clamp: allow the tail to exceed the uniform
@@ -365,13 +355,7 @@ fn base_sample<R: Rng + ?Sized>(input: &DelayInput, rng: &mut R) -> u32 {
                     // bounded, and never go implausibly fast.
                     ms.clamp(lo / 2, hi.saturating_mul(4))
                 }
-                Err(_) => {
-                    if hi == lo {
-                        lo
-                    } else {
-                        rng.random_range(lo..=hi)
-                    }
-                }
+                None => crate::autoplay::humanize::uniform_ms(lo, hi, rng),
             }
         }
     }
