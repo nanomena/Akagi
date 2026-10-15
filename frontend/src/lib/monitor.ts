@@ -59,8 +59,9 @@ export function newestSnapshot(current: MonitorSnapshot | null, incoming: Monito
 // ---------------------------------------------------------------- tiles ----
 
 /** One drawn tile. `side` lays it down (called tile, riichi declaration);
- *  `back` hides the face (concealed kan, hidden hands). */
-export type Face = { tile: string; side?: boolean; back?: boolean; dim?: boolean }
+ *  `back` hides the face (concealed kan, hidden hands); `called` is a discard
+ *  another seat took, drawn as an outline where it lay. */
+export type Face = { tile: string; side?: boolean; back?: boolean; dim?: boolean; called?: boolean }
 
 const HONOR: Record<string, string> = localized({ E: '东', S: '南', W: '西', N: '北', P: '白', F: '发', C: '中' })
 const SUIT: Record<string, string> = localized({ m: '万', p: '筒', s: '索' })
