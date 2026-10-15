@@ -5,7 +5,7 @@ import { setLang } from '@/lib/i18n'
 
 const fixture = vi.hoisted(() => ({
   snapshot: null as MonitorSnapshot | null,
-  options: { always_on_top: false } as { always_on_top: boolean; pointer_trail?: boolean; pointer_lean?: boolean; quick_confirm?: boolean; riichi_auto_win?: boolean },
+  options: { always_on_top: false } as { always_on_top: boolean; pointer_trail?: boolean; pointer_lean?: boolean; quick_confirm?: boolean; riichi_auto_win?: boolean; stream_output?: boolean; stream_url?: string },
   calls: [] as Array<[string, unknown]>,
   /** What the core answers when an earlier hand's events are asked for. */
   handEvents: [] as MonitorEvent[],
@@ -22,9 +22,13 @@ vi.mock('@/lib/host', () => ({
     if (cmd === 'set_monitor_lean') fixture.options = { ...fixture.options, pointer_lean: (args as { enabled: boolean }).enabled }
     if (cmd === 'set_monitor_confirm') fixture.options = { ...fixture.options, quick_confirm: (args as { enabled: boolean }).enabled }
     if (cmd === 'set_monitor_auto_win') fixture.options = { ...fixture.options, riichi_auto_win: (args as { enabled: boolean }).enabled }
+    if (cmd === 'set_monitor_stream') {
+      const enabled = (args as { enabled: boolean }).enabled
+      fixture.options = { ...fixture.options, stream_output: enabled, stream_url: enabled ? 'http://127.0.0.1:50123/0123456789abcdef01234567/' : undefined }
+    }
     if (cmd === 'get_hand_events') return fixture.handEvents
     if (cmd === 'get_history') return fixture.history
-    return ['get_monitor_options', 'set_monitor_pinned', 'set_monitor_trail', 'set_monitor_lean', 'set_monitor_confirm', 'set_monitor_auto_win'].includes(cmd) ? fixture.options : undefined
+    return ['get_monitor_options', 'set_monitor_pinned', 'set_monitor_trail', 'set_monitor_lean', 'set_monitor_confirm', 'set_monitor_auto_win', 'set_monitor_stream'].includes(cmd) ? fixture.options : undefined
   }),
 }))
 // No canvas under jsdom, so mahgen cannot draw. A tile is then an <img> whose
@@ -204,6 +208,21 @@ describe('monitor user states', () => {
     const reveal = screen.getByText('自摸').closest('.mreveal') as HTMLElement
     expect(within(reveal).getAllByRole('img').map(img => img.getAttribute('alt'))).toEqual(['1万', '1万', '中'])
     expect(screen.getByText('+1,000')).toBeTruthy()
+  })
+
+  it('shows an earlier hand with the melds it ended with, once the next round is dealt', () => {
+    fixture.snapshot!.result = null
+    fixture.snapshot!.hands = [
+      { round: 1, bakaze: 'E', kyoku: 1, honba: 0, events: 50, result: { kind: 'hora', scores: [24000, 26000], deltas: [-1000, 1000],
+        hands: [{ seat: 1, tiles: ['1m', '1m'], melds: [{ kind: 'pon', tiles: ['P', 'P', 'P'], from_who: 0, called_tile: 'P' }], winning_tile: 'C', target: 1, ura_markers: [] }] } },
+      { round: 2, bakaze: 'E', kyoku: 2, honba: 0, result: null, events: 3 },
+    ]
+    render(<Monitor />)
+    fireEvent.click(screen.getByRole('tab', { name: '结果' }))
+    const reveal = screen.getByText('自摸').closest('.mreveal') as HTMLElement
+    const shown = within(reveal).getAllByRole('img').map(img => img.getAttribute('alt'))
+    expect(shown.slice(0, 3)).toEqual(['1万', '1万', '中'])
+    expect(shown.filter(alt => alt === '白')).toHaveLength(3)
   })
 
   it('is one window with one control of its own: staying on top', async () => {
@@ -386,6 +405,23 @@ describe('the settings', () => {
       await waitFor(() => expect(screen.getByRole('switch', { name }).getAttribute('aria-checked')).toBe('true'))
       expect(fixture.calls).toContainEqual([command, { enabled: true }])
     }
+
+    // The stream: off, its copy button is there but not shown; on, the address is the line under it.
+    const copy = screen.getByRole('button', { name: '复制直播地址', hidden: true })
+    expect(copy.hasAttribute('data-empty')).toBe(true)
+    expect((copy as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole('switch', { name: '直播输出' }))
+    await waitFor(() => expect(screen.getByRole('switch', { name: '直播输出' }).getAttribute('aria-checked')).toBe('true'))
+    expect(fixture.calls).toContainEqual(['set_monitor_stream', { enabled: true }])
+    expect(screen.getByText('http://127.0.0.1:50123/0123456789abcdef01234567/')).toBeTruthy()
+    const shown = screen.getByRole('button', { name: '复制直播地址' })
+    expect(shown.hasAttribute('data-empty')).toBe(false)
+    fireEvent.click(shown)
+    await waitFor(() => expect(fixture.calls).toContainEqual(['copy_stream_url', undefined]))
+    await waitFor(() => expect(shown.getAttribute('title')).toBe('已复制'))
+    fireEvent.click(screen.getByRole('switch', { name: '直播输出' }))
+    await waitFor(() => expect(screen.getByRole('switch', { name: '直播输出' }).getAttribute('aria-checked')).toBe('false'))
+    expect(screen.queryByText(/127\.0\.0\.1/)).toBeNull()
   })
 })
 

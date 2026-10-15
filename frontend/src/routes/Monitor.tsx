@@ -102,8 +102,10 @@ type DockProps = {
   onLean: ((enabled: boolean) => void) | null
   onConfirm: ((enabled: boolean) => void) | null
   onAutoWin: ((enabled: boolean) => void) | null
+  onStream: ((enabled: boolean) => void) | null
+  onCopyStream: (() => Promise<void>) | null
 }
-function Dock({ m, tab: chosen, setTab, tools, options, onAutoplay, onPin, onTrail, onLean, onConfirm, onAutoWin }: DockProps) {
+function Dock({ m, tab: chosen, setTab, tools, options, onAutoplay, onPin, onTrail, onLean, onConfirm, onAutoWin, onStream, onCopyStream }: DockProps) {
   const { s, view } = m
   const game = s?.game ?? null
   const link = linkOf(m.health)
@@ -155,7 +157,9 @@ function Dock({ m, tab: chosen, setTab, tools, options, onAutoplay, onPin, onTra
       {/* The record can change when a game starts or ends, and at no other time. */}
       {tab === 'stats' && <Statistics refresh={`${s?.context.game ?? 0}:${s?.game_ended ?? true}`} />}
       {tab === 'link' && <Diagnostics snapshot={s} health={m.health} now={m.now} />}
-      {tab === 'settings' && <Settings snapshot={s} options={options} now={m.now} onPin={onPin} onAutoplay={onAutoplay} onTrail={onTrail} onLean={onLean} onConfirm={onConfirm} onAutoWin={onAutoWin} />}
+      {tab === 'settings' && <Settings snapshot={s} options={options} now={m.now} onPin={onPin} onAutoplay={onAutoplay} onTrail={onTrail} onLean={onLean}
+        onConfirm={onConfirm} onAutoWin={onAutoWin}
+        onStream={onStream} onCopyStream={onCopyStream} />}
     </div>
   </aside>
 }
@@ -218,6 +222,10 @@ export function Monitor() {
     try { setOptions(await invoke<MonitorConfig>(command, { enabled })) }
     catch (e) { setUiError(String(e)) }
     finally { setBusy(false) }
+  }
+  const copyStream = async () => {
+    try { await invoke('copy_stream_url') }
+    catch (e) { setUiError(String(e)); throw e }
   }
   const openGame = useCallback(async () => {
     const r = stage.current?.getBoundingClientRect()
@@ -297,7 +305,9 @@ export function Monitor() {
           onTrail={ready && !busy ? enabled => void choose('set_monitor_trail', enabled) : null}
           onLean={ready && !busy ? enabled => void choose('set_monitor_lean', enabled) : null}
           onConfirm={ready && !busy ? enabled => void choose('set_monitor_confirm', enabled) : null}
-          onAutoWin={ready && !busy ? enabled => void choose('set_monitor_auto_win', enabled) : null} />
+          onAutoWin={ready && !busy ? enabled => void choose('set_monitor_auto_win', enabled) : null}
+          onStream={ready && !busy ? enabled => void choose('set_monitor_stream', enabled) : null}
+          onCopyStream={ready ? copyStream : null} />
         {local.length > 0 && <div className="mtoast" role="alert">
           <div><strong>{local[0].title}</strong><p>{local[0].message}</p></div>
           {uiError && <button aria-label={tr('知道了')} onClick={() => setUiError(null)}><X size={13} /></button>}

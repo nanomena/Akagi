@@ -140,6 +140,8 @@ per Apache-2.0 §4(d), redistributions must include both files.
 
 - **riichienv-core** / RiichiEnv (Apache-2.0) — Cargo dependency.
 - **mahgen** (MIT) — draws the tile faces.
+- **Majsoul-to-NAGA**, adapted from **majsoul-naga** (MIT) — the conversion of
+  an opened replay to a tenhou.net/6 log.
 - **MajsoulMax-rs** (GPL-3.0), the **mjai** specification (Gimite) and
   **mjai.app** — reference only, no code copied; listed in `NOTICE` for credit.
 
