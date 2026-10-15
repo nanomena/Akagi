@@ -126,6 +126,12 @@ fn mark(x: f64, y: f64, down: bool) {
     let _ = marks().send(PointerMark { x, y, down, fresh });
 }
 
+/// Put the pointer at `(x, y)` in one step: one frame of a move made a frame
+/// at a time (`autoplay::pointer::queue`).
+pub async fn step_to(page: &Page, x: f64, y: f64) -> Result<()> {
+    move_to(page, x, y).await
+}
+
 /// Move the pointer, and say so.
 async fn move_to(page: &Page, x: f64, y: f64) -> Result<()> {
     page.move_mouse(Point::new(x, y))

@@ -156,7 +156,12 @@ impl AutoplayManager {
             let glance_at = self.hand.glance_due();
             // And its presses between decisions.
             let act_at = self.acts.due();
+            // And its unhurried moves, a frame at a time, so a press can cut them short.
+            let motion_at = self.hand.motion_due();
             tokio::select! {
+                _ = tokio::time::sleep_until(motion_at.unwrap_or_else(Instant::now).into()), if motion_at.is_some() => {
+                    self.hand.step().await;
+                }
                 _ = tokio::time::sleep_until(glance_at.unwrap_or_else(Instant::now).into()), if glance_at.is_some() => {
                     self.glance().await;
                 }
@@ -296,6 +301,11 @@ impl AutoplayManager {
         // have (see `autoplay::pointer`).
         // Not before what it answers can have been seen: the window opened with its frame.
         let shown_at = decision.planned_budget.map(|b| b.opened_at);
+        // A rest or a look under way brakes where it is; the way to the
+        // press starts from there.
+        if rect.is_some() {
+            self.hand.give_way().await;
+        }
         let approach =
             rect.and_then(|rect| self.hand.plan_approach(&mut plan, rect, glance, shown_at));
         if approach.as_ref().is_some_and(|a| a.looks_elsewhere()) {
@@ -361,7 +371,7 @@ impl AutoplayManager {
         let Some(rect) = self.canvas.resolve(&self.ctx).await else {
             return;
         };
-        self.hand.look_at(spot, &tehai, rect).await;
+        self.hand.look_at(spot, &tehai, rect);
     }
 
     /// The seat before ours, whose turn ends in our draw.

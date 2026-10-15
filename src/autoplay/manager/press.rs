@@ -33,7 +33,7 @@ impl AutoplayManager {
         // `rect` is `None` for a plan of Tenhou steps, which skips the proof.
         let (true, Some(rect)) = (cfg.verify_input_ms > 0, rect) else {
             if let Some(rect) = rect {
-                self.hand.rest_after(rect, plan, action).await;
+                self.hand.rest_after(rect, plan, action);
             }
             return;
         };
@@ -96,7 +96,7 @@ impl AutoplayManager {
             );
         }
         if registered {
-            self.hand.rest_after(rect, plan, action).await;
+            self.hand.rest_after(rect, plan, action);
         }
     }
 
