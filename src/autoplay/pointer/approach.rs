@@ -4,12 +4,13 @@
 //! that leads the plan gives up exactly what the way takes, so the press lands
 //! when it would have without it. Most presses are settled on first — the hand
 //! arrives early and rests on its target — and a hand torn between two
-//! discards may rest on the runner-up before its choice.
+//! discards may rest on the runner-up before its choice, each stop longer
+//! than the one before.
 
 use super::{distance, travel_ms, Leg, Point};
 use crate::autoplay::delay::probs::Candidate;
 use crate::autoplay::humanize::{
-    self, LOOK_FIRST, LOOK_REST, ONLY_SETTLE, SETTLE_CHANCE, SETTLE_REST,
+    self, LONGER, LOOK_FIRST, LOOK_REST, ONLY_SETTLE, SETTLE_CHANCE, SETTLE_REST,
 };
 use rand::Rng;
 
@@ -64,12 +65,13 @@ impl Approach {
 ///
 /// With a `look` at a runner-up that sits within reach of the press, the
 /// pointer settles on the press alone; or rests on the runner-up first; or
-/// rests on the press, goes over to the runner-up and comes back. With none,
-/// it mostly settles on the press, and otherwise presses as it arrives. How
-/// long it rests anywhere is drawn afresh against `rest_ms`. Whatever does
-/// not fit in `think_ms` is dropped, the look before the settle and the
-/// settle before the travel: a short think gets a plain approach, and a
-/// shorter one gets a quicker hand.
+/// rests on the press, goes over to the runner-up and comes back — the think
+/// spread over the wait before it moves and its stops, each longer than the
+/// one before (see [`weighed`]). With none, it mostly settles on the press,
+/// for a while drawn afresh against `rest_ms`, and otherwise presses as it
+/// arrives. Whatever does not fit in `think_ms` is dropped, the look before
+/// the settle and the settle before the travel: a short think gets a plain
+/// approach, and a shorter one gets a quicker hand.
 pub fn approach<R: Rng + ?Sized>(
     think_ms: u32,
     from: Point,
@@ -141,25 +143,46 @@ fn with_stops<R: Rng + ?Sized>(
     let travel: u32 = legs.iter().map(|l| l.travel_ms).sum();
     let spare = think_ms.checked_sub(travel)?;
     let rest = f64::from(rest_ms);
-    let least = rest * (LOOK_REST.low * stops.len() as f64 + SETTLE_REST.low);
-    if f64::from(spare) < least {
+    if !stops.is_empty() {
+        return weighed(spare, legs, rest, rng);
+    }
+    if f64::from(spare) < rest * SETTLE_REST.low {
         return None;
     }
-    // A rest on each tile looked at and one on the tile pressed; together no
-    // more than what is left once the travel is paid for.
-    for (i, leg) in legs.iter_mut().enumerate() {
-        let kind = if i < stops.len() {
-            &LOOK_REST
-        } else {
-            &SETTLE_REST
-        };
-        leg.dwell_ms = (rest * kind.draw(rng)) as u32;
+    // A rest on the tile pressed, no more than what is left once the travel
+    // is paid for; the wait before the hand moves has the rest.
+    let settle = &mut legs[0];
+    settle.dwell_ms = ((rest * SETTLE_REST.draw(rng)) as u32).min(spare);
+    Some(Approach {
+        pause_ms: spare - settle.dwell_ms,
+        legs,
+    })
+}
+
+/// A hand weighing two tiles spends its think, once the travel is paid for,
+/// on the wait before it moves and the stops it makes, each longer than the
+/// one before by [`LONGER`]: it looks longer every time it comes back, and
+/// longest at the tile it then presses. A longer think is longer stops, not
+/// a longer wait. `None` when the first stop would be too short to read a
+/// tile in (`LOOK_REST.low` of `rest`).
+fn weighed<R: Rng + ?Sized>(
+    spare: u32,
+    mut legs: Vec<Leg>,
+    rest: f64,
+    rng: &mut R,
+) -> Option<Approach> {
+    let mut shares = Vec::with_capacity(legs.len() + 1);
+    let mut share = 1.0;
+    for _ in 0..=legs.len() {
+        shares.push(share);
+        share *= LONGER.draw(rng);
     }
-    let wished: u32 = legs.iter().map(|l| l.dwell_ms).sum();
-    if wished > spare {
-        for leg in &mut legs {
-            leg.dwell_ms = (u64::from(leg.dwell_ms) * u64::from(spare) / u64::from(wished)) as u32;
-        }
+    let unit = f64::from(spare) / shares.iter().sum::<f64>();
+    if unit * shares[1] < rest * LOOK_REST.low {
+        return None;
+    }
+    for (leg, share) in legs.iter_mut().zip(&shares[1..]) {
+        leg.dwell_ms = (unit * share) as u32;
     }
     let rested: u32 = legs.iter().map(|l| l.dwell_ms).sum();
     Some(Approach {
@@ -279,11 +302,9 @@ mod tests {
                 "{stops:?}"
             );
             assert_eq!(plan.looks_elsewhere(), stops.len() > 1);
-            let (settle, looks) = plan.legs.split_last().unwrap();
-            for leg in looks {
-                assert!((400..=2_000).contains(&leg.dwell_ms), "{leg:?}");
+            if !plan.looks_elsewhere() {
+                assert!((160..=1_600).contains(&plan.legs[0].dwell_ms), "{plan:?}");
             }
-            assert!((160..=1_600).contains(&settle.dwell_ms), "{settle:?}");
             shapes.insert(stops.len());
         }
         assert_eq!(shapes.len(), 3, "all three shapes should occur");
@@ -315,19 +336,52 @@ mod tests {
         assert!(distinct.len() > settles.len() / 2);
     }
 
-    /// A longer rest asked for is a longer rest given.
+    /// A hand weighing two tiles looks longer each time: the wait before it
+    /// moves is the shortest, every stop longer than the one before, the one
+    /// on the tile it presses the longest.
     #[test]
-    fn the_rest_on_a_tile_grows_with_the_one_asked_for() {
+    fn a_torn_hand_looks_longer_each_time() {
+        let mut rng = StdRng::seed_from_u64(23);
+        let mut torn = 0;
+        for think in [3_000, 5_000, 9_000, 20_000] {
+            for _ in 0..300 {
+                let plan = approach(
+                    think,
+                    (700.0, 700.0),
+                    PRESS,
+                    Some(NEAR),
+                    LOOK_MS,
+                    UNIT,
+                    &mut rng,
+                );
+                if !plan.looks_elsewhere() {
+                    continue;
+                }
+                torn += 1;
+                let mut last = plan.pause_ms;
+                for leg in &plan.legs {
+                    assert!(leg.dwell_ms > last, "{plan:?}");
+                    last = leg.dwell_ms;
+                }
+                assert!(plan.legs[0].dwell_ms >= (LOOK_MS as f64 * LOOK_REST.low) as u32);
+            }
+        }
+        assert!(torn > 500, "{torn}");
+    }
+
+    /// A longer think is longer stops, not a longer wait before moving.
+    #[test]
+    fn a_longer_think_is_longer_stops() {
         let mut rng = StdRng::seed_from_u64(13);
-        let mut looks = |rest_ms: u32| -> u32 {
+        let mut first_look = |think: u32| -> u32 {
             let dwells = (0..400)
                 .filter_map(|_| {
                     let plan = approach(
-                        20_000,
+                        think,
                         (700.0, 700.0),
                         PRESS,
                         Some(NEAR),
-                        rest_ms,
+                        LOOK_MS,
                         UNIT,
                         &mut rng,
                     );
@@ -336,8 +390,8 @@ mod tests {
                 .collect();
             median(dwells)
         };
-        let short = looks(800);
-        let long = looks(1_600);
+        let short = first_look(4_000);
+        let long = first_look(8_000);
         assert!(long > short * 3 / 2, "{short} vs {long}");
     }
 

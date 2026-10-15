@@ -10,7 +10,10 @@
 //! - longer along the way the pointer came than across it, as an aimed
 //!   movement ends;
 //! - with a small lean of its own, drawn once a session: a person tends to the
-//!   same side of a target.
+//!   same side of a target;
+//! - on a hand tile, high rather than low: from the top quarter of its face
+//!   and down from there (`humanize::on_tile_y`), as a hand reaching down to
+//!   a tile stops on it.
 //!
 //! A press that is made again, because the first did not register, lands at a
 //! fresh point of the same target ([`again`]).
@@ -28,6 +31,9 @@ use rand::Rng;
 pub struct Reach {
     pub half_x: f64,
     pub half_y: f64,
+    /// A hand tile: pressed from the top of its face down rather than about
+    /// its middle (`humanize::on_tile_y`). Across, as any target.
+    pub from_top: bool,
 }
 
 /// Scatter every press of `plan` within its target, coming from `from` (the
@@ -68,6 +74,11 @@ fn land<R: Rng + ?Sized>(
     rng: &mut R,
 ) -> Point {
     let (hx, hy) = (reach.half_x.max(1e-6), reach.half_y.max(1e-6));
+    if reach.from_top {
+        // A tile is come at from above, the buttons' side: across is sideways.
+        let x = (lean.0 * hx + humanize::normal(rng) * ACROSS * hx).clamp(-0.95 * hx, 0.95 * hx);
+        return (middle.0 + x, middle.1 + humanize::on_tile_y(rng));
+    }
     let base = (lean.0 * hx, lean.1 * hy);
     // The way as a direction, and how far the reach goes along it and across it.
     let along = way
@@ -109,6 +120,7 @@ mod tests {
     const TILE: Reach = Reach {
         half_x: 0.24,
         half_y: 0.36,
+        from_top: false,
     };
 
     fn inside(p: Point, middle: Point, reach: Reach) -> bool {
@@ -159,6 +171,7 @@ mod tests {
         let round = Reach {
             half_x: 0.3,
             half_y: 0.3,
+            from_top: false,
         };
         let points: Vec<Point> = (0..4000)
             .map(|_| land(middle, Some((1.0, 0.0)), round, (0.0, 0.0), &mut rng))
@@ -169,6 +182,32 @@ mod tests {
         };
         let (along, across) = (var(|p| p.0), var(|p| p.1));
         assert!(along > across * 1.5, "along {along} across {across}");
+    }
+
+    /// A hand tile is pressed from the top quarter of its face down: never
+    /// above it, mostly in the upper half, never in the bottom fifth, and
+    /// across within the tile.
+    #[test]
+    fn a_tile_is_pressed_high_rather_than_low() {
+        let mut rng = StdRng::seed_from_u64(5);
+        let middle = (6.0, 8.3625);
+        let tile = Reach {
+            from_top: true,
+            ..TILE
+        };
+        let points: Vec<Point> = (0..4000)
+            .map(|_| land(middle, Some((0.0, 1.0)), tile, (0.1, 0.1), &mut rng))
+            .collect();
+        let top = middle.1 + humanize::TILE_TOP;
+        let bottom = middle.1 + humanize::TILE_TOP + humanize::TILE_DROP.most;
+        assert!(points
+            .iter()
+            .all(|p| p.1 >= top - 1e-9 && p.1 <= bottom + 1e-9));
+        assert!(points.iter().all(|p| (p.0 - middle.0).abs() <= tile.half_x));
+        let high = points.iter().filter(|p| p.1 < middle.1).count();
+        assert!(high > 3200, "mostly the upper half: {high} of 4000");
+        let mean = points.iter().map(|p| p.1 - top).sum::<f64>() / points.len() as f64;
+        assert!((mean - humanize::TILE_DROP.mean).abs() < 0.015, "{mean}");
     }
 
     /// Scattering a plan moves each press within its own target and keeps
@@ -198,6 +237,7 @@ mod tests {
                 Reach {
                     half_x: 0.5,
                     half_y: 0.2,
+                    from_top: false,
                 }
             }
         };

@@ -162,6 +162,12 @@ impl AutoplayManager {
                         );
                         continue;
                     }
+                    // The approach ended on the first press; a later one —
+                    // the riichi button's tile, a call's candidate — is
+                    // reached the same way, not jumped to.
+                    if !self.hand.reach((px, py), rect).await {
+                        return false;
+                    }
                     // Need to re-acquire the page handle on each click;
                     // it may have been replaced (tab reload) between
                     // successive clicks within one action.

@@ -270,7 +270,8 @@ impl PlatformAutoplay for MajsoulAutoplay {
 ///
 /// `extra_clicks` is how many clicks follow the *first* one in this plan
 /// (candidate disambiguation, riichi tile). It sizes the click-sequence
-/// overhead the budget layer must reserve.
+/// overhead the budget layer must reserve: each is waited for, moved to
+/// and pressed.
 ///
 /// Returns the delay model's decision, for what it says besides the pause.
 fn push_pre_delay(
@@ -281,7 +282,9 @@ fn push_pre_delay(
 ) -> delay::DelayDecision {
     let cfg = ctx.cfg;
     let per_click = cfg.hover_delay_ms + cfg.click_hold_ms;
-    let click_overhead_ms = per_click + extra_clicks * (per_click + cfg.inter_click_delay_ms);
+    let click_overhead_ms = per_click
+        + extra_clicks
+            * (per_click + cfg.inter_click_delay_ms + crate::autoplay::pointer::next_press_ms());
 
     let opening_animation = match kind {
         DecisionKind::Dahai => is_dealer_first_discard(ctx),
@@ -423,22 +426,26 @@ pub fn reach_of(at: (f64, f64)) -> crate::autoplay::pointer::aim::Reach {
         Reach {
             half_x: 0.24,
             half_y: 0.35,
+            from_top: true,
         }
     } else if is(&coords::ACTIONS) {
         Reach {
             half_x: 0.5,
             half_y: 0.2,
+            from_top: false,
         }
     } else if is(&coords::CANDIDATES) || is(&coords::CANDIDATES_KAN) {
         Reach {
             half_x: 0.22,
             half_y: 0.3,
+            from_top: false,
         }
     } else if is(&[coords::CONFIRM]) {
         // The button is about 1.45 wide and 0.53 high.
         Reach {
             half_x: 0.45,
             half_y: 0.16,
+            from_top: false,
         }
     } else if is(&[
         coords::AUTO_SORT,
@@ -449,11 +456,13 @@ pub fn reach_of(at: (f64, f64)) -> crate::autoplay::pointer::aim::Reach {
         Reach {
             half_x: 0.08,
             half_y: 0.1,
+            from_top: false,
         }
     } else {
         Reach {
             half_x: 0.12,
             half_y: 0.12,
+            from_top: false,
         }
     }
 }

@@ -10,10 +10,11 @@
 
 use super::approach::{approach, wait_to_see, Approach, LOOK_MS, LOOK_REACH};
 use super::lean::{self, Lean, Spot};
-use super::{leave, Point};
+use super::{distance, leave, Point};
 use crate::autoplay::context::{AutoplayContext, CanvasRect};
 use crate::autoplay::humanize;
 use crate::autoplay::platform::{PlanResult, Step};
+use crate::schema::MjaiEvent;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::warn;
@@ -107,11 +108,18 @@ impl Hand {
             let (x, y) = humanize::rest_spot(&mut rng);
             rect.pixel(x, y)
         });
+        // The runner-up is rested on where a tile is: high on it, as a press.
+        let glance = glance.map(|(x, y)| {
+            rect.pixel(
+                x + humanize::LOOK_OFF_X.draw(&mut rng),
+                y + humanize::on_tile_y(&mut rng),
+            )
+        });
         let mut approach = approach(
             *duration_ms,
             from,
             rect.pixel(*x_norm, *y_norm),
-            glance.map(|(x, y)| rect.pixel(x, y)),
+            glance,
             rest_ms,
             rect.width / 16.0,
             &mut rng,
@@ -224,10 +232,10 @@ impl Hand {
             if crate::autoplay::majsoul::on_tile(at, pointer) {
                 return;
             }
-            // Not the middle of the tile every time.
+            // Not the middle of the tile every time, and high on it, as a press.
             let at = (
                 at.0 + humanize::LOOK_OFF_X.draw(&mut rng),
-                at.1 + humanize::LOOK_OFF_Y.draw(&mut rng),
+                at.1 + humanize::on_tile_y(&mut rng),
             );
             let to = rect.pixel(at.0, at.1);
             let from = self.at.unwrap_or(to);
@@ -244,10 +252,22 @@ impl Hand {
     /// there.
     ///
     /// Not after a tsumogiri the pointer was already waiting for: a hand that
-    /// threw the tile it drew stays where it drew it.
-    pub async fn rest_after(&mut self, rect: CanvasRect, plan: &PlanResult, threw_draw: bool) {
+    /// threw the tile it drew stays where it drew it. Nor after a call: the
+    /// seat's own discard comes next, and a hand goes from the button to the
+    /// tile it throws, not up to wait and straight back down.
+    pub async fn rest_after(&mut self, rect: CanvasRect, plan: &PlanResult, action: &MjaiEvent) {
+        let threw_draw = matches!(
+            action,
+            MjaiEvent::Dahai {
+                tsumogiri: true,
+                ..
+            }
+        );
         if std::mem::take(&mut self.waiting_on_draw) && threw_draw {
             self.settle_glances();
+            return;
+        }
+        if discards_next(action) {
             return;
         }
         let Some(pressed) = plan.steps.iter().rev().find_map(|s| match s {
@@ -303,6 +323,28 @@ impl Hand {
         self.move_to(leg.to, leg.travel_ms, leg.bend).await && self.tap(to, hover_ms, hold_ms).await
     }
 
+    /// Take the pointer to `to`, in CSS pixels, along an arc, for a press no
+    /// approach led to: a plan's later presses (the riichi button's tile, a
+    /// call's candidate) and presses made again. The press would otherwise
+    /// put the pointer there in one jump. Nothing to do where it already is.
+    /// False when the pointer could not be moved.
+    pub async fn reach(&mut self, to: Point, rect: CanvasRect) -> bool {
+        self.sync_with_user();
+        let leg = {
+            let mut rng = rand::rng();
+            let from = *self.at.get_or_insert_with(|| {
+                let (x, y) = humanize::rest_spot(&mut rng);
+                rect.pixel(x, y)
+            });
+            if distance(from, to) < 1.0 {
+                return true;
+            }
+            leave(from, to, rect.width / 16.0, &mut rng)
+        };
+        // The pause after the press before is the plan's own, already made.
+        self.move_to(leg.to, leg.travel_ms, leg.bend).await
+    }
+
     /// Press at `to`, in CSS pixels, where the pointer is or all but is:
     /// about `hover_ms` on it first, the button held about `hold_ms`. False
     /// when the press failed.
@@ -345,8 +387,50 @@ impl Hand {
     }
 }
 
+/// Whether the seat's own discard follows `action`: a call, after which the
+/// seat throws a tile (a kan's or a kita's once its replacement is drawn).
+fn discards_next(action: &MjaiEvent) -> bool {
+    matches!(
+        action,
+        MjaiEvent::Chi { .. }
+            | MjaiEvent::Pon { .. }
+            | MjaiEvent::Daiminkan { .. }
+            | MjaiEvent::Kakan { .. }
+            | MjaiEvent::Ankan { .. }
+            | MjaiEvent::Kita { .. }
+    )
+}
+
 /// A reaction time from now: how soon a changed plan moves the pointer.
 fn after_a_reaction() -> Instant {
     let reaction = humanize::REACTION.draw_ms(&mut rand::rng());
     Instant::now() + Duration::from_millis(u64::from(reaction))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_call_is_followed_by_the_seats_own_discard_and_a_discard_is_not() {
+        let pon = MjaiEvent::Pon {
+            actor: 0,
+            target: 2,
+            pai: "5m".into(),
+            consumed: ["5m".into(), "5m".into()],
+        };
+        let dahai = MjaiEvent::Dahai {
+            actor: 0,
+            pai: "5m".into(),
+            tsumogiri: false,
+        };
+        assert!(discards_next(&pon));
+        assert!(!discards_next(&dahai));
+        let reach = MjaiEvent::Reach {
+            actor: 0,
+            pai: Some("5m".into()),
+            tsumogiri: Some(false),
+        };
+        assert!(!discards_next(&reach));
+    }
 }
