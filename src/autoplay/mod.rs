@@ -53,6 +53,10 @@
 //!   per-game state and drives the plan.
 //! - [`pointer`] — how the pointer moves: its way to a press, its looks
 //!   between turns ([`pointer::lean`]) and its rests.
+//! - [`acts`] — the presses between decisions: through a hand's result, and
+//!   on the client's auto-win around a riichi.
+//! - [`pixels`] — reading the few pixels of the game that say what its
+//!   script does not, such as whether one of its toggles is on.
 //! - [`riichi_city`] — Riichi City: protocol frames instead of presses.
 //! - [`verify`] — did the click land? Counts the client's own uplink
 //!   input commands (bumped by the Majsoul bridge) so the manager can
@@ -62,6 +66,7 @@
 //!
 //! Entry point: [`manager::run_autoplay_manager`].
 
+pub mod acts;
 pub mod advisor;
 pub mod budget;
 pub mod canvas;
@@ -72,6 +77,7 @@ pub mod humanize;
 pub mod inject;
 pub mod majsoul;
 pub mod manager;
+pub mod pixels;
 pub mod platform;
 pub mod pointer;
 pub mod riichi_city;

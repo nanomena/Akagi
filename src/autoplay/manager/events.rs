@@ -2,13 +2,16 @@
 //!
 //! A game resets everything. A hand keeps the seat, the table size, the
 //! canvas cache and the dead-click count, and forgets the rest — the tiles
-//! last seen, the riichi, and all the pointer knows ([`Hand::reset`]).
+//! last seen, the riichi, and all the pointer knows ([`Hand::reset`]). The
+//! presses between decisions (`autoplay::acts`) learn of each result, riichi,
+//! deal and game end here.
 //!
 //! [`Hand::reset`]: crate::autoplay::pointer::Hand::reset
 
 use super::{AutoplayManager, ManagerState};
 use crate::autoplay::canvas::Canvas;
 use crate::schema::MjaiEvent;
+use std::time::Instant;
 
 impl AutoplayManager {
     pub(super) fn handle_mjai_event(&mut self, ev: &MjaiEvent) {
@@ -25,8 +28,19 @@ impl AutoplayManager {
                 self.state.cached_our_seat = *id;
                 self.state.num_players = *num_players;
             }
-            MjaiEvent::EndGame { .. } => self.new_game(),
+            MjaiEvent::EndGame { .. } => {
+                self.acts.hand_over();
+                self.new_game();
+            }
+            MjaiEvent::Hora { .. } | MjaiEvent::Ryukyoku { .. } => {
+                let confirmed = self.ctx.input_watch.confirmed();
+                self.acts
+                    .result_shown(confirmed, Instant::now(), &mut rand::rng());
+            }
             MjaiEvent::StartKyoku { .. } | MjaiEvent::EndKyoku => {
+                if matches!(ev, MjaiEvent::StartKyoku { .. }) {
+                    self.acts.hand_over();
+                }
                 // Per-kyoku reset: keep last seen rect cache and cached seat,
                 // drop everything else. Keep last_kawa_tile as None so
                 // push_random_pre_delay uses the max delay (opening-hand guard).
@@ -59,6 +73,7 @@ impl AutoplayManager {
             MjaiEvent::ReachAccepted { actor } => {
                 if self.is_ours(*actor) {
                     self.state.self_riichi_accepted = true;
+                    self.acts.riichi_accepted(Instant::now(), &mut rand::rng());
                 }
             }
             MjaiEvent::Chi { actor, .. }
@@ -185,6 +200,43 @@ mod tests {
 
         m.handle_mjai_event(&start_game(Some(0)));
         assert_eq!(m.state.dead_clicks, 0, "a new table is a fresh start");
+    }
+
+    /// Our riichi and a hand's result reach the presses between decisions;
+    /// another seat's riichi does not, and a new deal clears what was due.
+    #[test]
+    fn riichi_and_results_are_handed_to_the_presses_between_decisions() {
+        let mut m = AutoplayManager::for_tests();
+        m.handle_mjai_event(&start_game(Some(0)));
+        m.handle_mjai_event(&MjaiEvent::ReachAccepted { actor: 2 });
+        assert!(m.acts.due().is_none(), "not our riichi");
+        m.handle_mjai_event(&MjaiEvent::ReachAccepted { actor: 0 });
+        assert!(m.acts.due().is_some(), "auto-win may go on");
+        m.handle_mjai_event(&MjaiEvent::Ryukyoku {
+            deltas: None,
+            tehais: None,
+            scores: None,
+            reason: None,
+        });
+        let result = m.acts.due().expect("the result is pressed through");
+        assert!(result <= Instant::now() + std::time::Duration::from_secs(30));
+        m.handle_mjai_event(&MjaiEvent::EndKyoku);
+        assert!(
+            m.acts.due().is_some(),
+            "the result is still up after the hand's end"
+        );
+        m.handle_mjai_event(&MjaiEvent::StartKyoku {
+            bakaze: "E".into(),
+            dora_marker: "1m".into(),
+            kyoku: 2,
+            honba: 0,
+            kyotaku: 0,
+            oya: 1,
+            scores: vec![25_000; 4],
+            tehais: vec![vec!["1m".into(); 13]; 4],
+            num_players: 4,
+        });
+        assert!(m.acts.due().is_none(), "a new deal: nothing left to press");
     }
 
     /// Observer/replay mode: `StartGame` with `id: None` must not cache a
