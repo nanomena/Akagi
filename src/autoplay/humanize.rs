@@ -243,6 +243,15 @@ pub const SETTLE_REST: Tail = Tail {
     low: 0.2,
     high: 2.0,
 };
+/// Added to the think when the hand presses another tile than the one it
+/// was looking at between turns: a changed mind weighs the two before it
+/// presses, as a torn hand does.
+pub const CHANGED_MIND: Tail = Tail {
+    median: 700.0,
+    spread: 0.35,
+    low: 350.0,
+    high: 1500.0,
+};
 /// A hand weighing two tiles: how much longer each stop is than the one
 /// before it, the wait before it moves the first.
 pub const LONGER: Tail = Tail {
