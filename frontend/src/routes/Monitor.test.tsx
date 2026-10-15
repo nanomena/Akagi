@@ -208,6 +208,21 @@ describe('monitor user states', () => {
     expect(screen.getByText('+1,000')).toBeTruthy()
   })
 
+  it('shows an earlier hand with the melds it ended with, once the next round is dealt', () => {
+    fixture.snapshot!.result = null
+    fixture.snapshot!.hands = [
+      { round: 1, bakaze: 'E', kyoku: 1, honba: 0, events: 50, result: { kind: 'hora', scores: [24000, 26000], deltas: [-1000, 1000],
+        hands: [{ seat: 1, tiles: ['1m', '1m'], melds: [{ kind: 'pon', tiles: ['P', 'P', 'P'], from_who: 0, called_tile: 'P' }], winning_tile: 'C', target: 1, ura_markers: [] }] } },
+      { round: 2, bakaze: 'E', kyoku: 2, honba: 0, result: null, events: 3 },
+    ]
+    render(<Monitor />)
+    fireEvent.click(screen.getByRole('tab', { name: '结果' }))
+    const reveal = screen.getByText('自摸').closest('.mreveal') as HTMLElement
+    const shown = within(reveal).getAllByRole('img').map(img => img.getAttribute('alt'))
+    expect(shown.slice(0, 3)).toEqual(['1万', '1万', '中'])
+    expect(shown.filter(alt => alt === '白')).toHaveLength(3)
+  })
+
   it('is one window with one control of its own: staying on top', async () => {
     render(<Monitor />)
     const pin = screen.getByRole('button', { name: '置顶' })
