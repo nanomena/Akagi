@@ -21,7 +21,7 @@ import { Board } from './board.js'
 import { Core } from './core.js'
 import { Feed } from './feed.js'
 import { FrameSource } from './frames.js'
-import { MIN, RATIO, conform, framedRatio, gameBounds, handOnGame, openingSize, restoredBounds, settle, trailBounds } from './layout.js'
+import { MIN, RATIO, conform, framedRatio, gameBounds, handOnGame, onGame, openingSize, restFor, restoredBounds, settle, trailBounds } from './layout.js'
 import { policyFor } from './policy.js'
 import { STREAM_FPS, StreamServer, newToken, streamUrl } from './stream.js'
 
@@ -69,8 +69,8 @@ let trail = null
 let cursorAt = null
 let cursorMovedAt = 0
 let userActive = false
-/** How long the cursor has to rest before the user's hand counts as off the mouse. */
-const USER_STILL_MS = 400
+/** How long the cursor has to rest before the user's hand counts as off the mouse: a while of its own each time. */
+let userStillMs = restFor()
 /** Where the game view is in the window's content, while it is shown. */
 /** @type {import('./layout.js').Rect | null} */
 let gameAt = null
@@ -374,14 +374,19 @@ function watchCursor() {
   const point = screen.getCursorScreenPoint()
   const now = Date.now()
   if (!cursorAt || point.x !== cursorAt.x || point.y !== cursorAt.y) {
+    // The hand on the mouse again: how long it rests this time before autoplay has the pointer back.
+    if (!userActive) userStillMs = restFor()
     cursorAt = point
     cursorMovedAt = now
   }
   const area = gameAt && !window.isMinimized() ? trailBounds(window.getContentBounds(), gameAt) : null
-  const active = handOnGame(point, area, cursorMovedAt, now, USER_STILL_MS)
+  const active = handOnGame(point, area, cursorMovedAt, now, userStillMs)
   if (active !== userActive) {
     userActive = active
-    core.call('set_user_pointer', { active }).catch(() => {})
+    // Resting over the game, the user's own mouse left the game's pointer where
+    // it is: autoplay goes on from there, not from where it last put it.
+    const at = active ? null : onGame(point, area)
+    core.call('set_user_pointer', at ? { active, x: at.x, y: at.y } : { active }).catch(() => {})
   }
 }
 

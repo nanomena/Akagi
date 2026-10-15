@@ -1,7 +1,7 @@
 // @ts-check
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { MIN, RATIO, SIZE, conform, framedRatio, gameBounds, handOnGame, openingSize, restoredBounds, settle, trailBounds } from '../src/layout.js'
+import { MIN, RATIO, SIZE, conform, framedRatio, gameBounds, handOnGame, onGame, openingSize, restFor, restoredBounds, settle, trailBounds } from '../src/layout.js'
 
 test('a fresh window opens at its own size, or as much of it as the display has room for', () => {
   assert.deepEqual(openingSize({ width: 2560, height: 1400 }), SIZE)
@@ -65,4 +65,21 @@ test("the user's hand is on the game while the cursor moves inside it, and off o
   assert.equal(handOnGame({ x: 50, y: 300 }, area, 1000, 1100, 400), false, 'beside the game')
   assert.equal(handOnGame({ x: 600, y: 900 }, area, 1000, 1100, 400), false, 'over the dock')
   assert.equal(handOnGame({ x: 600, y: 300 }, null, 1000, 1100, 400), false, 'no game shown')
+})
+
+test('a rest before autoplay has the pointer back is half a second to a second', () => {
+  assert.equal(restFor(() => 0), 500)
+  assert.equal(restFor(() => 0.999999), 1000)
+  for (let i = 0; i < 200; i++) {
+    const ms = restFor()
+    assert.ok(ms >= 500 && ms <= 1000, String(ms))
+  }
+})
+
+test('the cursor over the game view is read in the view\'s own pixels', () => {
+  const area = { x: 100, y: 50, width: 1200, height: 675 }
+  assert.deepEqual(onGame({ x: 100, y: 50 }, area), { x: 0, y: 0 })
+  assert.deepEqual(onGame({ x: 700, y: 400 }, area), { x: 600, y: 350 })
+  assert.equal(onGame({ x: 1300, y: 400 }, area), null, 'just past the right edge')
+  assert.equal(onGame({ x: 700, y: 400 }, null), null, 'no game view')
 })

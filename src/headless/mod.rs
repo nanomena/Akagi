@@ -27,7 +27,7 @@
 //! | `set_monitor_trail`    | `{enabled}`              | `MonitorConfig`   |
 //! | `set_monitor_lean`     | `{enabled}`              | `MonitorConfig`   |
 //! | `set_monitor_stream`   | `{enabled, port, token}` | `MonitorConfig`   |
-//! | `set_user_pointer`     | `{active}`               | `null`            |
+//! | `set_user_pointer`     | `{active, x?, y?}`       | `null`            |
 //! | `set_monitor_autoplay` | `{enabled}`              | `null`            |
 //! | `open_game`            | `{port, target}`         | `null`            |
 //!
@@ -98,6 +98,12 @@ static TRAIL: AtomicBool = AtomicBool::new(false);
 #[derive(Debug, Deserialize)]
 struct UserPointer {
     active: bool,
+    /// Where the user's mouse rests on the game view, in the game page's CSS
+    /// pixels, when it comes to rest there.
+    #[serde(default)]
+    x: Option<f64>,
+    #[serde(default)]
+    y: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -348,9 +354,15 @@ async fn answer(state: &AppState, method: &str, params: Value) -> Result<Value, 
             reply(config.monitor)
         }
         // The shell watches the system cursor; autoplay holds its presses
-        // while the user's own mouse moves over the game.
+        // while the user's own mouse moves over the game, and goes on from
+        // where it came to rest.
         "set_user_pointer" => {
-            let UserPointer { active } = parse(params)?;
+            let UserPointer { active, x, y } = parse(params)?;
+            if let (false, Some(x), Some(y)) = (active, x, y) {
+                if x.is_finite() && y.is_finite() {
+                    autoplay::cdp_input::user_left_pointer_at((x, y));
+                }
+            }
             autoplay::cdp_input::set_user_active(active);
             Ok(Value::Null)
         }
@@ -592,6 +604,18 @@ mod tests {
         let request: Request = serde_json::from_str(r#"{"id":3,"method":"get_monitor"}"#).unwrap();
         assert_eq!((request.id, request.method.as_str()), (3, "get_monitor"));
         assert!(request.params.is_null());
+    }
+
+    #[test]
+    fn the_users_mouse_may_say_where_it_came_to_rest() {
+        let busy: UserPointer = parse(json!({ "active": true })).unwrap();
+        assert!(busy.active && busy.x.is_none() && busy.y.is_none());
+        let rested: UserPointer =
+            parse(json!({ "active": false, "x": 600.5, "y": 350.0 })).unwrap();
+        assert_eq!(
+            (rested.active, rested.x, rested.y),
+            (false, Some(600.5), Some(350.0))
+        );
     }
 
     #[test]
