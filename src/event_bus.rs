@@ -17,6 +17,8 @@
 //! - [`NotifyBus`]: things the core has to say to the user. Any subsystem may
 //!   push; the monitor shows them.
 //! - [`HistoryBus`]: a finished game written to the history store.
+//! - [`AccountBus`]: the player's own ranks, each time the platform says
+//!   them. Producer: the Majsoul bridge. Consumer: the monitor.
 //!
 //! Channel capacity is fixed-size — slow consumers see `RecvError::Lagged`
 //! rather than blocking the producer. That's the right trade-off for a
@@ -24,7 +26,9 @@
 //! than stall capture.
 
 use crate::bot::BotResponse;
-use crate::schema::{BotStatus, CaptureStatus, HistoryEvent, MjaiEvent, Notification};
+use crate::schema::{
+    AccountLevels, BotStatus, CaptureStatus, HistoryEvent, MjaiEvent, Notification,
+};
 use tokio::sync::broadcast;
 
 /// Fan-out for `MjaiEvent`s from platform bridges.
@@ -77,6 +81,10 @@ pub type PostTrackerBus = broadcast::Sender<TrackedEvent>;
 /// frontend.
 pub type HistoryBus = broadcast::Sender<HistoryEvent>;
 
+/// Fan-out for the player's own ranks, as the platform says them: at login,
+/// when a game begins, and when the client asks again after one ends.
+pub type AccountBus = broadcast::Sender<AccountLevels>;
+
 /// Default capacity. Live pacing produces ~1 second of mjai events at a time
 /// (start_kyoku + 13 tehai + a few tsumo/dahai pairs), which is tiny. The
 /// sizing constraint is the **one-shot GameRestore replay**: on reconnect the
@@ -125,6 +133,11 @@ pub fn post_tracker_bus() -> PostTrackerBus {
 }
 
 pub fn history_bus() -> HistoryBus {
+    let (tx, _rx) = broadcast::channel(STATUS_CAPACITY);
+    tx
+}
+
+pub fn account_bus() -> AccountBus {
     let (tx, _rx) = broadcast::channel(STATUS_CAPACITY);
     tx
 }

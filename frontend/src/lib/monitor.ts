@@ -3,8 +3,13 @@ import { pickShow, visibleItems } from '@/lib/botShow'
 import type { BotResponse, BotStatus, CaptureStatus, GameStateSnapshot, MahgenView, MeldSnapshot, MjaiEvent, ShowItem } from '@/types'
 import { localized, tr } from '@/lib/i18n'
 
-/** The window's own options, and which build it is (`version` comes from the shell). */
-export type MonitorConfig = { always_on_top: boolean; pointer_trail?: boolean; pointer_lean?: boolean; version?: string }
+/** The window's own options, and which build it is (`version` comes from the shell).
+ *  `stream_url` is the address the shell serves the game at, while it does. */
+export type MonitorConfig = {
+  always_on_top: boolean; pointer_trail?: boolean; pointer_lean?: boolean
+  stream_output?: boolean; stream_port?: number; stream_token?: string; stream_url?: string
+  version?: string
+}
 export const MONITOR_DEFAULTS: MonitorConfig = { always_on_top: false, pointer_trail: false, pointer_lean: false }
 export type DecisionContext = { game: number; round: number; event_seq: number }
 export type MonitorDecision = {
@@ -14,7 +19,9 @@ export type MonitorDecision = {
   state: 'thinking' | 'awaiting' | 'confirmed' | 'expired' | 'failed' | 'unavailable' | 'declined'
   response: BotResponse | null; error: string | null; confirmed_seq: number | null
 }
-export type PublicHand = { seat: number; tiles: string[]; winning_tile: string | null; target: number | null; ura_markers: string[] }
+/** A hand the round's end made public. `melds` are its open melds as the round
+ *  ended, kept with it because the table is dealt again at the next round. */
+export type PublicHand = { seat: number; tiles: string[]; melds?: MeldSnapshot[]; winning_tile: string | null; target: number | null; ura_markers: string[] }
 export type RoundResult = { kind: string; hands: PublicHand[]; scores: number[] | null; deltas: number[] | null }
 export type MonitorEvent = { seq: number; ts_ms: number; event: MjaiEvent }
 /** One hand of the current game: which it was and how it ended (`null` while it

@@ -620,4 +620,11 @@
 .mset-row strong { font-size: 13px; font-weight: 500; }
 .mset-row small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--m-dim); }
 .mset-row .mswitch { justify-self: end; }
+/* The stream's row has a cell for its copy button, kept while there is nothing to copy. */
+.mset-row--stream { grid-template-columns: minmax(0, 1fr) 28px auto; }
+.mset-row--stream > div { grid-column: 1; }
+.mset-row--stream .mset-copy { grid-column: 2; }
+.mset-row--stream .mswitch { grid-column: 3; }
+.mset-copy[data-empty] { visibility: hidden; }
+.mset-row--stream small[title] { color: var(--m-ink2); font-variant-numeric: tabular-nums; user-select: text; }
 

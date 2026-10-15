@@ -18,17 +18,18 @@
 //! core → shell   {"event": "monitor-updated", "payload": {…}}
 //! ```
 //!
-//! | Method                 | Params               | Result                  |
-//! |------------------------|----------------------|-------------------------|
-//! | `get_monitor`          | —                    | `MonitorSnapshot`       |
-//! | `get_hand_events`      | `{round}`            | `[MonitorEvent]`        |
-//! | `get_history`          | —                    | `[GameRecord]`          |
-//! | `set_monitor_pinned`   | `{pinned}`           | `MonitorConfig`         |
-//! | `set_monitor_trail`    | `{enabled}`          | `MonitorConfig`         |
-//! | `set_monitor_lean`     | `{enabled}`          | `MonitorConfig`         |
-//! | `set_user_pointer`     | `{active, x?, y?}`   | `null`                  |
-//! | `set_monitor_autoplay` | `{enabled}`          | `null`                  |
-//! | `open_game`            | `{port, target}`     | `null`                  |
+//! | Method                 | Params                   | Result            |
+//! |------------------------|--------------------------|-------------------|
+//! | `get_monitor`          | —                        | `MonitorSnapshot` |
+//! | `get_hand_events`      | `{round}`                | `[MonitorEvent]`  |
+//! | `get_history`          | —                        | `[GameRecord]`    |
+//! | `set_monitor_pinned`   | `{pinned}`               | `MonitorConfig`   |
+//! | `set_monitor_trail`    | `{enabled}`              | `MonitorConfig`   |
+//! | `set_monitor_lean`     | `{enabled}`              | `MonitorConfig`   |
+//! | `set_monitor_stream`   | `{enabled, port, token}` | `MonitorConfig`   |
+//! | `set_user_pointer`     | `{active, x?, y?}`       | `null`            |
+//! | `set_monitor_autoplay` | `{enabled}`              | `null`            |
+//! | `open_game`            | `{port, target}`         | `null`            |
 //!
 //! | Event             | Payload                                              |
 //! |-------------------|------------------------------------------------------|
@@ -118,6 +119,30 @@ struct Hand {
 #[derive(Debug, Deserialize)]
 struct Enabled {
     enabled: bool,
+}
+
+/// The game offered to a streaming program, and the address the shell serves
+/// it at. The address is kept when the option goes off, so that it is the
+/// same when it comes back on.
+#[derive(Debug, Deserialize)]
+struct Stream {
+    enabled: bool,
+    port: u16,
+    token: String,
+}
+
+impl Stream {
+    /// An address that is on stands on a port of its own and carries a secret
+    /// long enough not to be guessed, made of what a URL's path holds as is.
+    fn check(&self) -> Result<(), String> {
+        let token_ok = self.token.len() >= 16
+            && self.token.len() <= 128
+            && self.token.bytes().all(|b| b.is_ascii_alphanumeric());
+        if self.enabled && (self.port == 0 || !token_ok) {
+            return Err("invalid stream address".into());
+        }
+        Ok(())
+    }
 }
 
 /// Where the shell's game view can be reached.
@@ -348,6 +373,18 @@ async fn answer(state: &AppState, method: &str, params: Value) -> Result<Value, 
                 .await?;
             reply(config.monitor)
         }
+        "set_monitor_stream" => {
+            let stream: Stream = parse(params)?;
+            stream.check()?;
+            let config = state
+                .save_config(|c| {
+                    c.monitor.stream_output = stream.enabled;
+                    c.monitor.stream_port = stream.port;
+                    c.monitor.stream_token = stream.token;
+                })
+                .await?;
+            reply(config.monitor)
+        }
         "set_monitor_autoplay" => {
             let Enabled { enabled } = parse(params)?;
             state.save_config(|c| c.autoplay.enabled = enabled).await?;
@@ -433,8 +470,9 @@ fn start_autoplay(state: &AppState, enabled: bool) {
     });
 }
 
-/// Keep the monitor in step with the bot's and capture's status and with what
-/// the core has to say, and the capture control's copy of its status with it.
+/// Keep the monitor in step with the bot's and capture's status, with what the
+/// core has to say and with the player's own ranks, and the capture control's
+/// copy of its status with it.
 fn mirror_statuses(state: &AppState) {
     let mut bots = state.bot_status_bus.subscribe();
     let monitor = state.monitor.clone();
@@ -472,6 +510,18 @@ fn mirror_statuses(state: &AppState) {
                 Err(broadcast::error::RecvError::Lagged(n)) => {
                     monitor.gap(format!("Missed {n} status notices."))
                 }
+                Err(broadcast::error::RecvError::Closed) => return,
+            }
+        }
+    });
+
+    let mut accounts = state.account_bus.subscribe();
+    let monitor = state.monitor.clone();
+    tokio::spawn(async move {
+        loop {
+            match accounts.recv().await {
+                Ok(levels) => monitor.set_account(levels),
+                Err(broadcast::error::RecvError::Lagged(_)) => {}
                 Err(broadcast::error::RecvError::Closed) => return,
             }
         }
@@ -582,14 +632,50 @@ mod tests {
             brand: "Akagi".into(),
             monitor: MonitorConfig {
                 always_on_top: true,
-                pointer_trail: false,
-                pointer_lean: false,
+                ..MonitorConfig::default()
             },
             version: "1.2.3",
         };
         assert_eq!(
             serde_json::to_value(ready).unwrap(),
-            json!({ "brand": "Akagi", "monitor": { "always_on_top": true, "pointer_trail": false, "pointer_lean": false }, "version": "1.2.3" })
+            json!({
+                "brand": "Akagi",
+                "monitor": {
+                    "always_on_top": true, "pointer_trail": false, "pointer_lean": false,
+                    "stream_output": false, "stream_port": 0, "stream_token": "",
+                },
+                "version": "1.2.3",
+            })
         );
+    }
+
+    #[test]
+    fn a_stream_that_is_on_needs_a_port_and_a_secret() {
+        let stream: Stream = parse(
+            json!({ "enabled": true, "port": 50123, "token": "0123456789abcdef0123456789abcdef" }),
+        )
+        .unwrap();
+        assert!(stream.check().is_ok());
+        for (port, token) in [
+            (0, "0123456789abcdef"),
+            (50123, "short"),
+            (50123, "0123456789abcdef/../x"),
+            (50123, ""),
+        ] {
+            let stream = Stream {
+                enabled: true,
+                port,
+                token: token.into(),
+            };
+            assert!(stream.check().is_err(), "{port} {token:?}");
+        }
+        // Off, whatever was kept is kept as it is.
+        let off = Stream {
+            enabled: false,
+            port: 0,
+            token: String::new(),
+        };
+        assert!(off.check().is_ok());
+        assert!(parse::<Stream>(json!({ "enabled": true, "port": 70000, "token": "x" })).is_err());
     }
 }
