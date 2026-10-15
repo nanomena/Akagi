@@ -13,9 +13,11 @@
 //!   appearing, mostly settles on its target before pressing it, and may
 //!   first rest on the runner-up when the bot was torn between two discards;
 //! - [`leave`] — once the press has registered the pointer leaves the hand
-//!   for [`rest_point`], by the buttons;
+//!   for where it waits, by the buttons (`humanize::rest_spot`);
 //! - [`lean`] — between the seat's turns it looks, at its own pace, at the
 //!   tiles the bot expects to throw next;
+//! - [`aim`] — where in its target a press lands: scattered in the target's
+//!   middle, never on the same few pixels;
 //! - [`hand`] — the pointer's state over a game and the moves that send it
 //!   to the page.
 //!
@@ -25,6 +27,7 @@
 //! the press lands at the instant it would have without any of this, so no
 //! budget, floor or cap is affected.
 
+pub mod aim;
 pub mod approach;
 pub mod hand;
 pub mod lean;
@@ -33,7 +36,6 @@ pub use approach::{approach, runner_up, Approach, LOOK_MS, LOOK_REACH};
 pub use hand::Hand;
 
 use rand::Rng;
-use rand_distr::{Distribution, LogNormal};
 
 /// A point in CSS pixels.
 pub type Point = (f64, f64);
@@ -85,41 +87,19 @@ pub fn along(from: Point, to: Point, bend: f64, t: f64) -> Point {
     )
 }
 
-fn bend<R: Rng + ?Sized>(rng: &mut R) -> f64 {
-    rng.random_range(-0.12..0.12)
-}
-
 /// The pointer leaving a press for `to`: a wait first — a hand does not
 /// spring off the tile it has just let go, and how long it stays varies a
 /// great deal: mostly about half a second, now and then at once, now and
 /// then a second or two — given as the leg's dwell, which here comes
 /// *before* the travel.
 pub fn leave<R: Rng + ?Sized>(from: Point, to: Point, unit: f64, rng: &mut R) -> Leg {
+    use crate::autoplay::humanize;
     Leg {
         to,
-        travel_ms: travel_ms(distance(from, to), unit),
-        dwell_ms: linger_ms(rng),
-        bend: bend(rng),
+        travel_ms: humanize::TRAVEL.draw_ms(travel_ms(distance(from, to), unit), rng),
+        dwell_ms: humanize::LINGER.draw_ms(rng),
+        bend: humanize::BEND.draw(rng),
     }
-}
-
-/// How long a hand stays on what it pressed: log-normal around 550 ms.
-fn linger_ms<R: Rng + ?Sized>(rng: &mut R) -> u32 {
-    let wait = LogNormal::new(550f64.ln(), 0.6).map_or(550.0, |d| d.sample(rng));
-    wait.clamp(120.0, 2500.0) as u32
-}
-
-/// Where the pointer rests between presses, as a normalised 16:9 point:
-/// along the action buttons' row and the table above it, where a hand waits
-/// for the next thing it may have to answer — a wide band, more than half the
-/// width of the game, so that it is not the same spot every time. Off the
-/// hand, so no tile is left lifted.
-pub fn rest_point<R: Rng + ?Sized>(rng: &mut R) -> (f64, f64) {
-    let (x, y) = crate::autoplay::majsoul::coords::ACTIONS[0];
-    (
-        x + rng.random_range(-6.4..2.4),
-        y + rng.random_range(-1.1..0.25),
-    )
 }
 
 #[cfg(test)]
@@ -191,16 +171,5 @@ mod tests {
             "{:?}",
             (waits[30], waits[waits.len() - 30])
         );
-    }
-
-    #[test]
-    fn the_pointer_rests_by_the_buttons_and_off_the_hand() {
-        let mut rng = StdRng::seed_from_u64(5);
-        for _ in 0..500 {
-            let (x, y) = rest_point(&mut rng);
-            assert!((4.4..13.3).contains(&x), "{x}");
-            // Above a lifted tile: on the buttons' row or over the table above it.
-            assert!((5.85..7.3).contains(&y), "{y}");
-        }
     }
 }

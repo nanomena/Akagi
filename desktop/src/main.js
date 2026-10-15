@@ -18,7 +18,7 @@ import { createServer } from 'node:net'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Core } from './core.js'
-import { MIN, RATIO, conform, framedRatio, gameBounds, handOnGame, onGame, openingSize, restFor, restoredBounds, settle, trailBounds } from './layout.js'
+import { MIN, RATIO, conform, framedRatio, gameBounds, handOnGame, onGame, openingSize, restoredBounds, settle, trailBounds } from './layout.js'
 import { policyFor } from './policy.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -63,8 +63,10 @@ let trail = null
 let cursorAt = null
 let cursorMovedAt = 0
 let userActive = false
-/** How long the cursor has to rest before the user's hand counts as off the mouse: a while of its own each time. */
-let userStillMs = restFor()
+/** How long the cursor has to stand still before it counts as at rest. How
+ *  long autoplay then waits before it has the pointer back is the core's to
+ *  draw (`humanize::HAND_BACK`). */
+const USER_STILL_MS = 150
 /** Where the game view is in the window's content, while it is shown. */
 /** @type {import('./layout.js').Rect | null} */
 let gameAt = null
@@ -286,13 +288,11 @@ function watchCursor() {
   const point = screen.getCursorScreenPoint()
   const now = Date.now()
   if (!cursorAt || point.x !== cursorAt.x || point.y !== cursorAt.y) {
-    // The hand on the mouse again: how long it rests this time before autoplay has the pointer back.
-    if (!userActive) userStillMs = restFor()
     cursorAt = point
     cursorMovedAt = now
   }
   const area = gameAt && !window.isMinimized() ? trailBounds(window.getContentBounds(), gameAt) : null
-  const active = handOnGame(point, area, cursorMovedAt, now, userStillMs)
+  const active = handOnGame(point, area, cursorMovedAt, now, USER_STILL_MS)
   if (active !== userActive) {
     userActive = active
     // Resting over the game, the user's own mouse left the game's pointer where

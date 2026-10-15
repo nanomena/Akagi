@@ -137,6 +137,10 @@ pub struct PlanResult {
     /// How long the pointer should rest on a tile it looks at, when the
     /// delay model said.
     pub look_ms: Option<u32>,
+    /// The middles of the targets the presses aim at, in press order, once
+    /// they have been scattered within them (`autoplay::pointer::aim`); empty
+    /// before.
+    pub aims: Vec<(f64, f64)>,
 }
 
 pub trait PlatformAutoplay: Send + Sync {

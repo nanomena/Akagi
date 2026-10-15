@@ -410,6 +410,38 @@ pub fn hand_point(
     at(pick_copy(&copies, at, pointer, rng)?)
 }
 
+/// The part of the target at `at` a press may land on (see
+/// `autoplay::pointer::aim`): the middle six tenths of a hand tile, of an
+/// action button, of a call candidate. A point that is none of these is
+/// given a small reach.
+pub fn reach_of(at: (f64, f64)) -> crate::autoplay::pointer::aim::Reach {
+    use crate::autoplay::pointer::aim::Reach;
+    let near = |a: f64, b: f64| (a - b).abs() < 1e-6;
+    let is = |table: &[(f64, f64)]| table.iter().any(|p| near(p.0, at.0) && near(p.1, at.1));
+    if near(at.1, TILES[0].1) {
+        // A tile is a slot's width (0.79) by about 1.15 high.
+        Reach {
+            half_x: 0.24,
+            half_y: 0.35,
+        }
+    } else if is(&coords::ACTIONS) {
+        Reach {
+            half_x: 0.5,
+            half_y: 0.2,
+        }
+    } else if is(&coords::CANDIDATES) || is(&coords::CANDIDATES_KAN) {
+        Reach {
+            half_x: 0.22,
+            half_y: 0.3,
+        }
+    } else {
+        Reach {
+            half_x: 0.12,
+            half_y: 0.12,
+        }
+    }
+}
+
 /// How far up or down from a tile's middle the pointer is still on it.
 const ON_TILE_HEIGHT: f64 = 0.75;
 
@@ -445,7 +477,7 @@ enum Whence {
 
 /// One of `places` at random.
 fn any_of(places: &[usize], rng: &mut impl Rng) -> Option<usize> {
-    (!places.is_empty()).then(|| places[rng.random_range(0..places.len())])
+    (!places.is_empty()).then(|| places[crate::autoplay::humanize::one_of(places.len(), rng)])
 }
 
 /// Which of the copies at `places` to press, each lying where `at` says: the
@@ -868,6 +900,24 @@ fn riichi_prompt_pending(ctx: &ActionContext, dahai_pai: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Each kind of target has its own reach, and the hand's drawn tile,
+    /// set apart from the rest, is a tile like any other.
+    #[test]
+    fn every_kind_of_target_has_its_own_reach() {
+        let tile = reach_of(TILES[3]);
+        assert_eq!((tile.half_x, tile.half_y), (0.24, 0.35));
+        let drawn = reach_of((TILES[12].0 + coords::TSUMO_SPACE + 0.790_625, TILES[12].1));
+        assert_eq!(drawn, tile);
+        let button = reach_of(coords::ACTIONS[1]);
+        assert_eq!((button.half_x, button.half_y), (0.5, 0.2));
+        let candidate = reach_of(coords::CANDIDATES_KAN[2]);
+        assert_eq!((candidate.half_x, candidate.half_y), (0.22, 0.3));
+        let unknown = reach_of((1.0, 1.0));
+        assert_eq!((unknown.half_x, unknown.half_y), (0.12, 0.12));
+        // Half a tile slot across: a press within the reach stays on its tile.
+        assert!(tile.half_x < (TILES[1].0 - TILES[0].0) / 2.0);
+    }
     use crate::autoplay::context::CanvasRect;
     use crate::config::MajsoulAutoplayConfig;
     use crate::game_state::snapshot::{GameStateSnapshot, Phase, PlayerSnapshot};

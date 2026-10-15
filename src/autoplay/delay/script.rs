@@ -341,19 +341,20 @@ impl DelayScript {
             budget.set("elapsed_ms", b.elapsed_ms)?;
             ctx.set("budget", budget)?;
         }
+        // The script's draws are autoplay's like any other (`autoplay::humanize`).
         ctx.set(
             "rng",
-            lua.create_function(|_, ()| Ok(rand::random::<f64>()))?,
+            lua.create_function(|_, ()| Ok(crate::autoplay::humanize::fraction(&mut rand::rng())))?,
         )?;
         ctx.set(
             "lognormal",
             lua.create_function(|_, (mu, sigma): (f64, f64)| {
-                match rand_distr::LogNormal::new(mu, sigma) {
-                    Ok(dist) => {
+                match crate::autoplay::humanize::log_normal(mu, sigma) {
+                    Some(dist) => {
                         use rand::Rng;
                         Ok(rand::rng().sample::<f64, _>(dist))
                     }
-                    Err(_) => Err(mlua::Error::RuntimeError("lognormal: invalid sigma".into())),
+                    None => Err(mlua::Error::RuntimeError("lognormal: invalid sigma".into())),
                 }
             })?,
         )?;
