@@ -306,8 +306,10 @@ impl AutoplayManager {
         if rect.is_some() {
             self.hand.give_way().await;
         }
-        let approach =
-            rect.and_then(|rect| self.hand.plan_approach(&mut plan, rect, glance, shown_at));
+        let approach = rect.and_then(|rect| {
+            self.hand
+                .plan_approach(&mut plan, rect, glance, shown_at, &resp.action)
+        });
         if approach.as_ref().is_some_and(|a| a.looks_elsewhere()) {
             info!(
                 "autoplay: looking at the runner-up before {:?}",
@@ -348,7 +350,7 @@ impl AutoplayManager {
         if crate::autoplay::cdp_input::user_active() {
             return;
         }
-        if !self.hand.may_look_at(&spot, self.kamicha()) {
+        if !self.hand.may_look_at(&spot) {
             return;
         }
         let Some(seat) = self.state.cached_our_seat else {
@@ -372,13 +374,6 @@ impl AutoplayManager {
             return;
         };
         self.hand.look_at(spot, &tehai, rect);
-    }
-
-    /// The seat before ours, whose turn ends in our draw.
-    fn kamicha(&self) -> Option<u8> {
-        let seat = self.state.cached_our_seat?;
-        let players = self.state.num_players.max(1);
-        Some((seat + players - 1) % players)
     }
 
     /// Best-effort seat lookup. Uses the cached seat from `StartGame` first,

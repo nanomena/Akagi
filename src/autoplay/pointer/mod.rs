@@ -35,7 +35,7 @@ pub mod hand;
 pub mod lean;
 pub mod queue;
 
-pub use approach::{approach, runner_up, wait_to_see, Approach, LOOK_MS, LOOK_REACH};
+pub use approach::{approach, changed_mind, runner_up, wait_to_see, Approach, LOOK_MS, LOOK_REACH};
 pub use hand::Hand;
 
 use rand::Rng;

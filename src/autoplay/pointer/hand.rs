@@ -8,7 +8,7 @@
 //! hand, but for where the pointer is: the manager resets it at every hand's
 //! start and end, and the pointer stays where it was.
 
-use super::approach::{approach, wait_to_see, Approach, LOOK_MS, LOOK_REACH};
+use super::approach::{approach, changed_mind, wait_to_see, Approach, LOOK_MS, LOOK_REACH};
 use super::lean::{self, Lean, Spot};
 use super::queue::{self, Errand, Motion, Queue};
 use super::{along, distance, leave, Point};
@@ -29,12 +29,12 @@ pub struct Hand {
     /// next looks at it. `None` on the seat's own turn and outside a hand.
     lean: Option<Lean>,
     glance_at: Option<Instant>,
-    /// The seat whose turn it last was, by a draw or a call: when it is the
-    /// one before ours, our draw comes next.
-    last_turn: Option<u8>,
-    /// The pointer went to where the draw lands before the draw came: a
-    /// tsumogiri then leaves it there rather than taking it back to rest.
-    waiting_on_draw: bool,
+    /// When our draw came, the bot expected to throw it: a tsumogiri then
+    /// leaves the pointer where it pressed rather than taking it back to rest.
+    expected_tsumogiri: bool,
+    /// The spot the pointer rests on after a look between turns, while it
+    /// does: a decision that presses another moves as a changed mind.
+    looked_at: Option<Spot>,
     /// The way the pointer last moved, as a unit direction, and when it got
     /// there: a sharp turn from it waits for a stop (see [`turn_wait`]).
     last_move: Option<(Point, Instant)>,
@@ -62,8 +62,8 @@ impl Hand {
             at: None,
             lean: None,
             glance_at: None,
-            last_turn: None,
-            waiting_on_draw: false,
+            expected_tsumogiri: false,
+            looked_at: None,
             last_move: None,
             queue: Queue::default(),
             moving: None,
@@ -106,6 +106,7 @@ impl Hand {
             self.at = Some(at);
             // The user's hand moved it last; there is no way of ours to turn from.
             self.last_move = None;
+            self.looked_at = None;
         }
     }
 
@@ -124,15 +125,19 @@ impl Hand {
     /// open with a pause and a press: there is no thinking time to move in.
     /// `glance` is the runner-up to look at, as a normalised point; `shown_at`
     /// when the frame that opened the decision came, before which the pointer
-    /// cannot have seen what it answers (see [`wait_to_see`]).
+    /// cannot have seen what it answers (see [`wait_to_see`]). A decision
+    /// that presses another tile than the one the pointer rests on after its
+    /// looks between turns is a changed mind ([`changed_mind`]).
     pub fn plan_approach(
         &mut self,
         plan: &mut PlanResult,
         rect: CanvasRect,
         glance: Option<(f64, f64)>,
         shown_at: Option<Instant>,
+        action: &MjaiEvent,
     ) -> Option<Approach> {
         self.sync_with_user();
+        let looked_at = self.looked_at.take();
         let rest_ms = plan.look_ms.unwrap_or(LOOK_MS);
         let [Step::Sleep { duration_ms }, Step::Click { x_norm, y_norm }, ..] =
             plan.steps.as_mut_slice()
@@ -153,15 +158,23 @@ impl Hand {
                 y + humanize::on_tile_y(&mut rng),
             )
         });
-        let mut approach = approach(
-            *duration_ms,
-            from,
-            rect.pixel(*x_norm, *y_norm),
-            glance,
-            rest_ms,
-            rect.width / 16.0,
-            &mut rng,
-        );
+        let press = rect.pixel(*x_norm, *y_norm);
+        let mut approach = match (looked_at, pressed_spot(action)) {
+            (Some(old), Some(new)) if old != new => {
+                info!("autoplay: a changed mind: the pointer was on {old:?}, pressing {new:?}");
+                let think = *duration_ms + humanize::CHANGED_MIND.draw_ms(&mut rng);
+                changed_mind(think, from, press, rest_ms, rect.width / 16.0, &mut rng)
+            }
+            _ => approach(
+                *duration_ms,
+                from,
+                press,
+                glance,
+                rest_ms,
+                rect.width / 16.0,
+                &mut rng,
+            ),
+        };
         if let Some(shown_at) = shown_at {
             let seen_at =
                 shown_at + Duration::from_millis(u64::from(humanize::SEE.draw_ms(&mut rng)));
@@ -200,16 +213,11 @@ impl Hand {
         }
     }
 
-    /// A seat's turn began. Once it is `kamicha`, the seat before ours, a
-    /// lean on throwing what we draw may look where the draw will land —
-    /// after a reaction time, as a person sees their turn coming.
-    pub fn took_turn(&mut self, actor: u8, kamicha: Option<u8>) {
-        self.last_turn = Some(actor);
-        let draw_next = kamicha == Some(actor);
-        let leans_on_draw = self.lean.as_ref().and_then(|lean| lean.first()) == Some(Spot::Draw);
-        if let (true, true, Some(at)) = (draw_next, leans_on_draw, self.glance_at) {
-            self.glance_at = Some(at.min(after_a_reaction()));
-        }
+    /// Our draw came: whether the bot expected to throw it, read before the
+    /// looks stop for our turn.
+    pub fn drew(&mut self) {
+        self.expected_tsumogiri =
+            self.lean.as_ref().and_then(|lean| lean.first()) == Some(Spot::Draw);
     }
 
     /// Start looking at the next turn, a while after the pointer was last
@@ -238,16 +246,17 @@ impl Hand {
         spot
     }
 
-    /// Whether `spot` can be looked at now. Where the draw lands is empty
-    /// until the draw: a hand goes there only once its turn is next, when
-    /// the last turn was `kamicha`'s, not with the tile still in the wall.
-    pub fn may_look_at(&self, spot: &Spot, kamicha: Option<u8>) -> bool {
-        !(*spot == Spot::Draw && self.last_turn != kamicha)
+    /// Whether `spot` can be looked at between turns. Where the draw lands
+    /// never is: it is empty until our draw, and pressing what lands there
+    /// is the decision's own way, made once the tile has been seen. A hand
+    /// expecting to throw what it draws waits where it is.
+    pub fn may_look_at(&self, spot: &Spot) -> bool {
+        *spot != Spot::Draw
     }
 
     /// Look at `spot` of a hand at rest holding `tehai`, on the canvas at
     /// `rect`: the look waits its turn in the queue.
-    pub fn look_at(&mut self, spot: Spot, tehai: &[String], rect: CanvasRect) {
+    pub fn look_at(&mut self, mut spot: Spot, tehai: &[String], rect: CanvasRect) {
         self.sync_with_user();
         let pointer = self.at.map(|(x, y)| rect.norm(x, y));
         let leg = {
@@ -262,16 +271,17 @@ impl Hand {
             // Weighing two tiles is a look between neighbours: one far from
             // the likeliest is not looked at, the likeliest is.
             let first = self.lean.as_ref().and_then(|lean| lean.first());
-            if let Some(main) = first
-                .filter(|main| *main != spot)
-                .and_then(|main| point(&main, &mut rng))
-            {
-                if (at.0 - main.0).abs() > LOOK_REACH {
-                    at = main;
+            if let Some(likeliest) = first.filter(|main| *main != spot) {
+                if let Some(main) = point(&likeliest, &mut rng) {
+                    if (at.0 - main.0).abs() > LOOK_REACH {
+                        at = main;
+                        spot = likeliest;
+                    }
                 }
             }
             // A look at the tile the hand is already on is a look that stays.
             if crate::autoplay::majsoul::on_tile(at, pointer) {
+                self.looked_at = Some(spot);
                 return;
             }
             // Not the middle of the tile every time, and high on it, as a press.
@@ -297,8 +307,8 @@ impl Hand {
     /// client draws nothing under it, and look on to the next turn from
     /// there.
     ///
-    /// Not after a tsumogiri the pointer was already waiting for: a hand that
-    /// threw the tile it drew stays where it drew it. Nor after a call: the
+    /// Not after a tsumogiri the bot expected when the tile came: a hand that
+    /// threw the tile it drew, as it meant to, stays where it pressed it. Nor after a call: the
     /// seat's own discard comes next, and a hand goes from the button to the
     /// tile it throws, not up to wait and straight back down.
     pub fn rest_after(&mut self, rect: CanvasRect, plan: &PlanResult, action: &MjaiEvent) {
@@ -309,7 +319,7 @@ impl Hand {
                 ..
             }
         );
-        if std::mem::take(&mut self.waiting_on_draw) && threw_draw {
+        if std::mem::take(&mut self.expected_tsumogiri) && threw_draw {
             self.settle_glances();
             return;
         }
@@ -457,9 +467,13 @@ impl Hand {
             self.last_move = Some((way, now));
         }
         match arrived.motion.errand {
-            Errand::Rest { settle: true } => self.settle_glances(),
-            Errand::Rest { settle: false } => {}
-            Errand::Look(spot) => self.waiting_on_draw = spot == Spot::Draw,
+            Errand::Rest { settle } => {
+                self.looked_at = None;
+                if settle {
+                    self.settle_glances();
+                }
+            }
+            Errand::Look(spot) => self.looked_at = Some(spot),
         }
     }
 
@@ -472,6 +486,8 @@ impl Hand {
         let Some(moving) = self.moving.take() else {
             return;
         };
+        // Cut short, the pointer is on neither what it left nor what it went for.
+        self.looked_at = None;
         let (at, then) = moving.last;
         let velocity = match moving.before {
             Some((before, earlier)) => {
@@ -670,6 +686,25 @@ fn direction(from: Point, to: Point) -> Option<Point> {
     let (dx, dy) = (to.0 - from.0, to.1 - from.1);
     let length = (dx * dx + dy * dy).sqrt();
     (length >= 6.0).then(|| (dx / length, dy / length))
+}
+
+/// The spot of the hand a decision presses: for a discard, or a riichi's,
+/// the tile drawn when it throws that, else the tile. `None` for a button.
+fn pressed_spot(action: &MjaiEvent) -> Option<Spot> {
+    let (pai, tsumogiri) = match action {
+        MjaiEvent::Dahai { pai, tsumogiri, .. } => (pai, *tsumogiri),
+        MjaiEvent::Reach {
+            pai: Some(pai),
+            tsumogiri,
+            ..
+        } => (pai, *tsumogiri == Some(true)),
+        _ => return None,
+    };
+    Some(if tsumogiri {
+        Spot::Draw
+    } else {
+        Spot::Hand(pai.clone())
+    })
 }
 
 /// Whether the seat's own discard follows `action`: a call, after which the
