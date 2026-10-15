@@ -59,8 +59,8 @@ impl AutoplayManager {
                 self.hand.reset();
             }
             MjaiEvent::Tsumo { actor, pai } => {
-                self.hand.took_turn(*actor, self.kamicha());
                 if self.is_ours(*actor) {
+                    self.hand.drew();
                     self.state.last_self_tsumo = Some(pai.clone());
                     // The seat's own turn: no more looking ahead to it.
                     self.hand.stop_glances();
@@ -83,10 +83,6 @@ impl AutoplayManager {
             | MjaiEvent::Daiminkan { actor, .. }
             | MjaiEvent::Ankan { actor, .. }
             | MjaiEvent::Kakan { actor, .. } => {
-                // A call is a turn too: after the seat before ours calls, our draw is next.
-                if matches!(ev, MjaiEvent::Chi { .. } | MjaiEvent::Pon { .. }) {
-                    self.hand.took_turn(*actor, self.kamicha());
-                }
                 if self.is_ours(*actor) {
                     self.state.last_self_tsumo = None;
                 }
