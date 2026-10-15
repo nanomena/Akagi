@@ -50,6 +50,8 @@ impl AutoplayManager {
             self.acts.later(act, Instant::now(), PUT_OFF);
             return;
         }
+        // A rest or a look under way brakes where it is.
+        self.hand.give_way().await;
         match act {
             Act::Burst(presses) => self.press_through(presses, hover_ms, hold_ms).await,
             Act::AutoWinOn => self.switch_auto_win_on(hover_ms, hold_ms).await,
@@ -150,7 +152,7 @@ impl AutoplayManager {
                 "autoplay: switching the client's auto-win on did not take; it reads {glyph:?}"
             ),
         }
-        self.hand.rest(rect).await;
+        self.hand.rest(rect);
     }
 
     /// What the toggle whose glyph is at `at` (a normalised point) shows.

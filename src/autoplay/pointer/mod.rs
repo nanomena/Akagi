@@ -18,6 +18,8 @@
 //!   tiles the bot expects to throw next;
 //! - [`aim`] — where in its target a press lands: scattered in the target's
 //!   middle, never on the same few pixels;
+//! - [`queue`] — the moves that can wait and be cut short, the rest after a
+//!   press and the looks, queued by priority; a press brakes them;
 //! - [`hand`] — the pointer's state over a game and the moves that send it
 //!   to the page.
 //!
@@ -31,6 +33,7 @@ pub mod aim;
 pub mod approach;
 pub mod hand;
 pub mod lean;
+pub mod queue;
 
 pub use approach::{approach, runner_up, wait_to_see, Approach, LOOK_MS, LOOK_REACH};
 pub use hand::Hand;
