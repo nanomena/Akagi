@@ -17,6 +17,7 @@ import fs from 'node:fs'
 import { createServer } from 'node:net'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { Board } from './board.js'
 import { Core } from './core.js'
 import { Feed } from './feed.js'
 import { FrameSource } from './frames.js'
@@ -86,6 +87,8 @@ let options = { always_on_top: false }
 let stream = null
 /** What the table is doing, kept from the core's snapshots for the stream's `/feed`; nothing about the bot. */
 const feed = new Feed({ readResults: () => running().call('get_history'), log: message => console.warn(message) })
+/** What the pages beside the stream share; kept while the application runs, through the stream going off and on. */
+const board = new Board()
 /** @type {FrameSource | null} */
 let frames = null
 /** @type {NodeJS.Timeout | undefined} */
@@ -320,7 +323,7 @@ function withStream(/** @type {Options} */ saved) {
  */
 async function startStream() {
   const token = options.stream_token || newToken()
-  const server = stream ?? new StreamServer({ token, onWatchers: watchStream, feed, pages: STREAM_PAGES })
+  const server = stream ?? new StreamServer({ token, onWatchers: watchStream, feed, board, pages: STREAM_PAGES })
   const port = await server.listen(options.stream_port ?? 0)
   stream = server
   if (!options.stream_output || port !== options.stream_port || token !== options.stream_token) {
