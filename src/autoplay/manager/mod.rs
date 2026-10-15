@@ -306,8 +306,10 @@ impl AutoplayManager {
         if rect.is_some() {
             self.hand.give_way().await;
         }
-        let approach =
-            rect.and_then(|rect| self.hand.plan_approach(&mut plan, rect, glance, shown_at));
+        let approach = rect.and_then(|rect| {
+            self.hand
+                .plan_approach(&mut plan, rect, glance, shown_at, &resp.action)
+        });
         if approach.as_ref().is_some_and(|a| a.looks_elsewhere()) {
             info!(
                 "autoplay: looking at the runner-up before {:?}",
