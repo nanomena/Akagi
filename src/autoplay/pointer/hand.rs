@@ -9,10 +9,10 @@
 
 use super::approach::{approach, Approach, LOOK_MS, LOOK_REACH};
 use super::lean::{self, Lean, Spot};
-use super::{leave, rest_point, Point};
+use super::{leave, Point};
 use crate::autoplay::context::{AutoplayContext, CanvasRect};
+use crate::autoplay::humanize;
 use crate::autoplay::platform::{PlanResult, Step};
-use rand::Rng;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::warn;
@@ -96,7 +96,7 @@ impl Hand {
         // A pointer that has not been anywhere yet starts from where it
         // would have been resting.
         let from = *self.at.get_or_insert_with(|| {
-            let (x, y) = rest_point(&mut rng);
+            let (x, y) = humanize::rest_spot(&mut rng);
             rect.pixel(x, y)
         });
         let approach = approach(
@@ -150,7 +150,7 @@ impl Hand {
     /// Start looking at the next turn, a while after the pointer was last
     /// put to rest — if the pointer is to lean at all.
     pub fn settle_glances(&mut self) {
-        let settle = rand::rng().random_range(lean::SETTLE_MS);
+        let settle = humanize::SETTLE.draw_ms(&mut rand::rng());
         self.glance_at = Some(Instant::now() + Duration::from_millis(u64::from(settle)));
     }
 
@@ -210,8 +210,8 @@ impl Hand {
             }
             // Not the middle of the tile every time.
             let at = (
-                at.0 + rng.random_range(-0.2..0.2),
-                at.1 + rng.random_range(-0.3..0.3),
+                at.0 + humanize::LOOK_OFF_X.draw(&mut rng),
+                at.1 + humanize::LOOK_OFF_Y.draw(&mut rng),
             );
             let to = rect.pixel(at.0, at.1);
             let from = self.at.unwrap_or(to);
@@ -243,7 +243,7 @@ impl Hand {
         let from = self.at.unwrap_or_else(|| rect.pixel(pressed.0, pressed.1));
         let leg = {
             let mut rng = rand::rng();
-            let (x, y) = rest_point(&mut rng);
+            let (x, y) = humanize::rest_spot(&mut rng);
             leave(from, rect.pixel(x, y), rect.width / 16.0, &mut rng)
         };
         tokio::time::sleep(Duration::from_millis(u64::from(leg.dwell_ms))).await;
@@ -273,6 +273,6 @@ impl Hand {
 
 /// A reaction time from now: how soon a changed plan moves the pointer.
 fn after_a_reaction() -> Instant {
-    let reaction = rand::rng().random_range(lean::REACTION_MS);
+    let reaction = humanize::REACTION.draw_ms(&mut rand::rng());
     Instant::now() + Duration::from_millis(u64::from(reaction))
 }

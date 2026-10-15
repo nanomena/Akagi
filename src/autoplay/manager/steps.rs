@@ -29,10 +29,19 @@ impl AutoplayManager {
         // `Reach.pai`), so the reach action alone identifies it.
         let declares_reach = matches!(action, MjaiEvent::Reach { .. });
         let mut window_checked = false;
+        let mut clicked = false;
         for step in &plan.steps {
             match step {
                 Step::Sleep { duration_ms } => {
-                    tokio::time::sleep(Duration::from_millis(*duration_ms as u64)).await;
+                    // The pause before the first press is the think time, already
+                    // drawn; one between presses is a hand's, drawn here.
+                    let ms = if clicked {
+                        crate::autoplay::humanize::BETWEEN_PRESSES
+                            .draw_ms(*duration_ms, &mut rand::rng())
+                    } else {
+                        *duration_ms
+                    };
+                    tokio::time::sleep(Duration::from_millis(u64::from(ms))).await;
                 }
                 Step::AwaitReady { timeout_ms } => {
                     let page_guard = self.ctx.page.read().await;
@@ -182,6 +191,7 @@ impl AutoplayManager {
                     }
                     drop(page_guard);
                     self.hand.pressed((px, py));
+                    clicked = true;
                 }
                 // Riichi City SendFrames never reach this loop — they are
                 // sent by their own task (`riichi_city::send`).

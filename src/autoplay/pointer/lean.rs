@@ -20,10 +20,9 @@
 //! as a hand on a mouse mostly does. A changed mind is acted on after a
 //! reaction time. Nothing moves the moment an opponent discards.
 
+use crate::autoplay::humanize;
 use rand::Rng;
-use rand_distr::{Distribution, LogNormal};
 use serde::Deserialize;
-use std::ops::Range;
 use std::sync::OnceLock;
 use tokio::sync::broadcast;
 
@@ -82,10 +81,6 @@ impl Lean {
 
 /// How many lines a lean must rest on before the pointer follows it.
 pub const MIN_LINES: f64 = 4.0;
-/// After the seat's own move, how long before its eye turns to the next turn.
-pub const SETTLE_MS: Range<u32> = 1500..4000;
-/// From a changed mind to the pointer moving.
-pub const REACTION_MS: Range<u32> = 400..1200;
 
 static LEANS: OnceLock<broadcast::Sender<Lean>> = OnceLock::new();
 
@@ -117,7 +112,7 @@ pub fn glance<R: Rng + ?Sized>(lean: &Lean, rng: &mut R) -> Option<Spot> {
         .filter_map(|option| option.spot().map(|spot| (spot, option.share.max(0.0))))
         .collect();
     let top = spots.first()?.1;
-    if rng.random_bool((0.25 + 0.35 * top).clamp(0.0, 0.8)) {
+    if humanize::chance((0.25 + 0.35 * top).clamp(0.0, 0.8), rng) {
         return None;
     }
     let weights: Vec<f64> = spots.iter().map(|(_, share)| share.powf(1.5)).collect();
@@ -125,7 +120,7 @@ pub fn glance<R: Rng + ?Sized>(lean: &Lean, rng: &mut R) -> Option<Spot> {
     if total <= 0.0 {
         return Some(spots[0].0.clone());
     }
-    let mut at = rng.random_range(0.0..total);
+    let mut at = humanize::fraction(rng) * total;
     for ((spot, _), weight) in spots.iter().zip(&weights) {
         if at < *weight {
             return Some(spot.clone());
@@ -142,8 +137,11 @@ pub fn wait_ms<R: Rng + ?Sized>(lean: Option<&Lean>, rng: &mut R) -> u32 {
         .and_then(|lean| lean.options.first())
         .map_or(0.5, |option| option.share.clamp(0.0, 1.0));
     let median: f64 = 1200.0 + 1000.0 * top;
-    let wait = LogNormal::new(median.ln(), 0.45).map_or(median, |d| d.sample(rng));
-    wait.clamp(600.0, 6000.0) as u32
+    humanize::Tail {
+        median,
+        ..humanize::GLANCE
+    }
+    .draw_ms(rng)
 }
 
 #[cfg(test)]

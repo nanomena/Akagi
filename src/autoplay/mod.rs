@@ -68,6 +68,7 @@ pub mod canvas;
 pub mod cdp_input;
 pub mod context;
 pub mod delay;
+pub mod humanize;
 pub mod inject;
 pub mod majsoul;
 pub mod manager;

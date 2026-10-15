@@ -6,10 +6,12 @@
 //! arrives early and rests on its target — and a hand torn between two
 //! discards may rest on the runner-up before its choice.
 
-use super::{bend, distance, travel_ms, Leg, Point};
+use super::{distance, travel_ms, Leg, Point};
 use crate::autoplay::delay::probs::Candidate;
+use crate::autoplay::humanize::{
+    self, LOOK_FIRST, LOOK_REST, ONLY_SETTLE, SETTLE_CHANCE, SETTLE_REST,
+};
 use rand::Rng;
-use rand_distr::{Distribution, LogNormal};
 
 /// How long the pointer rests on a tile it looks at, unless the delay script
 /// says otherwise (`look_ms` in its answer). A settle on the press before it
@@ -21,51 +23,6 @@ pub const LOOK_MS: u32 = 800;
 /// further and the look is a sweep across the rack, and nobody weighs two
 /// tiles by waving between the ends of their hand.
 pub const LOOK_REACH: f64 = 2.7;
-
-/// How often a press with no runner-up to look at is settled on before it is
-/// made. The rest of the time the hand presses as it arrives: a decided hand
-/// does that too.
-const SETTLE_CHANCE: f64 = 0.7;
-
-/// With a runner-up within reach, the shapes of the approach: how often the
-/// hand only settles on its choice (A), and how often it rests on the
-/// runner-up first (B, A). Otherwise it reaches for its choice, doubts it,
-/// goes over to the runner-up and comes back (A, B, A).
-const ONLY_SETTLE: f64 = 0.3;
-const LOOK_FIRST: f64 = 0.42;
-
-/// How long a hand rests somewhere, as a share of the rest it was given:
-/// log-normal around `median`, so mostly near it and now and then a good deal
-/// longer, never one fixed rhythm; held within `least..=most`.
-struct Rest {
-    median: f64,
-    spread: f64,
-    least: f64,
-    most: f64,
-}
-
-/// On a tile looked at.
-const LOOK_REST: Rest = Rest {
-    median: 1.0,
-    spread: 0.4,
-    least: 0.5,
-    most: 2.5,
-};
-/// On the tile pressed, before pressing it.
-const SETTLE_REST: Rest = Rest {
-    median: 0.55,
-    spread: 0.5,
-    least: 0.2,
-    most: 2.0,
-};
-
-impl Rest {
-    fn share<R: Rng + ?Sized>(&self, rng: &mut R) -> f64 {
-        let drawn =
-            LogNormal::new(self.median.ln(), self.spread).map_or(self.median, |d| d.sample(rng));
-        drawn.clamp(self.least, self.most)
-    }
-}
 
 /// The pointer's way to a press: wait `pause_ms`, then walk `legs`. The last
 /// leg ends on the press point; one that dwells there settles on the target
@@ -119,7 +76,7 @@ pub fn approach<R: Rng + ?Sized>(
     // next when the think cannot hold it.
     let shapes: Vec<Vec<Point>> = match near {
         Some(at) => {
-            let roll: f64 = rng.random();
+            let roll = humanize::fraction(rng);
             if roll < ONLY_SETTLE {
                 vec![vec![]]
             } else if roll < ONLY_SETTLE + LOOK_FIRST {
@@ -128,7 +85,7 @@ pub fn approach<R: Rng + ?Sized>(
                 vec![vec![press, at], vec![at], vec![]]
             }
         }
-        None if rng.random_bool(SETTLE_CHANCE) => vec![vec![]],
+        None if humanize::chance(SETTLE_CHANCE, rng) => vec![vec![]],
         None => Vec::new(),
     };
     for stops in &shapes {
@@ -136,14 +93,16 @@ pub fn approach<R: Rng + ?Sized>(
             return found;
         }
     }
-    let travel = travel_ms(distance(from, press), unit).min(think_ms);
+    let travel = humanize::TRAVEL
+        .draw_ms(travel_ms(distance(from, press), unit), rng)
+        .min(think_ms);
     Approach {
         pause_ms: think_ms - travel,
         legs: vec![Leg {
             to: press,
             travel_ms: travel,
             dwell_ms: 0,
-            bend: bend(rng),
+            bend: humanize::BEND.draw(rng),
         }],
     }
 }
@@ -165,16 +124,16 @@ fn with_stops<R: Rng + ?Sized>(
     for &stop in stops.iter().chain(std::iter::once(&press)) {
         legs.push(Leg {
             to: stop,
-            travel_ms: travel_ms(distance(at, stop), unit),
+            travel_ms: humanize::TRAVEL.draw_ms(travel_ms(distance(at, stop), unit), rng),
             dwell_ms: 0,
-            bend: bend(rng),
+            bend: humanize::BEND.draw(rng),
         });
         at = stop;
     }
     let travel: u32 = legs.iter().map(|l| l.travel_ms).sum();
     let spare = think_ms.checked_sub(travel)?;
     let rest = f64::from(rest_ms);
-    let least = rest * (LOOK_REST.least * stops.len() as f64 + SETTLE_REST.least);
+    let least = rest * (LOOK_REST.low * stops.len() as f64 + SETTLE_REST.low);
     if f64::from(spare) < least {
         return None;
     }
@@ -186,7 +145,7 @@ fn with_stops<R: Rng + ?Sized>(
         } else {
             &SETTLE_REST
         };
-        leg.dwell_ms = (rest * kind.share(rng)) as u32;
+        leg.dwell_ms = (rest * kind.draw(rng)) as u32;
     }
     let wished: u32 = legs.iter().map(|l| l.dwell_ms).sum();
     if wished > spare {

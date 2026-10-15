@@ -158,6 +158,23 @@ impl AutoplayManager {
                 return true;
             }
             let again = retry_slice(&clicks, attempt);
+            // Each press made again lands at a fresh point of its target.
+            let first = clicks.len() - again.len();
+            let again: Vec<(f64, f64)> = if plan.aims.len() == clicks.len() {
+                let mut rng = rand::rng();
+                plan.aims[first..]
+                    .iter()
+                    .map(|&middle| {
+                        crate::autoplay::pointer::aim::again(
+                            middle,
+                            crate::autoplay::majsoul::reach_of(middle),
+                            &mut rng,
+                        )
+                    })
+                    .collect()
+            } else {
+                again.to_vec()
+            };
             // The coordinates are in the message on purpose: when a button
             // visibly reacts and the action still does not happen, this
             // line is what says which slot was aimed at.
