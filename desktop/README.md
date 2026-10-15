@@ -40,6 +40,85 @@ transparent window of its own over the game view (`src/trail.*`), which takes
 no input: clicks pass through it to the game. Nothing is added to the game's
 page.
 
+## Streaming the game
+
+With `stream_output` on, the shell offers the game view to a streaming program
+on the same computer — the game alone: not the dock, not the pointer's trail,
+not the system cursor (`src/stream.js`):
+
+```text
+http://127.0.0.1:<port>/<token>/              a page that shows the stream filling its window, for a browser source
+http://127.0.0.1:<port>/<token>/stream.mjpg   the frames themselves, as Motion JPEG
+```
+
+The token is a random secret: without it every address is a 404, and a request
+under any host name but `127.0.0.1` or `localhost` is refused. The port and the
+token are kept in the configuration, so the address stays the same from run to
+run; the settings tab shows it and copies it.
+
+Frames are made only while something watches (`src/frames.js`): screenshots of
+the game view, up to 30 a second, of exactly what it shows — its own size in
+screen pixels. Nothing about the game's page is changed to take them: not its
+scale, not its size, so the window looks the same and every position autoplay
+clicks at stays where it is. A stream wants 1920 × 1080; a game view with fewer
+pixels than that is scaled up by the page that shows it. (Telling the page it
+is on a denser screen would draw more pixels, but it changes the page while it
+is played: its device pixel ratio, and after a move to a screen of another
+scale even its layout.)
+
+In OBS, add a **Browser** source with the address, 1920 × 1080. The page picks
+the stream up again by itself when the application restarts. A Media source
+can open `stream.mjpg` too, but Motion JPEG carries no timing, and ffmpeg
+plays it at 25 frames a second whatever comes in.
+
+### Pages of your own beside the game
+
+For overlays and control pages around the game, the same server says what the
+table is doing and serves a folder of your own pages (`src/feed.js`,
+`src/pages.js`):
+
+```text
+http://127.0.0.1:<port>/<token>/feed        server-sent events: `state` (the table, on every change) and `results` (the games on record)
+http://127.0.0.1:<port>/<token>/feed.json   the same two, once: {"state": …, "results": […]}
+http://127.0.0.1:<port>/<token>/board       server-sent events: `board` (every value, at once) and `set` ({name, value}, each value put)
+http://127.0.0.1:<port>/<token>/board.json  the board, once
+PUT  …/<token>/board/<name>                 put a JSON value under a name, from a page of this origin
+http://127.0.0.1:<port>/<token>/pages/…     the files in <data>/stream-pages/, a folder's index.html for the folder
+```
+
+The feed is what anyone watching the table could see, and nothing about the
+bot: `state` has the names, our seat, the round (wind, hand, honba, sticks,
+dealer), each seat's score and riichi, the dora indicators, how each hand of
+this game ended with the hands shown when it did, and the player's own ranks
+(`account`: the four- and three-player `{id, score}` as Mahjong Soul last said
+them, at login, a game's start or after a game, and `at`, when) and when this
+run of the app began (`started_at`); `results` has
+the games on record — scores, placements, rank points, our rank as the game
+began (`our_level`), per-game counts and yaku — without the path of their logs
+or the ids that lead to a replay, and never who the player is. No decision, no
+candidate, nothing a bot said of itself, and not whether autoplay is on. Every
+field is named in `src/feed.js`; one the core adds later stays out until it is
+named there. `state.version` goes up when a field changes meaning or goes away.
+
+The pages folder is yours: put a page there and add it to the streaming
+program as a browser source (an overlay) or as a custom browser dock (a
+control page). Its pages may load their own files and open a WebSocket to a
+program on this computer (`ws://127.0.0.1:*`, OBS's remote control), and
+nothing else. Names with `..` or a leading dot are refused; a link inside the
+folder, such as a junction to a music library, is followed. Media files answer
+range requests, so audio and video can seek. A page under `pages/` finds the
+feed at the top of its own address: `/<token>/feed`.
+
+The board (`src/board.js`) is how those pages talk to each other: a control
+page says what an overlay should show, a music page says what it is playing.
+They share an origin, but a streaming program may run them in browsers that
+share no storage (OBS keeps its docks apart from its sources), so they meet
+here. A name is lower-case letters, digits and dashes; a value is JSON, 64 KB
+at most, 32 names at most. The board is kept in memory while the application
+runs: a page that owns a value puts it again when it connects. Only a page of
+this origin may write (a browser names the page a write comes from); the
+secret in the address keeps everything else out.
+
 ## Running it from a checkout
 
 ```sh
@@ -70,6 +149,7 @@ executables:
 <data>/mjai_bot/      installed bots
 <data>/logs/          one folder per run
 <data>/history/       finished games
+<data>/replays/       replays opened in the game, as tenhou.net/6 logs and NAGA lines
 <data>/browser/       the Chromium profile, the game's session included
 <data>/window.json    where the window was left
 ```
@@ -78,7 +158,7 @@ executables:
 
 ```sh
 npm run check   # type-check the JavaScript (JSDoc types, no build step)
-npm test        # the window's geometry, the content policy, and the shell's end of the protocol against a stand-in core
+npm test        # the window's geometry, the content policy, the stream's server, frames, feed, board and pages, and the shell's end of the protocol against a stand-in core
 npm run smoke   # the shell for real — Electron, the built interface, a stand-in core — looked at over its DevTools port
 ```
 

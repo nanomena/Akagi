@@ -500,6 +500,7 @@ impl TenhouBridge {
                     game_id: None,
                     match_mode: None,
                     match_info: Some(match_info),
+                    our_level: None,
                 }),
             });
         }

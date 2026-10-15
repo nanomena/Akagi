@@ -14,7 +14,7 @@ pub mod supervisor;
 
 use crate::autoplay::AutoplayContext;
 use crate::config::Platform;
-use crate::event_bus::{MjaiBus, NotifyBus};
+use crate::event_bus::{AccountBus, MjaiBus, NotifyBus};
 use crate::logger::Session;
 use std::future::Future;
 use std::pin::Pin;
@@ -49,6 +49,8 @@ pub struct CaptureCtx {
     pub platform: Platform,
     pub mjai_bus: MjaiBus,
     pub notify_bus: NotifyBus,
+    /// Where the player's own ranks go when the platform says them.
+    pub account_bus: AccountBus,
     /// Shared with the autoplay manager. Capture writes the game page's
     /// `Page` handle here when it sees the game's WebSocket open; autoplay
     /// reads it to dispatch `Input.dispatchMouseEvent`.
