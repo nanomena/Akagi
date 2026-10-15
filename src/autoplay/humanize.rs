@@ -221,13 +221,15 @@ pub const RESULT_START: Hazard = Hazard {
 };
 /// Between one burst of presses on the result and the next.
 pub const RESULT_PAUSE: Hazard = Hazard {
-    floor: 300.0,
-    mean: 1500.0,
-    most: 20_000.0,
+    floor: 100.0,
+    mean: 500.0,
+    most: 7_000.0,
 };
-/// The chance a burst has a third press, after its two.
-pub const BURST_MORE: f64 = 0.5;
-/// Between the presses of a burst.
+/// The fewest and the most presses a burst has.
+pub const BURST_LEAST: u32 = 2;
+pub const BURST_MOST: u32 = 7;
+/// Between the presses of a burst, from one's release to the next one's
+/// press: a hand clicking as fast as it does.
 pub const BURST_GAP: Tail = Tail {
     median: 150.0,
     spread: 0.35,
@@ -252,9 +254,10 @@ pub const AUTO_WIN_ON: Hazard = Hazard {
     most: 600_000.0,
 };
 
-/// How many presses a burst has: two, or three as likely as [`BURST_MORE`].
+/// How many presses a burst has: any number from [`BURST_LEAST`] to
+/// [`BURST_MOST`], each as likely.
 pub fn burst_len<R: Rng + ?Sized>(rng: &mut R) -> u32 {
-    2 + u32::from(chance(BURST_MORE, rng))
+    BURST_LEAST + one_of((BURST_MOST - BURST_LEAST + 1) as usize, rng) as u32
 }
 
 // ---- Shapes of an approach ----
@@ -470,13 +473,15 @@ mod tests {
         assert!((early - (-1.0f64).exp()).abs() < 0.03, "{early}");
     }
 
-    /// A burst is two presses or three, three as likely as [`BURST_MORE`].
+    /// A burst is two presses to seven, each count as likely.
     #[test]
-    fn a_burst_is_two_presses_or_three() {
-        let all = draws(20_000, burst_len);
-        assert!(all.iter().all(|&n| (2..=3).contains(&n)));
-        let three = all.iter().filter(|&&n| n == 3).count() as f64 / all.len() as f64;
-        assert!((three - BURST_MORE).abs() < 0.02, "{three}");
+    fn a_burst_is_two_presses_to_seven_each_as_likely() {
+        let all = draws(30_000, burst_len);
+        assert!(all.iter().all(|&n| (2..=7).contains(&n)));
+        for n in 2..=7 {
+            let share = all.iter().filter(|&&m| m == n).count() as f64 / all.len() as f64;
+            assert!((share - 1.0 / 6.0).abs() < 0.015, "{n}: {share}");
+        }
     }
 
     /// A place's spread stays within its bound and is mostly small.
