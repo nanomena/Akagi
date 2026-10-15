@@ -1,0 +1,396 @@
+//! Autoplay manager: subscribes to bot decisions and mjai events, and turns
+//! each decision into presses in the client (or a frame, for Riichi City).
+//!
+//! Lifecycle: spawned by `crate::lib::run` when `cfg.autoplay.enabled =
+//! true`; one long-lived `tokio::select!` loop over the bot's answers, the
+//! mjai stream, the bot's leans and the pointer's own looks between turns.
+//!
+//! A decision goes through four stages, each with its own module:
+//!
+//! - [`decision`] reads the table and the bot's answer into a `Decision`;
+//! - the platform plans it ([`PlatformAutoplay::plan`]), and the pointer
+//!   plans its way to the first press ([`crate::autoplay::pointer::Hand`]);
+//! - [`steps`] carries the plan out;
+//! - [`press`] proves that the client took the presses, retries the ones it
+//!   did not, and recovers a client that has stopped listening.
+//!
+//! [`events`] keeps the per-game bookkeeping the mjai stream drives.
+//!
+//! Failure modes are silent-by-design: if the page handle is missing
+//! (chromium backend not running) or the canvas-rect query fails, the
+//! manager logs a warning and skips the click. The bot pipeline is
+//! untouched; the user can still play the round manually.
+
+mod decision;
+mod events;
+mod press;
+mod steps;
+
+use crate::autoplay::canvas::Canvas;
+use crate::autoplay::context::AutoplayContext;
+use crate::autoplay::majsoul::MajsoulAutoplay;
+use crate::autoplay::platform::{PlatformAutoplay, Step};
+use crate::autoplay::pointer::{self, Hand};
+use crate::autoplay::riichi_city::RiichiCityAutoplay;
+use crate::autoplay::tenhou::TenhouAutoplay;
+use crate::bot::BotResponse;
+use crate::config::{AppConfig, Platform};
+use crate::event_bus::{BotResponseBus, MjaiBus, NotifyBus};
+use crate::game_state::tracker::GameTracker;
+use crate::schema::MjaiEvent;
+use std::sync::Arc;
+use std::time::Instant;
+use tokio::sync::{broadcast::error::RecvError, Mutex, RwLock};
+use tracing::{debug, info, warn};
+
+pub struct AutoplayManager {
+    cfg: Arc<RwLock<AppConfig>>,
+    ctx: Arc<AutoplayContext>,
+    tracker: Arc<Mutex<GameTracker>>,
+    mjai_bus: MjaiBus,
+    /// For telling the user about a decision that came out wrong — see the
+    /// riichi check and the dead-click reload in [`press`].
+    notify: NotifyBus,
+    /// One implementation per supported platform, selected per decision from
+    /// the live config so a platform switch takes effect without a restart.
+    /// Majsoul synthesises clicks; Tenhou encodes a client frame.
+    majsoul: MajsoulAutoplay,
+    tenhou: TenhouAutoplay,
+    /// Riichi City: no page to click — plans a protocol frame the proxy
+    /// transmits (see `autoplay::inject`).
+    riichi: RiichiCityAutoplay,
+    state: ManagerState,
+    /// The pointer over the current hand.
+    hand: Hand,
+    /// When the canvas rect was last measured.
+    canvas: Canvas,
+    /// User Lua delay policy (hot-reloaded from disk; see
+    /// `autoplay::delay::script`).
+    delay_script: crate::autoplay::delay::ScriptHost,
+    /// The built-in bot following the game, for a second opinion on how
+    /// obvious each decision is (see `autoplay::advisor`).
+    advisor: crate::autoplay::advisor::Advisor,
+    /// Directory holding the loaded config file; the script lives at
+    /// `<config_dir>/delay.lua`.
+    config_dir: std::path::PathBuf,
+}
+
+/// What the manager keeps over a game; [`events`] says what each hand keeps.
+#[derive(Default)]
+struct ManagerState {
+    last_kawa_tile: Option<String>,
+    last_self_tsumo: Option<String>,
+    self_riichi_accepted: bool,
+    /// Decisions in a row where the client accepted nothing we pressed.
+    /// Reset by any input the client does accept.
+    dead_clicks: u32,
+    /// Cached seat index for our player. Captured directly from
+    /// `StartGame { id }` and kept across kyoku resets. Avoids try_lock
+    /// failures in the synchronous mjai event handler causing missed
+    /// tsumo/dahai updates, and is available from the very first event
+    /// rather than waiting for the first successful `handle_bot_response`.
+    cached_our_seat: Option<u8>,
+    /// Tenhou: the decision window we last acted on, so the extra bot
+    /// responses that arrive for the same one are dropped before they are
+    /// planned rather than after.
+    acted_window: Option<Instant>,
+    /// Players at the table, from `start_game`.
+    num_players: u8,
+}
+
+impl AutoplayManager {
+    pub fn new(
+        cfg: Arc<RwLock<AppConfig>>,
+        ctx: Arc<AutoplayContext>,
+        tracker: Arc<Mutex<GameTracker>>,
+        mjai_bus: MjaiBus,
+        notify: NotifyBus,
+        config_dir: std::path::PathBuf,
+    ) -> Self {
+        Self {
+            hand: Hand::new(ctx.clone()),
+            cfg,
+            ctx,
+            tracker,
+            mjai_bus,
+            notify,
+            majsoul: MajsoulAutoplay::new(),
+            tenhou: TenhouAutoplay::new(),
+            riichi: RiichiCityAutoplay::new(),
+            state: ManagerState::default(),
+            canvas: Canvas::default(),
+            delay_script: crate::autoplay::delay::ScriptHost::default(),
+            advisor: crate::autoplay::advisor::Advisor::default(),
+            config_dir,
+        }
+    }
+
+    /// Run forever. Returns `Err` only on bus closure (process exit).
+    pub async fn run(mut self, response_bus: BotResponseBus) -> anyhow::Result<()> {
+        let mut bot_rx = response_bus.subscribe();
+        let mut mjai_rx = self.mjai_bus.subscribe();
+        let mut lean_rx = pointer::lean::subscribe();
+        info!("autoplay manager started");
+        // The round-advance watcher runs on its own subscription: at hand
+        // end the plan loop is busy draining stale plans and the OK press
+        // must not inherit that delay.
+        let advance_cfg = self.cfg.clone();
+        let advance_inject = self.ctx.inject.clone();
+        let advance_bus = self.mjai_bus.clone();
+        tokio::spawn(async move {
+            crate::autoplay::riichi_city::round_advance::round_advance_watcher(
+                advance_cfg,
+                advance_inject,
+                advance_bus,
+            )
+            .await;
+        });
+
+        loop {
+            // The pointer's own pace between turns, apart from any event.
+            let glance_at = self.hand.glance_due();
+            tokio::select! {
+                _ = tokio::time::sleep_until(glance_at.unwrap_or_else(Instant::now).into()), if glance_at.is_some() => {
+                    self.glance().await;
+                }
+                msg = lean_rx.recv() => match msg {
+                    Ok(lean) => self.hand.take_lean(lean),
+                    Err(RecvError::Lagged(_)) => {}
+                    Err(RecvError::Closed) => return Ok(()),
+                },
+                msg = bot_rx.recv() => match msg {
+                    Ok(resp) => self.handle_bot_response(resp).await,
+                    Err(RecvError::Lagged(n)) => warn!("autoplay: bot bus lagged {n}"),
+                    Err(RecvError::Closed) => {
+                        info!("autoplay: bot bus closed; exiting");
+                        return Ok(());
+                    }
+                },
+                msg = mjai_rx.recv() => match msg {
+                    Ok(ev) => {
+                        self.handle_mjai_event(&ev);
+                    }
+                    Err(RecvError::Lagged(n)) => warn!("autoplay: mjai bus lagged {n}"),
+                    Err(RecvError::Closed) => {
+                        info!("autoplay: mjai bus closed; exiting");
+                        return Ok(());
+                    }
+                },
+            }
+        }
+    }
+
+    /// One decision, from the bot's answer to the pointer's rest after it.
+    async fn handle_bot_response(&mut self, resp: BotResponse) {
+        let Some(decision) = self.read_decision(&resp).await else {
+            return;
+        };
+        // Every reply that gets here is one the engine asked for: the bot
+        // manager only reacts where our seat can act (`bot::manager`), so a
+        // `None` means a decline and not "nothing to say". Belt and braces
+        // all the same — one window is answered once. A second reply for it
+        // is at best a wasted press and at worst one aimed at whatever
+        // replaced it.
+        if let Some(w) = decision.planned_window {
+            if self.state.acted_window == Some(w.opened_at) {
+                debug!("autoplay: already acted on this window; ignoring extra bot reply");
+                return;
+            }
+        }
+
+        // Throwing the tile just drawn: see `Hand::rest_after`.
+        let threw_draw = matches!(
+            resp.action,
+            MjaiEvent::Dahai {
+                tsumogiri: true,
+                ..
+            }
+        );
+        let (mut plan, glance) = {
+            let action_ctx =
+                decision.context(&resp.action, &self.state, self.delay_script.script());
+            let platform: &dyn PlatformAutoplay = match decision.platform {
+                Platform::Tenhou => &self.tenhou,
+                Platform::RiichiCity => &self.riichi,
+                _ => &self.majsoul,
+            };
+            let plan = platform.plan(&action_ctx);
+            // The runner-up's place in the hand, when the delay model asked
+            // for a look at it and the bot's two likeliest candidates are
+            // discards of different tiles (see `autoplay::pointer`).
+            let glance = match (&resp.action, plan.hesitate) {
+                (MjaiEvent::Dahai { pai, .. }, true) => {
+                    let candidates = crate::autoplay::delay::probs::candidates(resp.meta.as_ref());
+                    pointer::runner_up(&candidates, pai).and_then(|other| {
+                        crate::autoplay::majsoul::discard_point(other, &action_ctx)
+                    })
+                }
+                _ => None,
+            };
+            (plan, glance)
+        };
+        if plan.steps.is_empty() {
+            return;
+        }
+        debug!(
+            "autoplay: action={:?} steps={}",
+            resp.action,
+            plan.steps.len(),
+        );
+
+        // Only a click needs to know where the canvas is. A plan built of
+        // `Send` steps talks to the page's socket and would otherwise be
+        // held hostage by a rect query it never uses.
+        let needs_canvas = plan.steps.iter().any(|s| matches!(s, Step::Click { .. }));
+        let rect = if needs_canvas {
+            // Cache + TTL. If we can't resolve one, drop the click — the page
+            // handle isn't ready yet (e.g. user still on the lobby), or the
+            // chromium backend isn't running at all.
+            match self.canvas.resolve(&self.ctx).await {
+                Some(r) => Some(r),
+                None => {
+                    warn!(
+                        "autoplay: no canvas rect — skipping click for {:?}",
+                        resp.action
+                    );
+                    return;
+                }
+            }
+        } else {
+            None
+        };
+
+        // Ticket taken before the first press: the check afterwards asks
+        // whether the client sent *another* input command, so an input from
+        // the previous decision cannot be mistaken for this one landing.
+        let ticket = self.ctx.input_watch.ticket();
+
+        if let Some(w) = decision.planned_window {
+            self.state.acted_window = Some(w.opened_at);
+        }
+
+        if decision.platform == Platform::RiichiCity {
+            crate::autoplay::riichi_city::send::spawn(
+                &plan,
+                &decision.cfg,
+                &resp.action,
+                self.ctx.inject.clone(),
+            );
+            return;
+        }
+
+        // The pointer's way to the first press is made inside the thinking
+        // time, not after it: the pause that leads the plan gives up
+        // exactly what the way takes, so the press lands when it would
+        // have (see `autoplay::pointer`).
+        let approach = rect.and_then(|rect| self.hand.plan_approach(&mut plan, rect, glance));
+        if approach.as_ref().is_some_and(|a| a.looks_elsewhere()) {
+            info!(
+                "autoplay: looking at the runner-up before {:?}",
+                resp.action
+            );
+        }
+
+        if !self
+            .execute(&plan, approach, rect, &decision, &resp.action)
+            .await
+        {
+            return;
+        }
+        self.prove(&plan, rect, ticket, &decision, &resp.action, threw_draw)
+            .await;
+    }
+
+    /// One look between turns: at one of the tiles the bot expects to throw,
+    /// or nowhere new (see `autoplay::pointer::lean`). Majsoul only, the
+    /// seat's hand at rest, autoplay on and not in riichi; otherwise the
+    /// looks stop.
+    async fn glance(&mut self) {
+        let (wanted, platform) = {
+            let cfg = self.cfg.read().await;
+            (
+                cfg.monitor.pointer_lean && cfg.autoplay.enabled,
+                cfg.platform.kind,
+            )
+        };
+        if !wanted || platform != Platform::Majsoul || self.state.self_riichi_accepted {
+            self.hand.stop_glances();
+            return;
+        }
+        let Some(spot) = self.hand.next_glance() else {
+            return;
+        };
+        // The user's hand is on the mouse over the game: this look can wait for the next.
+        if crate::autoplay::cdp_input::user_active() {
+            return;
+        }
+        if !self.hand.may_look_at(&spot, self.kamicha()) {
+            return;
+        }
+        let Some(seat) = self.state.cached_our_seat else {
+            return;
+        };
+        let tehai = {
+            let tracker = self.tracker.lock().await;
+            match tracker
+                .snapshot()
+                .and_then(|s| s.players.get(seat as usize).map(|p| p.tehai.clone()))
+            {
+                Some(tehai) => tehai,
+                None => return,
+            }
+        };
+        // Between turns a hand holds 13, 10, 7, 4 or 1 tiles.
+        if tehai.len() % 3 != 1 {
+            return;
+        }
+        let Some(rect) = self.canvas.resolve(&self.ctx).await else {
+            return;
+        };
+        self.hand.look_at(spot, &tehai, rect).await;
+    }
+
+    /// The seat before ours, whose turn ends in our draw.
+    fn kamicha(&self) -> Option<u8> {
+        let seat = self.state.cached_our_seat?;
+        let players = self.state.num_players.max(1);
+        Some((seat + players - 1) % players)
+    }
+
+    /// Best-effort seat lookup. Uses the cached seat from `StartGame` first,
+    /// falling back to try_lock on the tracker.
+    fn our_seat_cached(&self) -> Option<u8> {
+        self.state
+            .cached_our_seat
+            .or_else(|| self.tracker.try_lock().ok().and_then(|t| t.our_seat()))
+    }
+
+    /// A manager with no page and default config, for the stages' tests.
+    #[cfg(test)]
+    fn for_tests() -> Self {
+        Self::new(
+            Arc::new(RwLock::new(AppConfig::default())),
+            Arc::new(AutoplayContext::default()),
+            crate::game_state::tracker::new_handle(),
+            crate::event_bus::mjai_bus(),
+            crate::event_bus::notify_bus(),
+            std::env::temp_dir(),
+        )
+    }
+}
+
+/// Spawn point for the autoplay loop. Must be called on the Tokio runtime:
+/// the manager spawns its own helper tasks there.
+pub async fn run_autoplay_manager(
+    cfg: Arc<RwLock<AppConfig>>,
+    ctx: Arc<AutoplayContext>,
+    tracker: Arc<Mutex<GameTracker>>,
+    mjai_bus: MjaiBus,
+    response_bus: BotResponseBus,
+    notify: NotifyBus,
+    config_dir: std::path::PathBuf,
+) -> anyhow::Result<()> {
+    AutoplayManager::new(cfg, ctx, tracker, mjai_bus, notify, config_dir)
+        .run(response_bus)
+        .await
+}

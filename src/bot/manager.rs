@@ -433,7 +433,7 @@ impl BotManager {
     /// Whether to ask the bot at an event that is no decision of ours: with
     /// the pointer's lean on, at every other seat's discard, so that a bot
     /// playing its next turn out ahead can say what it expects of it (see
-    /// `autoplay::lean`).
+    /// `autoplay::pointer::lean`).
     async fn peeks(&mut self, e: &MjaiEvent) -> bool {
         let Some(me) = self.actor_id else {
             return false;
@@ -446,9 +446,10 @@ impl BotManager {
     }
 
     /// Ask the bot between our turns, for nothing but what it expects of the
-    /// next one. The answer is no decision: it goes to `autoplay::lean` and
-    /// nowhere else — never onto the response bus, where a `none` would read
-    /// as a pass — and nothing records or shows it.
+    /// next one. The answer is no decision: it goes to
+    /// `autoplay::pointer::lean` and nowhere else — never onto the response
+    /// bus, where a `none` would read as a pass — and nothing records or
+    /// shows it.
     async fn peek(&mut self) -> Result<()> {
         let Some(runner) = self.runner.as_mut() else {
             return Ok(());
@@ -470,7 +471,7 @@ impl BotManager {
             .and_then(|meta| meta.get("lean"))
             .and_then(|lean| serde_json::from_value(lean.clone()).ok());
         if let Some(lean) = lean {
-            crate::autoplay::lean::publish(lean);
+            crate::autoplay::pointer::lean::publish(lean);
         }
         Ok(())
     }
@@ -1310,7 +1311,7 @@ mod tests {
             config.monitor.pointer_lean = true;
             config.autoplay.enabled = true;
         }
-        let mut leans = crate::autoplay::lean::subscribe();
+        let mut leans = crate::autoplay::pointer::lean::subscribe();
         mgr.handle_tracked(tracked(dahai(0), Some(false)))
             .await
             .unwrap();
@@ -1326,7 +1327,7 @@ mod tests {
         let got = leans.try_recv().expect("the lean goes to autoplay");
         assert_eq!(
             got.first(),
-            Some(crate::autoplay::lean::Spot::Hand("6s".into()))
+            Some(crate::autoplay::pointer::lean::Spot::Hand("6s".into()))
         );
 
         // With the lean off the same discard asks nothing.

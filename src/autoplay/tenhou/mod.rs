@@ -759,6 +759,7 @@ mod tests {
             reading: Default::default(),
             delay_script: None,
             tenhou: Some(&st),
+            pointer: None,
         };
         let plan = TenhouAutoplay::new().plan(&ctx);
 
@@ -819,6 +820,7 @@ mod tests {
             reading: Default::default(),
             delay_script: None,
             tenhou: Some(&st),
+            pointer: None,
         };
         let plan = TenhouAutoplay::new().plan(&ctx);
         assert!(
@@ -866,6 +868,7 @@ mod tests {
             reading: Default::default(),
             delay_script: None,
             tenhou: Some(&st),
+            pointer: None,
         };
         let plan = TenhouAutoplay::new().plan(&ctx);
         assert!(plan.steps.is_empty(), "{:?}", plan.steps);
@@ -912,6 +915,7 @@ mod tests {
             reading: Default::default(),
             delay_script: None,
             tenhou: Some(&st),
+            pointer: None,
         };
         let plan = TenhouAutoplay::new().plan(&ctx);
         assert!(
@@ -990,6 +994,7 @@ mod tests {
             reading: Default::default(),
             delay_script: None,
             tenhou: Some(&st),
+            pointer: None,
         };
         let plan = TenhouAutoplay::new().plan(&ctx);
         assert!(
