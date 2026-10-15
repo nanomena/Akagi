@@ -30,7 +30,8 @@ pub struct Hand {
     lean: Option<Lean>,
     glance_at: Option<Instant>,
     /// When our draw came, the bot expected to throw it: a tsumogiri then
-    /// leaves the pointer where it pressed rather than taking it back to rest.
+    /// lifts the pointer straight up off the hand rather than taking it to
+    /// the buttons.
     expected_tsumogiri: bool,
     /// The spot the pointer rests on after a look between turns, while it
     /// does: a decision that presses another moves as a changed mind.
@@ -307,10 +308,11 @@ impl Hand {
     /// client draws nothing under it, and look on to the next turn from
     /// there.
     ///
-    /// Not after a tsumogiri the bot expected when the tile came: a hand that
-    /// threw the tile it drew, as it meant to, stays where it pressed it. Nor after a call: the
-    /// seat's own discard comes next, and a hand goes from the button to the
-    /// tile it throws, not up to wait and straight back down.
+    /// After a tsumogiri the bot expected when the tile came, the hand lifts
+    /// straight up off the hand instead ([`Self::queue_lift`]): it stays near,
+    /// but never where the next draw lands before the tile is there. Not after
+    /// a call: the seat's own discard comes next, and a hand goes from the
+    /// button to the tile it throws, not up to wait and straight back down.
     pub fn rest_after(&mut self, rect: CanvasRect, plan: &PlanResult, action: &MjaiEvent) {
         let threw_draw = matches!(
             action,
@@ -319,10 +321,7 @@ impl Hand {
                 ..
             }
         );
-        if std::mem::take(&mut self.expected_tsumogiri) && threw_draw {
-            self.settle_glances();
-            return;
-        }
+        let lift = std::mem::take(&mut self.expected_tsumogiri) && threw_draw;
         if discards_next(action) {
             return;
         }
@@ -333,7 +332,36 @@ impl Hand {
             return;
         };
         let from = self.at.unwrap_or_else(|| rect.pixel(pressed.0, pressed.1));
-        self.queue_rest(from, rect, true);
+        if lift {
+            self.queue_lift(from, rect);
+        } else {
+            self.queue_rest(from, rect, true);
+        }
+    }
+
+    /// Queue the hand lifting straight up off the tile it threw at `from`,
+    /// after lingering on it, and the looks at the next turn once it is up.
+    fn queue_lift(&mut self, from: Point, rect: CanvasRect) {
+        let unit = rect.width / 16.0;
+        let leg = {
+            let mut rng = rand::rng();
+            let up = humanize::LIFT_UP.draw(&mut rng);
+            let side = humanize::LIFT_SIDE.draw(&mut rng);
+            leave(
+                from,
+                (from.0 + side * unit, from.1 - up * unit),
+                unit,
+                &mut rng,
+            )
+        };
+        self.queue.push(Motion {
+            errand: Errand::Rest { settle: true },
+            to: leg.to,
+            travel_ms: leg.travel_ms,
+            bend: leg.bend,
+            not_before: Instant::now()
+                + Duration::from_millis(u64::from(leg.dwell_ms.min(humanize::LIFT_LINGER_MOST_MS))),
+        });
     }
 
     /// Take the pointer off what it last pressed between decisions, to where it waits.
