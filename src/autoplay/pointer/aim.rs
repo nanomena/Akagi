@@ -200,7 +200,9 @@ mod tests {
             .collect();
         let top = middle.1 + humanize::TILE_TOP;
         let bottom = middle.1 + humanize::TILE_TOP + humanize::TILE_DROP.most;
-        assert!(points.iter().all(|p| p.1 >= top - 1e-9 && p.1 <= bottom + 1e-9));
+        assert!(points
+            .iter()
+            .all(|p| p.1 >= top - 1e-9 && p.1 <= bottom + 1e-9));
         assert!(points.iter().all(|p| (p.0 - middle.0).abs() <= tile.half_x));
         let high = points.iter().filter(|p| p.1 < middle.1).count();
         assert!(high > 3200, "mostly the upper half: {high} of 4000");
