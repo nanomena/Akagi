@@ -34,10 +34,14 @@ impl AutoplayManager {
             match step {
                 Step::Sleep { duration_ms } => {
                     // The pause before the first press is the think time, already
-                    // drawn; one between presses is a hand's, drawn here.
+                    // drawn; one between presses is a hand's, drawn here: long
+                    // enough to see what the press before brought up.
                     let ms = if clicked {
-                        crate::autoplay::humanize::BETWEEN_PRESSES
-                            .draw_ms(*duration_ms, &mut rand::rng())
+                        use crate::autoplay::humanize::{BETWEEN_PRESSES, SEE_NEXT};
+                        let mut rng = rand::rng();
+                        BETWEEN_PRESSES
+                            .draw_ms(*duration_ms, &mut rng)
+                            .max(SEE_NEXT.draw_ms(&mut rng))
                     } else {
                         *duration_ms
                     };

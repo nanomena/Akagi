@@ -149,6 +149,16 @@ pub const HOLD: Scaled = Scaled {
     floor: 40.0,
     high: 3.0,
 };
+/// From one press of a plan to the hand setting off for the next: the client
+/// answers the first (the tiles a riichi may throw, a call's choices) and a
+/// person sees it before moving. Never shorter than the configured gap
+/// ([`BETWEEN_PRESSES`]).
+pub const SEE_NEXT: Tail = Tail {
+    median: 420.0,
+    spread: 0.3,
+    low: 250.0,
+    high: 1200.0,
+};
 /// Between the presses of one plan, about the configured gap.
 pub const BETWEEN_PRESSES: Scaled = Scaled {
     spread: 0.35,
@@ -249,6 +259,10 @@ pub const RESULT_START: Hazard = Hazard {
     mean: 3000.0,
     most: 30_000.0,
 };
+/// After a win of the seat's own, how many times longer the hand lets the
+/// result show before it starts pressing through it ([`RESULT_START`]): a
+/// player looks at their own hand's score.
+pub const OUR_WIN_LINGER: f64 = 2.5;
 /// Between one burst of presses on the result and the next: half a second
 /// on average, never under 300 ms.
 pub const RESULT_PAUSE: Hazard = Hazard {
@@ -314,13 +328,14 @@ pub const LOOK_OFF_X: Spread = Spread {
     most: 0.2,
 };
 /// Where on a hand tile's height a hand puts the pointer, to press it or to
-/// look at it: from the top quarter of its face (some 1.13 high about its
-/// middle), and down from there — mostly in the upper half, never in the
-/// bottom fifth. In units of the canvas, down from the middle positive.
-pub const TILE_TOP: f64 = -0.28;
+/// look at it: from just inside the top of its face (some 1.13 high about its
+/// middle), and down from there, on average at the top quarter — mostly in
+/// the upper half, never in the bottom fifth. In units of the canvas, down
+/// from the middle positive.
+pub const TILE_TOP: f64 = -0.50;
 pub const TILE_DROP: Drop = Drop {
-    mean: 0.15,
-    most: 0.58,
+    mean: 0.22,
+    most: 0.80,
 };
 
 /// Where on a hand tile's height the pointer goes, as an offset from its

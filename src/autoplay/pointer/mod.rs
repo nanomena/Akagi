@@ -52,14 +52,15 @@ pub struct Leg {
 }
 
 /// How long a hand takes to move the pointer `distance` pixels, on a canvas
-/// whose 16:9 unit is `unit` pixels. Grows with the square root of the
-/// distance: a neighbouring tile is not ten times quicker than the far end
-/// of the hand.
+/// whose 16:9 unit is `unit` pixels: as an aimed mouse movement takes (Fitts),
+/// growing with the log of the distance in targets of about a tile's width. A
+/// neighbouring tile takes some 0.3 s, the far side of the table some 0.7 s:
+/// a long way is quicker per unit, never a flick.
 pub fn travel_ms(distance: f64, unit: f64) -> u32 {
     if !(distance.is_finite() && unit.is_finite()) || unit <= 0.0 || distance < 1.0 {
         return 0;
     }
-    (80.0 + 105.0 * (distance / unit).sqrt()).min(440.0) as u32
+    (100.0 + 140.0 * (1.0 + distance / unit / 0.45).log2()).min(1100.0) as u32
 }
 
 /// About how long the pointer takes from one press of a plan to the next
@@ -156,8 +157,12 @@ mod tests {
         assert_eq!(travel_ms(0.0, UNIT), 0);
         let near = travel_ms(79.0, UNIT);
         let far = travel_ms(900.0, UNIT);
-        assert!(near > 100 && near < far, "{near} {far}");
-        assert!(travel_ms(100_000.0, UNIT) <= 440);
+        assert!(near > 250 && near < far, "{near} {far}");
+        assert!(
+            far < 800,
+            "the far side of the table is not a slow crawl: {far}"
+        );
+        assert!(travel_ms(100_000.0, UNIT) <= 1100);
         assert_eq!(travel_ms(500.0, 0.0), 0);
     }
 

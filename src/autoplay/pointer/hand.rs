@@ -17,7 +17,7 @@ use crate::autoplay::platform::{PlanResult, Step};
 use crate::schema::MjaiEvent;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tracing::warn;
+use tracing::{info, warn};
 
 pub struct Hand {
     ctx: Arc<AutoplayContext>,
@@ -67,6 +67,10 @@ impl Hand {
     /// move from anywhere else would start with a jump.
     pub fn sync_with_user(&mut self) {
         if let Some(at) = crate::autoplay::cdp_input::take_user_left_pointer() {
+            info!(
+                "autoplay: pointer taken up where the user's mouse left it ({:.0}, {:.0})",
+                at.0, at.1
+            );
             self.at = Some(at);
         }
     }
@@ -139,7 +143,10 @@ impl Hand {
     /// Walk the pointer along `approach`. False when it could not be moved.
     pub async fn walk(&mut self, approach: &Approach) -> bool {
         for leg in &approach.legs {
-            if !self.move_to(leg.to, leg.travel_ms, leg.bend).await {
+            if !self
+                .move_to("approach", leg.to, leg.travel_ms, leg.bend)
+                .await
+            {
                 return false;
             }
             if leg.dwell_ms > 0 {
@@ -242,7 +249,10 @@ impl Hand {
             leave(from, to, rect.width / 16.0, &mut rng)
         };
         // A look is unhurried: half the speed of the way to a press.
-        if self.move_to(leg.to, leg.travel_ms * 2, leg.bend).await {
+        if self
+            .move_to("look", leg.to, leg.travel_ms * 2, leg.bend)
+            .await
+        {
             self.waiting_on_draw = spot == Spot::Draw;
         }
     }
@@ -296,7 +306,7 @@ impl Hand {
             leave(from, rect.pixel(x, y), rect.width / 16.0, &mut rng)
         };
         tokio::time::sleep(Duration::from_millis(u64::from(leg.dwell_ms))).await;
-        self.move_to(leg.to, leg.travel_ms, leg.bend).await;
+        self.move_to("rest", leg.to, leg.travel_ms, leg.bend).await;
     }
 
     /// Take the pointer to `to`, in CSS pixels, and press there, as a press
@@ -320,7 +330,8 @@ impl Hand {
             });
             leave(from, to, rect.width / 16.0, &mut rng)
         };
-        self.move_to(leg.to, leg.travel_ms, leg.bend).await && self.tap(to, hover_ms, hold_ms).await
+        self.move_to("press", leg.to, leg.travel_ms, leg.bend).await
+            && self.tap(to, hover_ms, hold_ms).await
     }
 
     /// Take the pointer to `to`, in CSS pixels, along an arc, for a press no
@@ -342,7 +353,8 @@ impl Hand {
             leave(from, to, rect.width / 16.0, &mut rng)
         };
         // The pause after the press before is the plan's own, already made.
-        self.move_to(leg.to, leg.travel_ms, leg.bend).await
+        self.move_to("next press", leg.to, leg.travel_ms, leg.bend)
+            .await
     }
 
     /// Press at `to`, in CSS pixels, where the pointer is or all but is:
@@ -367,11 +379,15 @@ impl Hand {
         true
     }
 
-    /// Move the pointer to `to` over `travel_ms`. False when it could not
-    /// be moved.
-    async fn move_to(&mut self, to: Point, travel_ms: u32, bend: f64) -> bool {
+    /// Move the pointer to `to` over `travel_ms`, a move of the `kind` the
+    /// log names. False when it could not be moved.
+    async fn move_to(&mut self, kind: &str, to: Point, travel_ms: u32, bend: f64) -> bool {
         self.sync_with_user();
         let from = self.at.unwrap_or(to);
+        info!(
+            "autoplay: pointer {kind} ({:.0}, {:.0}) -> ({:.0}, {:.0}) in {travel_ms} ms",
+            from.0, from.1, to.0, to.1
+        );
         let page_guard = self.ctx.page.read().await;
         let Some(page) = page_guard.as_ref() else {
             warn!("autoplay: no page handle — cannot move the pointer");

@@ -18,7 +18,9 @@
 //! This is the plan alone; the manager makes the presses, and reads the
 //! toggle's colour to know where it stands (`autoplay::pixels`).
 
-use crate::autoplay::humanize::{self, Hazard, AUTO_WIN_ON, RESULT_PAUSE, RESULT_START};
+use crate::autoplay::humanize::{
+    self, Hazard, AUTO_WIN_ON, OUR_WIN_LINGER, RESULT_PAUSE, RESULT_START,
+};
 use rand::Rng;
 use std::time::{Duration, Instant};
 
@@ -45,6 +47,8 @@ struct Shown {
     shown_at: Instant,
     /// When the next burst goes; `None` while one is under way.
     next: Option<Instant>,
+    /// The seat's own win: the result is let show for longer.
+    ours: bool,
 }
 
 /// The acts in hand.
@@ -59,15 +63,38 @@ fn after<R: Rng + ?Sized>(now: Instant, wait: Hazard, rng: &mut R) -> Instant {
 }
 
 impl Acts {
-    /// A hand's result has shown; the client had confirmed `confirmed` so far.
-    pub fn result_shown<R: Rng + ?Sized>(&mut self, confirmed: u64, now: Instant, rng: &mut R) {
-        // Two wins on one discard are one result.
-        if self.result.is_none() {
-            self.result = Some(Shown {
-                seen: confirmed,
-                shown_at: now,
-                next: Some(after(now, RESULT_START, rng)),
-            });
+    /// A hand's result has shown, the seat's own win when `ours`; the client
+    /// had confirmed `confirmed` so far.
+    pub fn result_shown<R: Rng + ?Sized>(
+        &mut self,
+        confirmed: u64,
+        ours: bool,
+        now: Instant,
+        rng: &mut R,
+    ) {
+        let start = |rng: &mut R| {
+            let wait = f64::from(RESULT_START.draw_ms(rng));
+            let wait = if ours { wait * OUR_WIN_LINGER } else { wait };
+            now + Duration::from_millis(wait as u64)
+        };
+        match &mut self.result {
+            None => {
+                self.result = Some(Shown {
+                    seen: confirmed,
+                    shown_at: now,
+                    next: Some(start(rng)),
+                    ours,
+                });
+            }
+            // Two wins on one discard are one result; one of them ours makes
+            // it ours, while nothing has been pressed yet.
+            Some(shown) if ours && !shown.ours => {
+                shown.ours = true;
+                if let Some(next) = &mut shown.next {
+                    *next = (*next).max(start(rng));
+                }
+            }
+            Some(_) => {}
         }
         // A riichi that ended before its auto-win was switched on stays without it.
         self.win_on_at = None;
@@ -154,6 +181,31 @@ mod tests {
         base + Duration::from_millis(n)
     }
 
+    /// After a win of our own the result is let show two and a half times as
+    /// long before the first burst; a second win on the same discard that is
+    /// ours makes the wait ours too.
+    #[test]
+    fn our_own_win_is_looked_at_longer() {
+        let mut rng = StdRng::seed_from_u64(31);
+        let t0 = Instant::now();
+        let wait = |ours: bool, rng: &mut StdRng| {
+            let mut acts = Acts::default();
+            acts.result_shown(0, ours, t0, rng);
+            acts.due().unwrap().duration_since(t0).as_millis() as f64
+        };
+        let theirs: f64 = (0..3000).map(|_| wait(false, &mut rng)).sum::<f64>() / 3000.0;
+        let ours: f64 = (0..3000).map(|_| wait(true, &mut rng)).sum::<f64>() / 3000.0;
+        let ratio = ours / theirs;
+        assert!((ratio - OUR_WIN_LINGER).abs() < 0.2, "{ratio}");
+
+        let mut acts = Acts::default();
+        acts.result_shown(0, false, t0, &mut rng);
+        let before = acts.due().unwrap();
+        acts.result_shown(0, true, t0, &mut rng);
+        assert!(acts.due().unwrap() >= before);
+        assert!(acts.result.unwrap().ours);
+    }
+
     /// A result is pressed through in bursts, the first after a reaction,
     /// until the client confirms it; then nothing more.
     #[test]
@@ -161,7 +213,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(1);
         let t0 = Instant::now();
         let mut acts = Acts::default();
-        acts.result_shown(4, t0, &mut rng);
+        acts.result_shown(4, false, t0, &mut rng);
         let first = acts.due().expect("a burst is due");
         assert!(first >= ms(t0, 600), "after a reaction");
         assert_eq!(
@@ -190,7 +242,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(5);
         let t0 = Instant::now();
         let mut acts = Acts::default();
-        acts.result_shown(0, t0, &mut rng);
+        acts.result_shown(0, false, t0, &mut rng);
         let (mut bursts, mut last) = (0, t0);
         while let Some(at) = acts.due() {
             if let Some(Act::Burst(_)) = acts.next(at, 0, &mut rng) {
@@ -211,7 +263,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(6);
         let t0 = Instant::now();
         let mut acts = Acts::default();
-        acts.result_shown(0, t0, &mut rng);
+        acts.result_shown(0, false, t0, &mut rng);
         acts.hand_over();
         assert_eq!(acts.due(), None);
         assert_eq!(acts.next(ms(t0, 5000), 0, &mut rng), None);
@@ -242,7 +294,7 @@ mod tests {
         let t0 = Instant::now();
         let mut acts = Acts::default();
         acts.riichi_accepted(t0, &mut rng);
-        acts.result_shown(0, ms(t0, 100), &mut rng);
+        acts.result_shown(0, false, ms(t0, 100), &mut rng);
         acts.hand_over();
         assert_eq!(acts.due(), None);
     }
