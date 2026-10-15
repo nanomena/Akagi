@@ -82,10 +82,10 @@ impl AutoplayManager {
             | MjaiEvent::Pon { actor, .. }
             | MjaiEvent::Daiminkan { actor, .. }
             | MjaiEvent::Ankan { actor, .. }
-            | MjaiEvent::Kakan { actor, .. } => {
-                if self.is_ours(*actor) {
-                    self.state.last_self_tsumo = None;
-                }
+            | MjaiEvent::Kakan { actor, .. }
+                if self.is_ours(*actor) =>
+            {
+                self.state.last_self_tsumo = None;
             }
             _ => {}
         }
