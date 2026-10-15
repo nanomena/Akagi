@@ -34,8 +34,10 @@ impl AutoplayManager {
             }
             MjaiEvent::Hora { .. } | MjaiEvent::Ryukyoku { .. } => {
                 let confirmed = self.ctx.input_watch.confirmed();
+                let ours = matches!(ev, MjaiEvent::Hora { actor, .. }
+                    if Some(*actor) == self.state.cached_our_seat);
                 self.acts
-                    .result_shown(confirmed, Instant::now(), &mut rand::rng());
+                    .result_shown(confirmed, ours, Instant::now(), &mut rand::rng());
             }
             MjaiEvent::StartKyoku { .. } | MjaiEvent::EndKyoku => {
                 if matches!(ev, MjaiEvent::StartKyoku { .. }) {
