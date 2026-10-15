@@ -172,7 +172,7 @@ mod tests {
         let Some(Act::Burst(n)) = acts.next(first, 4, &mut rng) else {
             panic!("a burst")
         };
-        assert!((2..=3).contains(&n));
+        assert!((humanize::BURST_LEAST..=humanize::BURST_MOST).contains(&n));
         assert_eq!(acts.due(), None, "nothing while the burst is under way");
         assert!(acts.result_up(4));
         acts.burst_done(first, 4, &mut rng);
