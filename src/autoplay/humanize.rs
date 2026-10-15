@@ -219,10 +219,11 @@ pub const RESULT_START: Hazard = Hazard {
     mean: 3000.0,
     most: 30_000.0,
 };
-/// Between one burst of presses on the result and the next.
+/// Between one burst of presses on the result and the next: half a second
+/// on average, never under 300 ms.
 pub const RESULT_PAUSE: Hazard = Hazard {
-    floor: 100.0,
-    mean: 500.0,
+    floor: 300.0,
+    mean: 200.0,
     most: 7_000.0,
 };
 /// The fewest and the most presses a burst has.
