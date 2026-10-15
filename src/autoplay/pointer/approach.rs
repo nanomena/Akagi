@@ -99,10 +99,57 @@ pub fn approach<R: Rng + ?Sized>(
         None => Vec::new(),
     };
     for stops in &shapes {
-        if let Some(found) = with_stops(think_ms, from, press, stops, rest_ms, unit, rng) {
+        if let Some(found) = with_stops(think_ms, from, press, stops, rest_ms, unit, false, rng) {
             return found;
         }
     }
+    plain(think_ms, from, press, unit, rng)
+}
+
+/// The way to a press when the hand, resting at `from` on a tile it was
+/// looking at between turns, presses another at `press`: a changed mind,
+/// which moves as a torn hand does. With the old tile within reach of the
+/// new, it always weighs the two — stays on the old a while before going
+/// over, or goes over, back, and over again — each stop longer than the one
+/// before, the new tile's the longest. Further apart it does not sweep
+/// between them: it waits where it is, then settles on the new tile for
+/// longer than it waited. `think_ms` should already hold the time a changed
+/// mind takes (`humanize::CHANGED_MIND`).
+pub fn changed_mind<R: Rng + ?Sized>(
+    think_ms: u32,
+    from: Point,
+    press: Point,
+    rest_ms: u32,
+    unit: f64,
+    rng: &mut R,
+) -> Approach {
+    let shapes: Vec<Vec<Point>> = if distance(press, from) <= LOOK_REACH * unit {
+        // As a torn hand's looks, without the plain settle.
+        if humanize::fraction(rng) < LOOK_FIRST / (1.0 - ONLY_SETTLE) {
+            vec![vec![from], vec![]]
+        } else {
+            vec![vec![press, from], vec![from], vec![]]
+        }
+    } else {
+        vec![vec![]]
+    };
+    for stops in &shapes {
+        if let Some(found) = with_stops(think_ms, from, press, stops, rest_ms, unit, true, rng) {
+            return found;
+        }
+    }
+    plain(think_ms, from, press, unit, rng)
+}
+
+/// The plainest way: wait, then travel to the press and press on arrival,
+/// a quicker hand when the think cannot hold even the travel.
+fn plain<R: Rng + ?Sized>(
+    think_ms: u32,
+    from: Point,
+    press: Point,
+    unit: f64,
+    rng: &mut R,
+) -> Approach {
     let travel = humanize::TRAVEL
         .draw_ms(travel_ms(distance(from, press), unit), rng)
         .min(think_ms);
@@ -119,7 +166,10 @@ pub fn approach<R: Rng + ?Sized>(
 
 /// An approach that rests on each of `stops` on its way to `press`, and
 /// settles on `press` before pressing it; `None` when `think_ms` cannot hold
-/// that.
+/// that. With stops, or with `grow`, the think is spread over the wait and
+/// the stops each longer than the one before ([`weighed`]); otherwise the
+/// settle is drawn against `rest_ms` and the wait has the rest.
+#[allow(clippy::too_many_arguments)]
 fn with_stops<R: Rng + ?Sized>(
     think_ms: u32,
     from: Point,
@@ -127,6 +177,7 @@ fn with_stops<R: Rng + ?Sized>(
     stops: &[Point],
     rest_ms: u32,
     unit: f64,
+    grow: bool,
     rng: &mut R,
 ) -> Option<Approach> {
     let mut legs = Vec::with_capacity(stops.len() + 1);
@@ -143,7 +194,7 @@ fn with_stops<R: Rng + ?Sized>(
     let travel: u32 = legs.iter().map(|l| l.travel_ms).sum();
     let spare = think_ms.checked_sub(travel)?;
     let rest = f64::from(rest_ms);
-    if !stops.is_empty() {
+    if grow || !stops.is_empty() {
         return weighed(spare, legs, rest, rng);
     }
     if f64::from(spare) < rest * SETTLE_REST.low {
@@ -367,6 +418,38 @@ mod tests {
             }
         }
         assert!(torn > 500, "{torn}");
+    }
+
+    /// A changed mind next to the old tile always weighs the two, each stop
+    /// longer than the one before; far from it, it waits less than it then
+    /// settles on the new tile.
+    #[test]
+    fn a_changed_mind_weighs_the_old_tile_against_the_new() {
+        let mut rng = StdRng::seed_from_u64(29);
+        let mut shapes = std::collections::BTreeSet::new();
+        for _ in 0..300 {
+            let plan = changed_mind(6_000, NEAR, PRESS, LOOK_MS, UNIT, &mut rng);
+            assert_eq!(plan.total_ms(), 6_000);
+            assert!(plan.looks_elsewhere(), "{plan:?}");
+            let stops: Vec<Point> = plan.legs.iter().map(|l| l.to).collect();
+            assert!(
+                stops == vec![NEAR, PRESS] || stops == vec![PRESS, NEAR, PRESS],
+                "{stops:?}"
+            );
+            let mut last = plan.pause_ms;
+            for leg in &plan.legs {
+                assert!(leg.dwell_ms > last, "{plan:?}");
+                last = leg.dwell_ms;
+            }
+            shapes.insert(stops.len());
+        }
+        assert_eq!(shapes.len(), 2, "both ways of weighing occur");
+        for _ in 0..100 {
+            let plan = changed_mind(3_500, FAR, PRESS, LOOK_MS, UNIT, &mut rng);
+            assert_eq!(plan.total_ms(), 3_500);
+            assert_eq!(plan.legs.len(), 1, "no sweep across the rack");
+            assert!(plan.legs[0].dwell_ms > plan.pause_ms, "{plan:?}");
+        }
     }
 
     /// A longer think is longer stops, not a longer wait before moving.
