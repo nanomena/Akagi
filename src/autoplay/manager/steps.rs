@@ -2,10 +2,9 @@
 
 use super::decision::Decision;
 use super::AutoplayManager;
-use crate::autoplay::cdp_input::dispatch_click_shaped;
 use crate::autoplay::context::CanvasRect;
 use crate::autoplay::platform::{PlanResult, Step};
-use crate::autoplay::pointer::Approach;
+use crate::autoplay::pointer::{Approach, Touch};
 use crate::schema::MjaiEvent;
 use chromiumoxide::page::Page;
 use std::time::{Duration, Instant};
@@ -37,11 +36,7 @@ impl AutoplayManager {
                     // drawn; one between presses is a hand's, drawn here: long
                     // enough to see what the press before brought up.
                     let ms = if clicked {
-                        use crate::autoplay::humanize::{BETWEEN_PRESSES, SEE_NEXT};
-                        let mut rng = rand::rng();
-                        BETWEEN_PRESSES
-                            .draw_ms(*duration_ms, &mut rng)
-                            .max(SEE_NEXT.draw_ms(&mut rng))
+                        crate::autoplay::humanize::next_press_gap(*duration_ms, &mut rand::rng())
                     } else {
                         *duration_ms
                     };
@@ -168,39 +163,22 @@ impl AutoplayManager {
                     }
                     // The approach ended on the first press; a later one —
                     // the riichi button's tile, a call's candidate — is
-                    // reached the same way, not jumped to.
-                    if !self.hand.reach((px, py), rect).await {
-                        return false;
-                    }
-                    // Need to re-acquire the page handle on each click;
-                    // it may have been replaced (tab reload) between
-                    // successive clicks within one action.
-                    let page_guard = self.ctx.page.read().await;
-                    let Some(page) = page_guard.as_ref() else {
-                        warn!("autoplay: no page handle — aborting click sequence");
-                        return false;
-                    };
+                    // reached the same way by the press itself.
+                    //
                     // A lost press usually costs nothing — the decision
                     // window closes and the client passes. A lost *riichi*
                     // press is different: the discard that follows it still
                     // goes out, so the hand throws its riichi tile with no
                     // riichi behind it. That press gets the sturdier shape
                     // from the first attempt rather than only on a retry.
-                    if let Err(e) = dispatch_click_shaped(
-                        page,
-                        px,
-                        py,
-                        decision.cfg.hover_delay_ms,
-                        decision.cfg.click_hold_ms,
-                        declares_reach,
-                    )
-                    .await
-                    {
-                        warn!("autoplay: dispatch_click failed: {e:#}");
+                    let touch = Touch {
+                        hover_ms: decision.cfg.hover_delay_ms,
+                        hold_ms: decision.cfg.click_hold_ms,
+                        jiggle: declares_reach,
+                    };
+                    if !self.hand.press("plan", (px, py), rect, touch).await {
                         return false;
                     }
-                    drop(page_guard);
-                    self.hand.pressed((px, py));
                     clicked = true;
                 }
                 // Riichi City SendFrames never reach this loop — they are
