@@ -62,6 +62,12 @@ pub fn travel_ms(distance: f64, unit: f64) -> u32 {
     (80.0 + 105.0 * (distance / unit).sqrt()).min(440.0) as u32
 }
 
+/// About how long the pointer takes from one press of a plan to the next
+/// ([`Hand::reach`]): a button's way down to the hand, some four units.
+pub fn next_press_ms() -> u32 {
+    travel_ms(4.0, 1.0)
+}
+
 fn distance(a: Point, b: Point) -> f64 {
     ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt()
 }

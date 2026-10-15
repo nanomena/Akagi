@@ -28,13 +28,12 @@ impl AutoplayManager {
         ticket: InputTicket,
         decision: &Decision,
         action: &MjaiEvent,
-        threw_draw: bool,
     ) {
         let cfg = &decision.cfg;
         // `rect` is `None` for a plan of Tenhou steps, which skips the proof.
         let (true, Some(rect)) = (cfg.verify_input_ms > 0, rect) else {
             if let Some(rect) = rect {
-                self.hand.rest_after(rect, plan, threw_draw).await;
+                self.hand.rest_after(rect, plan, action).await;
             }
             return;
         };
@@ -97,7 +96,7 @@ impl AutoplayManager {
             );
         }
         if registered {
-            self.hand.rest_after(rect, plan, threw_draw).await;
+            self.hand.rest_after(rect, plan, action).await;
         }
     }
 
@@ -215,6 +214,11 @@ impl AutoplayManager {
                         rect
                     );
                     continue;
+                }
+                // A press made again is moved to like any other: its fresh
+                // point, or the press before it, is somewhere else.
+                if !self.hand.reach((px, py), rect).await {
+                    return false;
                 }
                 let page_guard = self.ctx.page.read().await;
                 let Some(page) = page_guard.as_ref() else {

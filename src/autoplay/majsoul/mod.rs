@@ -270,7 +270,8 @@ impl PlatformAutoplay for MajsoulAutoplay {
 ///
 /// `extra_clicks` is how many clicks follow the *first* one in this plan
 /// (candidate disambiguation, riichi tile). It sizes the click-sequence
-/// overhead the budget layer must reserve.
+/// overhead the budget layer must reserve: each is waited for, moved to
+/// and pressed.
 ///
 /// Returns the delay model's decision, for what it says besides the pause.
 fn push_pre_delay(
@@ -281,7 +282,9 @@ fn push_pre_delay(
 ) -> delay::DelayDecision {
     let cfg = ctx.cfg;
     let per_click = cfg.hover_delay_ms + cfg.click_hold_ms;
-    let click_overhead_ms = per_click + extra_clicks * (per_click + cfg.inter_click_delay_ms);
+    let click_overhead_ms = per_click
+        + extra_clicks
+            * (per_click + cfg.inter_click_delay_ms + crate::autoplay::pointer::next_press_ms());
 
     let opening_animation = match kind {
         DecisionKind::Dahai => is_dealer_first_discard(ctx),
