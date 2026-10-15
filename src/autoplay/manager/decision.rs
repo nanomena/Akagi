@@ -39,7 +39,7 @@ pub(super) struct Decision {
     num_players: u8,
     reading: Reading,
     /// Where the pointer is, as a normalised point.
-    pointer: Option<(f64, f64)>,
+    pub(super) pointer: Option<(f64, f64)>,
 }
 
 impl Decision {

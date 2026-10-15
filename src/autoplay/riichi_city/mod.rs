@@ -56,6 +56,7 @@ impl PlatformAutoplay for RiichiCityAutoplay {
             steps,
             hesitate: false,
             look_ms: None,
+            aims: Vec::new(),
         }
     }
 }
