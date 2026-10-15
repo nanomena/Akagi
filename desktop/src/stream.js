@@ -12,6 +12,8 @@
 //   /<token>/stream.mjpg  the frames, one JPEG after another
 //   /<token>/feed         the table and the games on record, as server-sent events
 //   /<token>/feed.json    the same, once
+//   /<token>/board        what the pages share (`board.js`), as server-sent events; PUT /<token>/board/<name> puts a value
+//   /<token>/board.json   the board, once
 //   /<token>/pages/…      the folder of pages (`pages.js`)
 //
 // The token is a secret: without it every address is a 404, so nothing else
@@ -22,6 +24,7 @@ import fs from 'node:fs'
 import { createServer } from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { BOARD_LIMITS, isBoardName } from './board.js'
 import { servePage } from './pages.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -71,18 +74,22 @@ export class StreamServer {
   #token
   #onWatchers
   #feed
+  #board
   #pages
   /** @type {Record<string, { type: string, body: Buffer }>} */
   #files
 
   /**
-   * @param {{ token: string, onWatchers?: (count: number) => void, feed?: import('./feed.js').Feed, pages?: string }} options
-   *   `feed`: what the table is doing, for `/feed`; `pages`: the folder served at `/pages/`
+   * @param {{ token: string, onWatchers?: (count: number) => void, feed?: import('./feed.js').Feed,
+   *   board?: import('./board.js').Board, pages?: string }} options
+   *   `feed`: what the table is doing, for `/feed`; `board`: what the pages share, for `/board`;
+   *   `pages`: the folder served at `/pages/`
    */
-  constructor({ token, onWatchers, feed, pages }) {
+  constructor({ token, onWatchers, feed, board, pages }) {
     this.#token = token
     this.#onWatchers = onWatchers ?? (() => {})
     this.#feed = feed ?? null
+    this.#board = board ?? null
     this.#pages = pages ?? null
     this.#files = {
       '': { type: 'text/html; charset=utf-8', body: fs.readFileSync(path.join(HERE, 'viewer.html')) },
@@ -167,10 +174,16 @@ export class StreamServer {
     // has a name of its own point here gets nothing.
     const host = request.headers.host ?? ''
     if (host !== `127.0.0.1:${this.port}` && host !== `localhost:${this.port}`) return refuse(403)
-    if (request.method !== 'GET' && request.method !== 'HEAD') return refuse(405)
+    const writing = request.method === 'PUT'
+    if (!writing && request.method !== 'GET' && request.method !== 'HEAD') return refuse(405)
     const [, token, ...rest] = (request.url ?? '').split('?')[0].split('/')
     const name = rest.join('/')
     if (!token || !same(token, this.#token)) return refuse(404)
+    if (writing) {
+      // A value on the board is the one thing a page may change here.
+      if (rest.length !== 2 || rest[0] !== 'board' || !this.#board) return refuse(405)
+      return void this.#put(this.#board, rest[1], host, request, response).catch(() => response.destroy())
+    }
     // The page's own files are named relative to it, so it has to be read as a folder.
     if (rest.length === 0) { response.writeHead(308, { Location: `/${token}/`, 'Cache-Control': 'no-store' }).end(); return }
 
@@ -199,6 +212,11 @@ export class StreamServer {
       if (name === 'feed') return this.#listen(this.#feed, request, response)
       return void this.#tell(this.#feed, request, response)
     }
+    if (name === 'board' || name === 'board.json') {
+      if (!this.#board) return refuse(404)
+      if (name === 'board') return this.#listenBoard(this.#board, request, response)
+      return json(response, request, this.#board.all)
+    }
     if (rest[0] === 'pages') {
       if (!this.#pages) return refuse(404)
       if (rest.length === 1) { response.writeHead(308, { Location: `/${token}/pages/`, 'Cache-Control': 'no-store' }).end(); return }
@@ -226,28 +244,55 @@ export class StreamServer {
    * @param {import('node:http').ServerResponse} response
    */
   #listen(feed, request, response) {
+    const send = this.#events(request, response, feed.subscribe.bind(feed))
+    if (!send) return
+    send('state', feed.state)
+    // Once read, the games on record are sent here; until then, reading them sends them to every listener.
+    if (feed.resultsRead) send('results', feed.resultsRead)
+    else feed.results().catch(() => {})
+  }
+
+  /**
+   * Keep a page told of the board: all of it at once, then each value put.
+   * @param {import('./board.js').Board} board
+   * @param {import('node:http').IncomingMessage} request
+   * @param {import('node:http').ServerResponse} response
+   */
+  #listenBoard(board, request, response) {
+    const send = this.#events(request, response, tell => board.subscribe((name, value) => tell('set', { name, value })))
+    if (send) send('board', board.all)
+  }
+
+  /**
+   * Open a stream of server-sent events, subscribed while it is open.
+   * @param {import('node:http').IncomingMessage} request
+   * @param {import('node:http').ServerResponse} response
+   * @param {(send: (kind: string, value: unknown) => void) => () => void} subscribe
+   * @returns {((kind: string, value: unknown) => void) | null} null for a `HEAD`
+   */
+  #events(request, response, subscribe) {
     response.writeHead(200, {
       'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-store',
       'X-Content-Type-Options': 'nosniff',
     })
-    if (request.method === 'HEAD') return response.end()
+    if (request.method === 'HEAD') {
+      response.end()
+      return null
+    }
     response.flushHeaders()
     response.socket?.setNoDelay(true)
     const send = (/** @type {string} */ kind, /** @type {unknown} */ value) => {
       response.write(`event: ${kind}\ndata: ${JSON.stringify(value)}\n\n`)
     }
     response.write('retry: 2000\n\n')
-    const off = feed.subscribe(send)
+    const off = subscribe(send)
     this.#listeners.add(response)
     response.once('close', () => {
       off()
       this.#listeners.delete(response)
     })
-    send('state', feed.state)
-    // Once read, the games on record are sent here; until then, reading them sends them to every listener.
-    if (feed.resultsRead) send('results', feed.resultsRead)
-    else feed.results().catch(() => {})
+    return send
   }
 
   /**
@@ -259,13 +304,56 @@ export class StreamServer {
   async #tell(feed, request, response) {
     let results = null
     try { results = await feed.results() } catch { /* sent as null: the table is worth having without them */ }
-    const body = Buffer.from(JSON.stringify({ state: feed.state, results }))
-    response.writeHead(200, {
-      'Content-Type': 'application/json; charset=utf-8',
-      'Content-Length': body.length,
-      'Cache-Control': 'no-store',
-      'X-Content-Type-Options': 'nosniff',
-    })
-    response.end(request.method === 'HEAD' ? undefined : body)
+    json(response, request, { state: feed.state, results })
   }
+
+  /**
+   * Put a value on the board, from a page of this origin: JSON, `BOARD_LIMITS.bytes` at most.
+   * @param {import('./board.js').Board} board
+   * @param {string} name
+   * @param {string} host the name this request reached the server by
+   * @param {import('node:http').IncomingMessage} request
+   * @param {import('node:http').ServerResponse} response
+   */
+  async #put(board, name, host, request, response) {
+    const answer = (/** @type {number} */ status) => { response.writeHead(status, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' }).end() }
+    // A browser names the page a write comes from; a page of any other origin may not write.
+    const origin = request.headers.origin
+    if (origin !== undefined && origin !== `http://${host}`) return answer(403)
+    if (!isBoardName(name)) return answer(404)
+    if (!/^application\/json\s*(;|$)/i.test(request.headers['content-type'] ?? '')) return answer(415)
+    if (Number(request.headers['content-length'] ?? 0) > BOARD_LIMITS.bytes) return answer(413)
+    /** @type {Buffer[]} */
+    const chunks = []
+    let size = 0
+    for await (const chunk of request) {
+      size += chunk.length
+      if (size > BOARD_LIMITS.bytes) {
+        response.writeHead(413, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store', Connection: 'close' }).end(() => request.destroy())
+        return
+      }
+      chunks.push(chunk)
+    }
+    let value
+    try { value = JSON.parse(Buffer.concat(chunks).toString('utf8')) } catch { return answer(400) }
+    try { board.set(name, value) } catch { return answer(409) }
+    answer(204)
+  }
+}
+
+/**
+ * Answer with `value` as JSON.
+ * @param {import('node:http').ServerResponse} response
+ * @param {import('node:http').IncomingMessage} request
+ * @param {unknown} value
+ */
+function json(response, request, value) {
+  const body = Buffer.from(JSON.stringify(value))
+  response.writeHead(200, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Length': body.length,
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+  })
+  response.end(request.method === 'HEAD' ? undefined : body)
 }
