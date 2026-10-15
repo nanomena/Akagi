@@ -14,7 +14,8 @@
 //! - [`press`] proves that the client took the presses, retries the ones it
 //!   did not, and recovers a client that has stopped listening.
 //!
-//! [`events`] keeps the per-game bookkeeping the mjai stream drives.
+//! [`events`] keeps the per-game bookkeeping the mjai stream drives, and
+//! [`table_acts`] makes the presses between decisions.
 //!
 //! Failure modes are silent-by-design: if the page handle is missing
 //! (chromium backend not running) or the canvas-rect query fails, the
@@ -25,6 +26,7 @@ mod decision;
 mod events;
 mod press;
 mod steps;
+mod table_acts;
 
 use crate::autoplay::canvas::Canvas;
 use crate::autoplay::context::AutoplayContext;
@@ -62,6 +64,8 @@ pub struct AutoplayManager {
     state: ManagerState,
     /// The pointer over the current hand.
     hand: Hand,
+    /// The presses due between decisions (see `autoplay::acts`).
+    acts: crate::autoplay::acts::Acts,
     /// When the canvas rect was last measured.
     canvas: Canvas,
     /// User Lua delay policy (hot-reloaded from disk; see
@@ -109,6 +113,7 @@ impl AutoplayManager {
     ) -> Self {
         Self {
             hand: Hand::new(ctx.clone()),
+            acts: Default::default(),
             cfg,
             ctx,
             tracker,
@@ -149,9 +154,14 @@ impl AutoplayManager {
         loop {
             // The pointer's own pace between turns, apart from any event.
             let glance_at = self.hand.glance_due();
+            // And its presses between decisions.
+            let act_at = self.acts.due();
             tokio::select! {
                 _ = tokio::time::sleep_until(glance_at.unwrap_or_else(Instant::now).into()), if glance_at.is_some() => {
                     self.glance().await;
+                }
+                _ = tokio::time::sleep_until(act_at.unwrap_or_else(Instant::now).into()), if act_at.is_some() => {
+                    self.table_act().await;
                 }
                 msg = lean_rx.recv() => match msg {
                     Ok(lean) => self.hand.take_lean(lean),
@@ -292,7 +302,10 @@ impl AutoplayManager {
         // time, not after it: the pause that leads the plan gives up
         // exactly what the way takes, so the press lands when it would
         // have (see `autoplay::pointer`).
-        let approach = rect.and_then(|rect| self.hand.plan_approach(&mut plan, rect, glance));
+        // Not before what it answers can have been seen: the window opened with its frame.
+        let shown_at = decision.planned_budget.map(|b| b.opened_at);
+        let approach =
+            rect.and_then(|rect| self.hand.plan_approach(&mut plan, rect, glance, shown_at));
         if approach.as_ref().is_some_and(|a| a.looks_elsewhere()) {
             info!(
                 "autoplay: looking at the runner-up before {:?}",

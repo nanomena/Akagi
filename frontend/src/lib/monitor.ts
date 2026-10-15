@@ -7,10 +7,11 @@ import { localized, tr } from '@/lib/i18n'
  *  `stream_url` is the address the shell serves the game at, while it does. */
 export type MonitorConfig = {
   always_on_top: boolean; pointer_trail?: boolean; pointer_lean?: boolean
+  quick_confirm?: boolean; riichi_auto_win?: boolean
   stream_output?: boolean; stream_port?: number; stream_token?: string; stream_url?: string
   version?: string
 }
-export const MONITOR_DEFAULTS: MonitorConfig = { always_on_top: false, pointer_trail: false, pointer_lean: false }
+export const MONITOR_DEFAULTS: MonitorConfig = { always_on_top: false, pointer_trail: false, pointer_lean: false, quick_confirm: false, riichi_auto_win: false }
 export type DecisionContext = { game: number; round: number; event_seq: number }
 export type MonitorDecision = {
   /** Which decision this is, for the life of the process; `number` is its place among its game's. */

@@ -60,6 +60,9 @@ pub struct InputWatch {
     sent: AtomicU64,
     reach: AtomicU64,
     non_discard: AtomicU64,
+    /// How many hands' results the client has confirmed (`confirmNewRound`):
+    /// one more means the result is gone from the screen.
+    confirmed: AtomicU64,
 }
 
 /// A snapshot of the counts, taken before a click.
@@ -80,6 +83,16 @@ impl InputWatch {
         if kind != InputKind::Discard {
             self.non_discard.fetch_add(1, Ordering::Relaxed);
         }
+    }
+
+    /// The bridge saw the client confirm a hand's result.
+    pub fn note_confirmed(&self) {
+        self.confirmed.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// How many results the client has confirmed so far.
+    pub fn confirmed(&self) -> u64 {
+        self.confirmed.load(Ordering::Relaxed)
     }
 
     /// Snapshot to compare against later.

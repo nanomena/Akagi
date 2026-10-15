@@ -45,6 +45,7 @@ const METHOD_SYNC_GAME: &str = ".lq.FastTest.syncGame";
 /// discard, call, win and pass goes out as one of them. Watched so autoplay
 /// can tell a click that registered from one the UI swallowed.
 const METHOD_INPUT_OPERATION: &str = ".lq.FastTest.inputOperation";
+const METHOD_CONFIRM_NEW_ROUND: &str = ".lq.FastTest.confirmNewRound";
 const METHOD_INPUT_CHI_PENG_GANG: &str = ".lq.FastTest.inputChiPengGang";
 /// `timeuse` the client stamps on an action it took by itself rather than
 /// on one the player made — a decision window that ran out, or an auto
@@ -356,6 +357,13 @@ impl MajsoulBridge {
                     if is_client_initiated(&msg.payload) {
                         watch.note_sent(input_kind(msg.method_name.as_ref(), &msg.payload));
                     }
+                }
+                Vec::new()
+            }
+            // The result of a hand confirmed: it is gone from the screen.
+            (MessageType::Request, METHOD_CONFIRM_NEW_ROUND) => {
+                if let Some(watch) = &self.input_watch {
+                    watch.note_confirmed();
                 }
                 Vec::new()
             }
@@ -2173,6 +2181,16 @@ mod tests {
     /// watching for the client's own uplink command. Both input methods
     /// must count, and only the uplink: a response coming back is not the
     /// client accepting anything.
+    #[test]
+    fn a_confirmed_result_is_counted() {
+        let watch: crate::autoplay::verify::SharedInputWatch = Default::default();
+        let mut bridge = MajsoulBridge::new(None, None).with_input_watch(Some(watch.clone()));
+        assert_eq!(watch.confirmed(), 0);
+        let events = bridge.dispatch(&req(METHOD_CONFIRM_NEW_ROUND, json!({})));
+        assert!(events.is_empty());
+        assert_eq!(watch.confirmed(), 1);
+    }
+
     #[test]
     fn input_commands_are_counted_for_click_verification() {
         let watch: crate::autoplay::verify::SharedInputWatch = Default::default();

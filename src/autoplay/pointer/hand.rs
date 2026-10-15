@@ -3,11 +3,12 @@
 //! [`Hand`] keeps where the pointer is and what the bot expects of the seat's
 //! next turn, and makes the moves the rest of [`super`] plans: the way to a
 //! press ([`super::approach`]), the looks between turns ([`super::lean`]), and
-//! leaving a press for a rest by the buttons ([`super::leave`]). What it
-//! knows belongs to one hand: the manager resets it at every hand's start and
-//! end.
+//! leaving a press for a rest by the buttons ([`super::leave`]), and the
+//! presses between decisions (`autoplay::acts`). What it knows belongs to one
+//! hand, but for where the pointer is: the manager resets it at every hand's
+//! start and end, and the pointer stays where it was.
 
-use super::approach::{approach, Approach, LOOK_MS, LOOK_REACH};
+use super::approach::{approach, wait_to_see, Approach, LOOK_MS, LOOK_REACH};
 use super::lean::{self, Lean, Spot};
 use super::{leave, Point};
 use crate::autoplay::context::{AutoplayContext, CanvasRect};
@@ -46,9 +47,13 @@ impl Hand {
         }
     }
 
-    /// Forget the hand: the next one starts with nothing known.
+    /// Forget the hand: the next one starts with nothing known but where
+    /// the pointer is, which a new hand does not move.
     pub fn reset(&mut self) {
-        *self = Self::new(self.ctx.clone());
+        *self = Self {
+            at: self.at,
+            ..Self::new(self.ctx.clone())
+        };
     }
 
     /// Where the pointer is, in CSS pixels, once it has moved.
@@ -78,12 +83,15 @@ impl Hand {
     /// Plan the pointer's way to the plan's first press and take its time
     /// out of the pause that leads the plan. `None` for a plan that does not
     /// open with a pause and a press: there is no thinking time to move in.
-    /// `glance` is the runner-up to look at, as a normalised point.
+    /// `glance` is the runner-up to look at, as a normalised point; `shown_at`
+    /// when the frame that opened the decision came, before which the pointer
+    /// cannot have seen what it answers (see [`wait_to_see`]).
     pub fn plan_approach(
         &mut self,
         plan: &mut PlanResult,
         rect: CanvasRect,
         glance: Option<(f64, f64)>,
+        shown_at: Option<Instant>,
     ) -> Option<Approach> {
         self.sync_with_user();
         let rest_ms = plan.look_ms.unwrap_or(LOOK_MS);
@@ -99,7 +107,7 @@ impl Hand {
             let (x, y) = humanize::rest_spot(&mut rng);
             rect.pixel(x, y)
         });
-        let approach = approach(
+        let mut approach = approach(
             *duration_ms,
             from,
             rect.pixel(*x_norm, *y_norm),
@@ -108,6 +116,14 @@ impl Hand {
             rect.width / 16.0,
             &mut rng,
         );
+        if let Some(shown_at) = shown_at {
+            let seen_at =
+                shown_at + Duration::from_millis(u64::from(humanize::SEE.draw_ms(&mut rng)));
+            let see_ms = seen_at
+                .saturating_duration_since(Instant::now())
+                .as_millis();
+            wait_to_see(&mut approach, u32::try_from(see_ms).unwrap_or(u32::MAX));
+        }
         *duration_ms = approach.pause_ms;
         Some(approach)
     }
@@ -241,6 +257,19 @@ impl Hand {
             return;
         };
         let from = self.at.unwrap_or_else(|| rect.pixel(pressed.0, pressed.1));
+        self.rest_from(from, rect).await;
+        self.settle_glances();
+    }
+
+    /// Take the pointer off what it last pressed between decisions, to where it waits.
+    pub async fn rest(&mut self, rect: CanvasRect) {
+        self.sync_with_user();
+        if let Some(from) = self.at {
+            self.rest_from(from, rect).await;
+        }
+    }
+
+    async fn rest_from(&mut self, from: Point, rect: CanvasRect) {
         let leg = {
             let mut rng = rand::rng();
             let (x, y) = humanize::rest_spot(&mut rng);
@@ -248,7 +277,52 @@ impl Hand {
         };
         tokio::time::sleep(Duration::from_millis(u64::from(leg.dwell_ms))).await;
         self.move_to(leg.to, leg.travel_ms, leg.bend).await;
-        self.settle_glances();
+    }
+
+    /// Take the pointer to `to`, in CSS pixels, and press there, as a press
+    /// between decisions is made: a way of its own, then [`Self::tap`]. False
+    /// when the pointer could not be moved or the press failed.
+    pub async fn press_at(
+        &mut self,
+        to: Point,
+        rect: CanvasRect,
+        hover_ms: u32,
+        hold_ms: u32,
+    ) -> bool {
+        self.sync_with_user();
+        let leg = {
+            let mut rng = rand::rng();
+            // A pointer that has not been anywhere yet starts from where it
+            // would have been resting.
+            let from = *self.at.get_or_insert_with(|| {
+                let (x, y) = humanize::rest_spot(&mut rng);
+                rect.pixel(x, y)
+            });
+            leave(from, to, rect.width / 16.0, &mut rng)
+        };
+        self.move_to(leg.to, leg.travel_ms, leg.bend).await && self.tap(to, hover_ms, hold_ms).await
+    }
+
+    /// Press at `to`, in CSS pixels, where the pointer is or all but is:
+    /// about `hover_ms` on it first, the button held about `hold_ms`. False
+    /// when the press failed.
+    pub async fn tap(&mut self, to: Point, hover_ms: u32, hold_ms: u32) -> bool {
+        let page_guard = self.ctx.page.read().await;
+        let Some(page) = page_guard.as_ref() else {
+            warn!("autoplay: no page handle — cannot press");
+            return false;
+        };
+        if let Err(e) = crate::autoplay::cdp_input::dispatch_click_shaped(
+            page, to.0, to.1, hover_ms, hold_ms, false,
+        )
+        .await
+        {
+            warn!("autoplay: a press between decisions failed: {e:#}");
+            return false;
+        }
+        drop(page_guard);
+        self.at = Some(to);
+        true
     }
 
     /// Move the pointer to `to` over `travel_ms`. False when it could not

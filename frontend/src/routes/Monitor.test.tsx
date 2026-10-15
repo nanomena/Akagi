@@ -5,7 +5,7 @@ import { setLang } from '@/lib/i18n'
 
 const fixture = vi.hoisted(() => ({
   snapshot: null as MonitorSnapshot | null,
-  options: { always_on_top: false } as { always_on_top: boolean; pointer_trail?: boolean; pointer_lean?: boolean; stream_output?: boolean; stream_url?: string },
+  options: { always_on_top: false } as { always_on_top: boolean; pointer_trail?: boolean; pointer_lean?: boolean; quick_confirm?: boolean; riichi_auto_win?: boolean; stream_output?: boolean; stream_url?: string },
   calls: [] as Array<[string, unknown]>,
   /** What the core answers when an earlier hand's events are asked for. */
   handEvents: [] as MonitorEvent[],
@@ -20,13 +20,15 @@ vi.mock('@/lib/host', () => ({
     if (cmd === 'set_monitor_pinned') fixture.options = { ...fixture.options, always_on_top: (args as { pinned: boolean }).pinned }
     if (cmd === 'set_monitor_trail') fixture.options = { ...fixture.options, pointer_trail: (args as { enabled: boolean }).enabled }
     if (cmd === 'set_monitor_lean') fixture.options = { ...fixture.options, pointer_lean: (args as { enabled: boolean }).enabled }
+    if (cmd === 'set_monitor_confirm') fixture.options = { ...fixture.options, quick_confirm: (args as { enabled: boolean }).enabled }
+    if (cmd === 'set_monitor_auto_win') fixture.options = { ...fixture.options, riichi_auto_win: (args as { enabled: boolean }).enabled }
     if (cmd === 'set_monitor_stream') {
       const enabled = (args as { enabled: boolean }).enabled
       fixture.options = { ...fixture.options, stream_output: enabled, stream_url: enabled ? 'http://127.0.0.1:50123/0123456789abcdef01234567/' : undefined }
     }
     if (cmd === 'get_hand_events') return fixture.handEvents
     if (cmd === 'get_history') return fixture.history
-    return ['get_monitor_options', 'set_monitor_pinned', 'set_monitor_trail', 'set_monitor_lean', 'set_monitor_stream'].includes(cmd) ? fixture.options : undefined
+    return ['get_monitor_options', 'set_monitor_pinned', 'set_monitor_trail', 'set_monitor_lean', 'set_monitor_confirm', 'set_monitor_auto_win', 'set_monitor_stream'].includes(cmd) ? fixture.options : undefined
   }),
 }))
 // No canvas under jsdom, so mahgen cannot draw. A tile is then an <img> whose
@@ -394,6 +396,15 @@ describe('the settings', () => {
     fireEvent.click(lean)
     await waitFor(() => expect(screen.getByRole('switch', { name: '预推理' }).getAttribute('aria-checked')).toBe('true'))
     expect(fixture.calls).toContainEqual(['set_monitor_lean', { enabled: true }])
+
+    // What autoplay presses between decisions: each its own switch, saved by the core.
+    for (const [name, command] of [['快速确认', 'set_monitor_confirm'], ['立直自动和牌', 'set_monitor_auto_win']]) {
+      const row = screen.getByRole('switch', { name })
+      expect(row.getAttribute('aria-checked')).toBe('false')
+      fireEvent.click(row)
+      await waitFor(() => expect(screen.getByRole('switch', { name }).getAttribute('aria-checked')).toBe('true'))
+      expect(fixture.calls).toContainEqual([command, { enabled: true }])
+    }
 
     // The stream: off, its copy button is there but not shown; on, the address is the line under it.
     const copy = screen.getByRole('button', { name: '复制直播地址', hidden: true })
