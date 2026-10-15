@@ -11,17 +11,10 @@ use crate::autoplay::context::CanvasRect;
 use crate::autoplay::humanize;
 use crate::autoplay::majsoul::{coords, reach_of};
 use crate::autoplay::pixels::{self, Glyph};
-use crate::autoplay::pointer::aim;
+use crate::autoplay::pointer::{aim, spots, Touch};
 use crate::config::Platform;
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
-
-/// How long the client takes to draw a toggle's new state after a press.
-const REDRAW: Duration = Duration::from_millis(400);
-
-/// How long an act waits for the user's hand to leave the mouse, or for our
-/// own decision to be made, before it is looked at again.
-const PUT_OFF: Duration = Duration::from_millis(1200);
 
 impl AutoplayManager {
     /// The act due now, if it still is and is wanted.
@@ -47,7 +40,11 @@ impl AutoplayManager {
         // for our own decision to be made.
         let deciding = self.ctx.time_budget.read().ok().and_then(|g| *g).is_some();
         if user_active() || (act == Act::AutoWinOn && deciding) {
-            self.acts.later(act, Instant::now(), PUT_OFF);
+            self.acts.later(
+                act,
+                Instant::now(),
+                Duration::from_millis(humanize::ACT_PUT_OFF_MS),
+            );
             return;
         }
         // A rest or a look under way brakes where it is.
@@ -69,13 +66,8 @@ impl AutoplayManager {
         if let Some(rect) = self.canvas.resolve(&self.ctx).await {
             let reach = reach_of(coords::CONFIRM);
             let (cx, cy) = coords::CONFIRM;
-            // Never off the button.
             let nudged = |at: (f64, f64), x: humanize::Spread, y: humanize::Spread| {
-                let mut rng = rand::rng();
-                (
-                    (at.0 + x.draw(&mut rng)).clamp(cx - reach.half_x, cx + reach.half_x),
-                    (at.1 + y.draw(&mut rng)).clamp(cy - reach.half_y, cy + reach.half_y),
-                )
+                spots::nudge(at, coords::CONFIRM, reach, x, y, &mut rand::rng())
             };
             // A hand still on the button from the burst before stays on its
             // spot, a little moved; one coming from elsewhere lands anywhere
@@ -97,17 +89,25 @@ impl AutoplayManager {
                 if gone || user_active() {
                     break;
                 }
-                let pressed = if press == 0 {
-                    self.hand
-                        .press_at(rect.pixel(at.0, at.1), rect, hover_ms, hold_ms)
-                        .await
+                let touch = if press == 0 {
+                    Touch {
+                        hover_ms,
+                        hold_ms,
+                        jiggle: false,
+                    }
                 } else {
-                    // A hand clicking fast barely moves.
+                    // A hand clicking fast barely moves, and does not hover.
                     at = nudged(at, humanize::TAP_DRIFT_X, humanize::TAP_DRIFT_Y);
-                    self.hand
-                        .tap(rect.pixel(at.0, at.1), 0, humanize::TAP_HOLD_MS)
-                        .await
+                    Touch {
+                        hover_ms: 0,
+                        hold_ms: humanize::TAP_HOLD_MS,
+                        jiggle: false,
+                    }
                 };
+                let pressed = self
+                    .hand
+                    .press("result", rect.pixel(at.0, at.1), rect, touch)
+                    .await;
                 if !pressed {
                     break;
                 }
@@ -141,11 +141,16 @@ impl AutoplayManager {
             reach_of(coords::AUTO_WIN),
             &mut rand::rng(),
         );
+        let touch = Touch {
+            hover_ms,
+            hold_ms,
+            jiggle: false,
+        };
         let pressed = self
             .hand
-            .press_at(rect.pixel(at.0, at.1), rect, hover_ms, hold_ms)
+            .press("auto-win", rect.pixel(at.0, at.1), rect, touch)
             .await;
-        tokio::time::sleep(REDRAW).await;
+        tokio::time::sleep(Duration::from_millis(humanize::TOGGLE_REDRAW_MS)).await;
         match self.read_toggle(rect, coords::AUTO_WIN).await {
             Glyph::Lit if pressed => info!("autoplay: switched the client's auto-win on"),
             glyph => warn!(

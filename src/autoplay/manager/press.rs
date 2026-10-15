@@ -9,9 +9,9 @@
 
 use super::decision::Decision;
 use super::AutoplayManager;
-use crate::autoplay::cdp_input::dispatch_click_shaped;
 use crate::autoplay::context::CanvasRect;
 use crate::autoplay::platform::{PlanResult, Step};
+use crate::autoplay::pointer::Touch;
 use crate::autoplay::verify::InputTicket;
 use crate::schema::MjaiEvent;
 use std::time::Duration;
@@ -204,8 +204,11 @@ impl AutoplayManager {
             }
             for (i, (x_norm, y_norm)) in again.iter().enumerate() {
                 if i > 0 {
-                    tokio::time::sleep(Duration::from_millis(u64::from(cfg.inter_click_delay_ms)))
-                        .await;
+                    let gap = crate::autoplay::humanize::next_press_gap(
+                        cfg.inter_click_delay_ms,
+                        &mut rand::rng(),
+                    );
+                    tokio::time::sleep(Duration::from_millis(u64::from(gap))).await;
                 }
                 let (px, py) = rect.pixel(*x_norm, *y_norm);
                 if !rect.contains(px, py) {
@@ -215,23 +218,15 @@ impl AutoplayManager {
                     );
                     continue;
                 }
-                // A press made again is moved to like any other: its fresh
-                // point, or the press before it, is somewhere else.
-                if !self.hand.reach((px, py), rect).await {
-                    return false;
-                }
-                let page_guard = self.ctx.page.read().await;
-                let Some(page) = page_guard.as_ref() else {
-                    warn!("autoplay: no page handle — abandoning retry for {action:?}");
-                    return false;
+                // A press made again is made like any other: its fresh
+                // point, or the press before it, is somewhere else. One that
+                // fails says so; the next attempt is the answer to it.
+                let touch = Touch {
+                    hover_ms: cfg.hover_delay_ms,
+                    hold_ms: hold,
+                    jiggle,
                 };
-                if let Err(e) =
-                    dispatch_click_shaped(page, px, py, cfg.hover_delay_ms, hold, jiggle).await
-                {
-                    warn!("autoplay: retry dispatch_click failed: {e:#}");
-                }
-                drop(page_guard);
-                self.hand.pressed((px, py));
+                self.hand.press("retry", (px, py), rect, touch).await;
             }
         }
         // The timings are in the message because a config written before a
