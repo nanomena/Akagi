@@ -79,6 +79,7 @@ pub async fn start(state: AppState) -> Result<()> {
         platform,
         mjai_bus: state.mjai_bus.clone(),
         notify_bus: state.notify_bus.clone(),
+        account_bus: state.account_bus.clone(),
         autoplay: Some(state.autoplay_context.clone()),
         http,
     };

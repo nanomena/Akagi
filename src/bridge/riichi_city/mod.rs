@@ -277,6 +277,7 @@ impl RiichiCityBridge {
                         stage_type: self.status.stage_type,
                         game_play: self.status.game_play,
                     }),
+                    our_level: None,
                 }),
             });
             self.status.game_start = false;

@@ -1,7 +1,7 @@
 // @ts-check
 // What the game is doing, for pages a streaming program shows beside it: the
-// round and the scores, how each hand of this game ended, and the games on
-// record. Nothing about the bot — no decision, no candidate, nothing a bot or
+// round and the scores, how each hand of this game ended, the player's own
+// ranks, and the games on record. Nothing about the bot — no decision, no candidate, nothing a bot or
 // its service said of itself, not even whether autoplay is on. The core's
 // monitor snapshot and its game records are cut down here to what anyone
 // watching the table could see, field by field: a field the core adds later is
@@ -18,7 +18,7 @@ const MATCH_FIELDS = /** @type {Record<string, string[]>} */ ({
 })
 
 const RECORD_FIELDS = ['id', 'started_at', 'ended_at', 'platform', 'num_players', 'kyoku_mode', 'names', 'our_seat',
-  'final_scores', 'final_ranks', 'our_rank', 'our_delta', 'our_rank_points', 'stats', 'yaku']
+  'final_scores', 'final_ranks', 'our_rank', 'our_delta', 'our_rank_points', 'our_level', 'stats', 'yaku']
 
 /** @param {unknown} value @returns {value is Record<string, any>} */
 const isObject = value => typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -39,6 +39,22 @@ function pick(from, names) {
   const kept = {}
   for (const name of names) if (Object.hasOwn(from, name)) kept[name] = from[name]
   return kept
+}
+
+/** A place on a rank ladder, as the platform gives it: `{id, score}`. */
+function publicLevel(/** @type {unknown} */ level) {
+  if (!isObject(level) || typeof level.id !== 'number' || typeof level.score !== 'number') return null
+  return { id: level.id, score: level.score }
+}
+
+/**
+ * The player's own ranks, four- and three-player, as the platform last said
+ * them, and when: the games that ended before are counted in them. Not who
+ * the player is.
+ */
+function publicAccount(/** @type {unknown} */ account) {
+  if (!isObject(account)) return null
+  return { level: publicLevel(account.level), level3: publicLevel(account.level3), at: text(account.at) }
 }
 
 /** How a hand ended, and the hands that were shown when it did. */
@@ -90,6 +106,7 @@ export function publicState(snapshot) {
       honba: number(hand.honba),
       result: publicRound(hand.result),
     })),
+    account: publicAccount(snapshot.account),
   }
 }
 

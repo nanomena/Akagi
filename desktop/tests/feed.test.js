@@ -59,6 +59,7 @@ test('the table is passed on, and nothing about the bot', () => {
       { round: 1, bakaze: 'E', kyoku: 1, honba: 0, result: { kind: 'hora', scores: [33000, 17000, 25000, 25000], deltas: [8000, -8000, 0, 0], hands: [{ seat: 0, tiles: ['1m', '1m'], winning_tile: '1m', target: 1, ura_markers: ['4s'] }] } },
       { round: 2, bakaze: 'E', kyoku: 2, honba: 1, result: null },
     ],
+    account: null,
   })
   const sent = JSON.stringify(state)
   for (const left of ['secret', 'Model A', 'autoplay', 'tehai', 'drawn', 'decision', 'facts', 'service', '5z']) {
@@ -68,18 +69,32 @@ test('the table is passed on, and nothing about the bot', () => {
   assert.equal(publicState(snapshot({ game: null }))?.game, null)
 })
 
+test("the player's own ranks are passed on, and not who the player is", () => {
+  const account = {
+    level: { id: 10203, score: 833, extra: 1 }, level3: { id: 20101, score: 0 }, at: '2026-10-15T04:10:14.519123400Z',
+    account_id: 23456789, nickname: 'Ann',
+  }
+  assert.deepEqual(publicState(snapshot({ account }))?.account, {
+    level: { id: 10203, score: 833 }, level3: { id: 20101, score: 0 }, at: '2026-10-15T04:10:14.519123400Z',
+  })
+  const sent = JSON.stringify(publicState(snapshot({ account, names: [] })))
+  for (const left of ['23456789', 'Ann', 'extra']) assert.ok(!sent.includes(left), `"${left}" must not be in the feed`)
+  assert.deepEqual(publicState(snapshot({ account: { level: null, level3: { id: 'x' }, at: 5 } }))?.account, { level: null, level3: null, at: null })
+})
+
 test('a game on record is passed on without where its log is or the ids of its replay', () => {
   const record = {
     id: '01J0000000000000000000000', started_at: '2026-10-14T10:00:00Z', ended_at: '2026-10-14T10:30:00Z',
     platform: 'majsoul', num_players: 4, kyoku_mode: 'east_south', names: ['Ann', 'Bo', 'Cy', 'Di'], our_seat: 0,
     final_scores: [40000, 30000, 20000, 10000], final_ranks: [1, 2, 3, 4], our_rank: 1, our_delta: 15000,
-    stats: { round: 8, agari: 3 }, our_rank_points: 85, yaku: { 1: 2 },
+    stats: { round: 8, agari: 3 }, our_rank_points: 85, our_level: { id: 10203, score: 761 }, yaku: { 1: 2 },
     match_info: { platform: 'majsoul', game_uuid: 'replay-id', mode_id: 12, room_id: 0 },
     log_path: 'games/01J0000000000000000000000.mjai.jsonl',
   }
   const result = publicResult(record)
   assert.deepEqual(result?.match_info, { platform: 'majsoul', mode_id: 12, room_id: 0 })
   assert.equal(result?.our_rank_points, 85)
+  assert.deepEqual(result?.our_level, { id: 10203, score: 761 })
   assert.deepEqual(result?.final_ranks, [1, 2, 3, 4])
   const sent = JSON.stringify(result)
   assert.ok(!sent.includes('replay-id'))

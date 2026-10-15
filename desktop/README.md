@@ -88,10 +88,13 @@ http://127.0.0.1:<port>/<token>/pages/…     the files in <data>/stream-pages/,
 
 The feed is what anyone watching the table could see, and nothing about the
 bot: `state` has the names, our seat, the round (wind, hand, honba, sticks,
-dealer), each seat's score and riichi, the dora indicators, and how each hand
-of this game ended with the hands shown when it did; `results` has the games on
-record — scores, placements, rank points, per-game counts and yaku — without
-the path of their logs or the ids that lead to a replay. No decision, no
+dealer), each seat's score and riichi, the dora indicators, how each hand of
+this game ended with the hands shown when it did, and the player's own ranks
+(`account`: the four- and three-player `{id, score}` as Mahjong Soul last said
+them, at login, a game's start or after a game, and `at`, when); `results` has
+the games on record — scores, placements, rank points, our rank as the game
+began (`our_level`), per-game counts and yaku — without the path of their logs
+or the ids that lead to a replay, and never who the player is. No decision, no
 candidate, nothing a bot said of itself, and not whether autoplay is on. Every
 field is named in `src/feed.js`; one the core adds later stays out until it is
 named there. `state.version` goes up when a field changes meaning or goes away.
