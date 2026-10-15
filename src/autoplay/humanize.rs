@@ -174,6 +174,14 @@ pub const TRAVEL: Scaled = Scaled {
     floor: 0.0,
     high: 1.9,
 };
+/// How long a hand is still before it turns sharply: it never reverses or
+/// cuts a corner at speed, whatever planned the next move.
+pub const TURN_STOP: Tail = Tail {
+    median: 280.0,
+    spread: 0.3,
+    low: 180.0,
+    high: 600.0,
+};
 /// On what it pressed, before leaving it.
 pub const LINGER: Tail = Tail {
     median: 550.0,

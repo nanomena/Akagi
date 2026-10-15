@@ -34,6 +34,9 @@ pub struct Hand {
     /// The pointer went to where the draw lands before the draw came: a
     /// tsumogiri then leaves it there rather than taking it back to rest.
     waiting_on_draw: bool,
+    /// The way the pointer last moved, as a unit direction, and when it got
+    /// there: a sharp turn from it waits for a stop (see [`turn_wait`]).
+    last_move: Option<(Point, Instant)>,
 }
 
 impl Hand {
@@ -45,6 +48,7 @@ impl Hand {
             glance_at: None,
             last_turn: None,
             waiting_on_draw: false,
+            last_move: None,
         }
     }
 
@@ -53,6 +57,7 @@ impl Hand {
     pub fn reset(&mut self) {
         *self = Self {
             at: self.at,
+            last_move: self.last_move,
             ..Self::new(self.ctx.clone())
         };
     }
@@ -72,6 +77,8 @@ impl Hand {
                 at.0, at.1
             );
             self.at = Some(at);
+            // The user's hand moved it last; there is no way of ours to turn from.
+            self.last_move = None;
         }
     }
 
@@ -384,9 +391,19 @@ impl Hand {
     async fn move_to(&mut self, kind: &str, to: Point, travel_ms: u32, bend: f64) -> bool {
         self.sync_with_user();
         let from = self.at.unwrap_or(to);
+        // Whoever planned this move, a hand turns sharply only from a stop.
+        let wait = turn_wait(self.last_move, from, to, Instant::now(), &mut rand::rng());
+        if let Some(wait) = wait {
+            tokio::time::sleep(wait).await;
+        }
         info!(
-            "autoplay: pointer {kind} ({:.0}, {:.0}) -> ({:.0}, {:.0}) in {travel_ms} ms",
-            from.0, from.1, to.0, to.1
+            "autoplay: pointer {kind} ({:.0}, {:.0}) -> ({:.0}, {:.0}) in {travel_ms} ms{}",
+            from.0,
+            from.1,
+            to.0,
+            to.1,
+            wait.map(|w| format!(", after a stop of {} ms to turn", w.as_millis()))
+                .unwrap_or_default()
         );
         let page_guard = self.ctx.page.read().await;
         let Some(page) = page_guard.as_ref() else {
@@ -399,8 +416,42 @@ impl Hand {
         }
         drop(page_guard);
         self.at = Some(to);
+        if let Some(way) = direction(from, to) {
+            self.last_move = Some((way, Instant::now()));
+        }
         true
     }
+}
+
+/// How long a move from `from` to `to` waits before it sets off, when it
+/// turns sharply — by more than 60 degrees — from the last move (`last`: its
+/// direction and when it ended): long enough that the hand has been still
+/// [`humanize::TURN_STOP`] since. A gentle bend, a turn after such a stop
+/// anyway (a press's hover and hold count), or a move of a few pixels waits
+/// nothing.
+fn turn_wait<R: rand::Rng + ?Sized>(
+    last: Option<(Point, Instant)>,
+    from: Point,
+    to: Point,
+    now: Instant,
+    rng: &mut R,
+) -> Option<Duration> {
+    let (was, ended) = last?;
+    let way = direction(from, to)?;
+    if was.0 * way.0 + was.1 * way.1 >= 0.5 {
+        return None;
+    }
+    let stop = Duration::from_millis(u64::from(humanize::TURN_STOP.draw_ms(rng)));
+    stop.checked_sub(now.saturating_duration_since(ended))
+        .filter(|wait| !wait.is_zero())
+}
+
+/// Which way a move from `from` to `to` goes, as a unit vector; `None` for a
+/// move of a few pixels, which has no way worth turning from.
+fn direction(from: Point, to: Point) -> Option<Point> {
+    let (dx, dy) = (to.0 - from.0, to.1 - from.1);
+    let length = (dx * dx + dy * dy).sqrt();
+    (length >= 6.0).then(|| (dx / length, dy / length))
 }
 
 /// Whether the seat's own discard follows `action`: a call, after which the
@@ -426,6 +477,51 @@ fn after_a_reaction() -> Instant {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+
+    /// A move that reverses, or turns a corner, right after the last one
+    /// waits for a stop; one that goes on the same way, or turns after a
+    /// stop long enough, or barely moves, does not.
+    #[test]
+    fn a_sharp_turn_waits_for_a_stop_and_nothing_else_does() {
+        let mut rng = StdRng::seed_from_u64(41);
+        let ended = Instant::now();
+        let right = Some(((1.0, 0.0), ended));
+        let just_after = ended + Duration::from_millis(20);
+        let from = (500.0, 500.0);
+        // Back the way it came, and a right angle: a stop first.
+        for to in [(300.0, 500.0), (500.0, 700.0)] {
+            let wait = turn_wait(right, from, to, just_after, &mut rng).expect("a stop");
+            let least = humanize::TURN_STOP.low as u64 - 20;
+            assert!(wait >= Duration::from_millis(least), "{wait:?}");
+            assert!(wait <= Duration::from_millis(humanize::TURN_STOP.high as u64));
+        }
+        // On the same way, or bending gently: no stop.
+        assert_eq!(
+            turn_wait(right, from, (700.0, 520.0), just_after, &mut rng),
+            None
+        );
+        assert_eq!(
+            turn_wait(right, from, (650.0, 620.0), just_after, &mut rng),
+            None
+        );
+        // Still long enough already, or a nudge of a pixel or two: no stop.
+        let later = ended + Duration::from_millis(humanize::TURN_STOP.high as u64);
+        assert_eq!(
+            turn_wait(right, from, (300.0, 500.0), later, &mut rng),
+            None
+        );
+        assert_eq!(
+            turn_wait(right, from, (497.0, 501.0), just_after, &mut rng),
+            None
+        );
+        // Nothing moved before: nothing to turn from.
+        assert_eq!(
+            turn_wait(None, from, (300.0, 500.0), just_after, &mut rng),
+            None
+        );
+    }
 
     #[test]
     fn a_call_is_followed_by_the_seats_own_discard_and_a_discard_is_not() {
