@@ -285,10 +285,27 @@ pub const BURST_GAP: Tail = Tail {
 /// draws it: quick, and with no hover first, the pointer already on it.
 pub const TAP_HOLD_MS: u32 = 70;
 /// How far, in the 16:9 unit, the pointer drifts between the presses of a
-/// burst: a pixel or two, a hand clicking fast not moving the mouse.
-pub const TAP_DRIFT: Spread = Spread {
+/// burst, sideways and up and down: a pixel or two, a hand clicking fast not
+/// moving the mouse. A press pushes the mouse more along the hand than across
+/// it, so mostly up and down.
+pub const TAP_DRIFT_X: Spread = Spread {
+    sd: 0.005,
+    most: 0.02,
+};
+pub const TAP_DRIFT_Y: Spread = Spread {
+    sd: 0.016,
+    most: 0.05,
+};
+/// From one burst on the same button to the next, the hand still on it: it
+/// stays where it was, moved a little more than between two presses, again
+/// mostly up and down.
+pub const STAY_DRIFT_X: Spread = Spread {
     sd: 0.012,
     most: 0.04,
+};
+pub const STAY_DRIFT_Y: Spread = Spread {
+    sd: 0.035,
+    most: 0.10,
 };
 /// From our riichi being accepted to the hand switching the client's
 /// auto-win on: any moment as likely as the next, so an early riichi, with

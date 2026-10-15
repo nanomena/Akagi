@@ -66,7 +66,26 @@ impl AutoplayManager {
         let watch = self.ctx.input_watch.clone();
         if let Some(rect) = self.canvas.resolve(&self.ctx).await {
             let reach = reach_of(coords::CONFIRM);
-            let mut at = aim::again(coords::CONFIRM, reach, &mut rand::rng());
+            let (cx, cy) = coords::CONFIRM;
+            // Never off the button.
+            let nudged = |at: (f64, f64), x: humanize::Spread, y: humanize::Spread| {
+                let mut rng = rand::rng();
+                (
+                    (at.0 + x.draw(&mut rng)).clamp(cx - reach.half_x, cx + reach.half_x),
+                    (at.1 + y.draw(&mut rng)).clamp(cy - reach.half_y, cy + reach.half_y),
+                )
+            };
+            // A hand still on the button from the burst before stays on its
+            // spot, a little moved; one coming from elsewhere lands anywhere
+            // in it.
+            let on_button =
+                self.hand.at().map(|(x, y)| rect.norm(x, y)).filter(|p| {
+                    (p.0 - cx).abs() <= reach.half_x && (p.1 - cy).abs() <= reach.half_y
+                });
+            let mut at = match on_button {
+                Some(p) => nudged(p, humanize::STAY_DRIFT_X, humanize::STAY_DRIFT_Y),
+                None => aim::again(coords::CONFIRM, reach, &mut rand::rng()),
+            };
             for press in 0..presses {
                 if press > 0 {
                     let gap = humanize::BURST_GAP.draw_ms(&mut rand::rng());
@@ -81,17 +100,8 @@ impl AutoplayManager {
                         .press_at(rect.pixel(at.0, at.1), rect, hover_ms, hold_ms)
                         .await
                 } else {
-                    // A hand clicking fast barely moves, and never off the button.
-                    at = {
-                        let mut rng = rand::rng();
-                        let (cx, cy) = coords::CONFIRM;
-                        (
-                            (at.0 + humanize::TAP_DRIFT.draw(&mut rng))
-                                .clamp(cx - reach.half_x, cx + reach.half_x),
-                            (at.1 + humanize::TAP_DRIFT.draw(&mut rng))
-                                .clamp(cy - reach.half_y, cy + reach.half_y),
-                        )
-                    };
+                    // A hand clicking fast barely moves.
+                    at = nudged(at, humanize::TAP_DRIFT_X, humanize::TAP_DRIFT_Y);
                     self.hand
                         .tap(rect.pixel(at.0, at.1), 0, humanize::TAP_HOLD_MS)
                         .await
