@@ -32,7 +32,10 @@ const port = await new Promise(done => {
   const probe = net.createServer().listen(0, '127.0.0.1', () => { const { port } = /** @type {net.AddressInfo} */ (probe.address()); probe.close(() => done(port)) })
 })
 
-const shell = spawn(electron, [DESKTOP, '--no-sandbox', `--data=${path.join(work, 'data')}`, `--core=${core}`, `--dock=${dock}`, `--cdp-port=${port}`], { stdio: ['ignore', 'pipe', 'pipe'] })
+// On a screen of scale 1.5, as many are: CSS and screen pixels differ, which is
+// where a page drawn for the stream could be laid out apart from its view.
+const SCREEN_SCALE = 1.5
+const shell = spawn(electron, [DESKTOP, '--no-sandbox', `--force-device-scale-factor=${SCREEN_SCALE}`, `--data=${path.join(work, 'data')}`, `--core=${core}`, `--dock=${dock}`, `--cdp-port=${port}`], { stdio: ['ignore', 'pipe', 'pipe'] })
 let said = ''
 shell.stdout.on('data', text => { said += text })
 shell.stderr.on('data', text => { said += text })
@@ -121,6 +124,58 @@ try {
     const attached = await send('Target.attachToTarget', { targetId: game.targetId, flatten: true })
     const size = (await send('Runtime.evaluate', { expression: '[innerWidth, innerHeight]', returnByValue: true }, attached.sessionId)).result.value
     check('the game view is the size of the stage', seen.stage && Math.abs(size[0] - seen.stage[0]) <= 1 && Math.abs(size[1] - seen.stage[1]) <= 1, `${size.join('×')} on a stage of ${seen.stage?.join('×')}`)
+  }
+
+  // The game offered to a streaming program: an address under a secret, and
+  // frames of exactly what the view shows, taken without changing anything
+  // about the game's page.
+  if (game) {
+    const attached = await send('Target.attachToTarget', { targetId: game.targetId, flatten: true })
+    await send('Runtime.evaluate', { expression: "window.__resized = 0; addEventListener('resize', () => window.__resized++)" }, attached.sessionId)
+    const metrics = async () => (await send('Runtime.evaluate', { expression: '[innerWidth, innerHeight, devicePixelRatio, window.__resized]', returnByValue: true }, attached.sessionId)).result.value
+    const before = await metrics()
+    const options = await evaluate(`window.akagi.invoke('set_monitor_stream', { enabled: true })`)
+    const url = String(options.stream_url ?? '')
+    check('switching the stream on gives an address on this machine under a secret', /^http:\/\/127\.0\.0\.1:\d+\/[0-9a-f]{24}\/$/.test(url), url)
+    if (url) {
+      const page = await fetch(url)
+      check("the address serves the stream's page", page.ok && /viewer\.js/.test(await page.text()), String(page.status))
+      check('the address without its secret serves nothing', (await fetch(new URL('/', url))).status === 404)
+      const watching = new AbortController()
+      const reply = await fetch(new URL('stream.mjpg', url), { signal: watching.signal })
+      const reader = /** @type {ReadableStreamDefaultReader<Uint8Array>} */ (reply.body?.getReader())
+      /** @type {Buffer} */
+      let got = Buffer.alloc(0)
+      /** @type {number[] | null} */
+      let size = null
+      const end = Date.now() + 15000
+      while (!size && Date.now() < end) {
+        const { value, done } = await Promise.race([reader.read(), sleep(15000).then(() => ({ value: undefined, done: true }))])
+        if (done || !value) break
+        got = Buffer.concat([got, value])
+        // The width and height in the first frame's start-of-frame marker.
+        const start = got.indexOf(Buffer.from([0xff, 0xd8]))
+        for (let i = start + 2; start >= 0 && i + 9 < got.length;) {
+          if (got[i] !== 0xff) break
+          const marker = got[i + 1]
+          if (marker >= 0xc0 && marker <= 0xc3) { size = [got.readUInt16BE(i + 7), got.readUInt16BE(i + 5)]; break }
+          i += 2 + got.readUInt16BE(i + 2)
+        }
+      }
+      const during = await metrics()
+      const pixels = [Math.round(before[0] * SCREEN_SCALE), Math.round(before[1] * SCREEN_SCALE)]
+      check("frames are the view's own size in screen pixels", size && Math.abs(size[0] - pixels[0]) <= 1 && Math.abs(size[1] - pixels[1]) <= 1, `${size?.join('×') ?? 'no frame'} for ${pixels.join('×')}`)
+      const same = (/** @type {number[]} */ a) => a.every((v, i) => v === before[i])
+      check("the game's page is left exactly as it is while it is streamed", before[2] === SCREEN_SCALE && same(during), `${before.join(' ')} → ${during.join(' ')}`)
+      watching.abort()
+      await sleep(4000)
+      const after = await metrics()
+      check('and after nobody watches any more', same(after), `${after.join(' ')}`)
+      const off = await evaluate(`window.akagi.invoke('set_monitor_stream', { enabled: false })`)
+      check('switching the stream off takes the address away', !off.stream_url && off.stream_output === false && off.stream_token === options.stream_token)
+      const gone = await fetch(url).then(() => 'served', () => 'refused')
+      check('nothing is served once it is off', gone === 'refused', gone)
+    }
   }
 
   const problems = events.filter(event => event.sessionId === sessionId)
