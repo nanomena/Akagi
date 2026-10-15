@@ -50,6 +50,20 @@ pub const ACTIONS: [(f64, f64); 9] = [
     (6.4, 4.8),
 ];
 
+/// The confirm button of a hand's result, bottom right, under its countdown.
+/// Measured on the client's result screen (2026-10-15).
+pub const CONFIRM: (f64, f64) = (14.59, 8.37);
+
+/// The client's own toggles down the left of the table, top to bottom: auto
+/// sort, auto win, no calls, auto tsumogiri. Each is a glyph, green while on.
+/// Measured on the client's table (2026-10-15).
+pub const AUTO_SORT: (f64, f64) = (0.347, 4.55);
+pub const AUTO_WIN: (f64, f64) = (0.347, 5.10);
+pub const NO_CALLS: (f64, f64) = (0.347, 5.64);
+pub const AUTO_TSUMOGIRI: (f64, f64) = (0.347, 6.14);
+/// Half a toggle glyph's box, in units of the canvas.
+pub const TOGGLE_HALF: f64 = 0.15;
+
 /// Candidate-selection row for chi/pon disambiguation. Index formula
 /// from the Python reference: `idx = int((-(len/2) + i + 0.5)*2 + 5)`.
 pub const CANDIDATES: [(f64, f64); 11] = [

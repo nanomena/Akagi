@@ -434,6 +434,22 @@ pub fn reach_of(at: (f64, f64)) -> crate::autoplay::pointer::aim::Reach {
             half_x: 0.22,
             half_y: 0.3,
         }
+    } else if is(&[coords::CONFIRM]) {
+        // The button is about 1.45 wide and 0.53 high.
+        Reach {
+            half_x: 0.45,
+            half_y: 0.16,
+        }
+    } else if is(&[
+        coords::AUTO_SORT,
+        coords::AUTO_WIN,
+        coords::NO_CALLS,
+        coords::AUTO_TSUMOGIRI,
+    ]) {
+        Reach {
+            half_x: 0.08,
+            half_y: 0.1,
+        }
     } else {
         Reach {
             half_x: 0.12,

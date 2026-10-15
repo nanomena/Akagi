@@ -26,6 +26,8 @@
 //! | `set_monitor_pinned`   | `{pinned}`           | `MonitorConfig`         |
 //! | `set_monitor_trail`    | `{enabled}`          | `MonitorConfig`         |
 //! | `set_monitor_lean`     | `{enabled}`          | `MonitorConfig`         |
+//! | `set_monitor_confirm`  | `{enabled}`          | `MonitorConfig`         |
+//! | `set_monitor_auto_win` | `{enabled}`          | `MonitorConfig`         |
 //! | `set_user_pointer`     | `{active, x?, y?}`   | `null`                  |
 //! | `set_monitor_autoplay` | `{enabled}`          | `null`                  |
 //! | `open_game`            | `{port, target}`     | `null`                  |
@@ -348,6 +350,20 @@ async fn answer(state: &AppState, method: &str, params: Value) -> Result<Value, 
                 .await?;
             reply(config.monitor)
         }
+        "set_monitor_confirm" => {
+            let Enabled { enabled } = parse(params)?;
+            let config = state
+                .save_config(|c| c.monitor.quick_confirm = enabled)
+                .await?;
+            reply(config.monitor)
+        }
+        "set_monitor_auto_win" => {
+            let Enabled { enabled } = parse(params)?;
+            let config = state
+                .save_config(|c| c.monitor.riichi_auto_win = enabled)
+                .await?;
+            reply(config.monitor)
+        }
         "set_monitor_autoplay" => {
             let Enabled { enabled } = parse(params)?;
             state.save_config(|c| c.autoplay.enabled = enabled).await?;
@@ -584,12 +600,14 @@ mod tests {
                 always_on_top: true,
                 pointer_trail: false,
                 pointer_lean: false,
+                quick_confirm: true,
+                riichi_auto_win: false,
             },
             version: "1.2.3",
         };
         assert_eq!(
             serde_json::to_value(ready).unwrap(),
-            json!({ "brand": "Akagi", "monitor": { "always_on_top": true, "pointer_trail": false, "pointer_lean": false }, "version": "1.2.3" })
+            json!({ "brand": "Akagi", "monitor": { "always_on_top": true, "pointer_trail": false, "pointer_lean": false, "quick_confirm": true, "riichi_auto_win": false }, "version": "1.2.3" })
         );
     }
 }

@@ -9,6 +9,9 @@
 //! - **Times** are log-normal ([`Tail`], [`Scaled`]): mostly near their median,
 //!   now and then a good deal longer, never one fixed rhythm. Bounds keep a
 //!   tail from running away.
+//! - **Waits for a moment** that could come at any time ([`Hazard`]) are
+//!   exponential: no moment likelier than another, so the longer the chance
+//!   lasts, the likelier it was taken.
 //! - **Places** are normal about where they aim ([`Spread`]): mostly near, now
 //!   and then further, never past a bound that would put them on something
 //!   else. Where the hand waits between presses has a tail of its own
@@ -90,6 +93,24 @@ impl Spread {
     }
 }
 
+/// A wait in which every moment is as likely as any other to be the one it
+/// ends: at least `floor` ms, then exponential with mean `mean` ms, never
+/// past `most`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Hazard {
+    pub floor: f64,
+    pub mean: f64,
+    pub most: f64,
+}
+
+impl Hazard {
+    pub fn draw_ms<R: Rng + ?Sized>(&self, rng: &mut R) -> u32 {
+        let u: f64 = rng.random();
+        let wait = self.floor - self.mean * (1.0 - u).max(f64::MIN_POSITIVE).ln();
+        wait.min(self.most).round() as u32
+    }
+}
+
 // ---- Times ----
 
 /// Over the target before pressing it, about the configured hover.
@@ -135,6 +156,15 @@ pub const SETTLE: Tail = Tail {
     low: 1000.0,
     high: 8000.0,
 };
+/// From the frame that opens a decision — our draw, a discard we may call —
+/// to the hand being able to move for it: the client's animation of the tile
+/// coming in, and a person seeing what it is.
+pub const SEE: Tail = Tail {
+    median: 800.0,
+    spread: 0.3,
+    low: 500.0,
+    high: 2200.0,
+};
 /// From a changed mind to the pointer moving.
 pub const REACTION: Tail = Tail {
     median: 650.0,
@@ -178,6 +208,53 @@ pub const SETTLE_REST: Tail = Tail {
 /// a real mouse's events come.
 pub fn frame_ms<R: Rng + ?Sized>(rng: &mut R) -> u64 {
     rng.random_range(11..=17)
+}
+
+// ---- Between decisions ----
+
+/// From a hand's result showing to the hand starting to press its way
+/// through it: a reaction, then any moment as likely as the next.
+pub const RESULT_START: Hazard = Hazard {
+    floor: 600.0,
+    mean: 3000.0,
+    most: 30_000.0,
+};
+/// Between one burst of presses on the result and the next.
+pub const RESULT_PAUSE: Hazard = Hazard {
+    floor: 300.0,
+    mean: 1500.0,
+    most: 20_000.0,
+};
+/// The chance a burst has a third press, after its two.
+pub const BURST_MORE: f64 = 0.5;
+/// Between the presses of a burst.
+pub const BURST_GAP: Tail = Tail {
+    median: 150.0,
+    spread: 0.35,
+    low: 70.0,
+    high: 600.0,
+};
+/// What a press of a burst holds the button about, in ms, before [`HOLD`]
+/// draws it: quick, and with no hover first, the pointer already on it.
+pub const TAP_HOLD_MS: u32 = 70;
+/// How far, in the 16:9 unit, the pointer drifts between the presses of a
+/// burst: a pixel or two, a hand clicking fast not moving the mouse.
+pub const TAP_DRIFT: Spread = Spread {
+    sd: 0.012,
+    most: 0.04,
+};
+/// From our riichi being accepted to the hand switching the client's
+/// auto-win on: any moment as likely as the next, so an early riichi, with
+/// longer to go, is the likelier to have it switched on.
+pub const AUTO_WIN_ON: Hazard = Hazard {
+    floor: 2000.0,
+    mean: 25_000.0,
+    most: 600_000.0,
+};
+
+/// How many presses a burst has: two, or three as likely as [`BURST_MORE`].
+pub fn burst_len<R: Rng + ?Sized>(rng: &mut R) -> u32 {
+    2 + u32::from(chance(BURST_MORE, rng))
 }
 
 // ---- Shapes of an approach ----
@@ -367,6 +444,39 @@ mod tests {
         far.sort_by(f64::total_cmp);
         assert!(far[2000] < 1.2, "mostly near: median {}", far[2000]);
         assert!(far[3900] > 2.5, "and now and then far: {}", far[3900]);
+    }
+
+    /// A wait for any moment: never before its floor nor past its most, its
+    /// mean the floor and the mean, and no moment likelier than another —
+    /// having lasted a while, it is as likely to go on as at the start.
+    #[test]
+    fn a_wait_for_any_moment_has_no_likelier_moment() {
+        let wait = Hazard {
+            floor: 1000.0,
+            mean: 4000.0,
+            most: 60_000.0,
+        };
+        let all = draws(20_000, |rng| wait.draw_ms(rng));
+        assert!(all.iter().all(|&ms| (1000..=60_000).contains(&ms)));
+        let mean = all.iter().map(|&ms| f64::from(ms)).sum::<f64>() / all.len() as f64;
+        assert!((mean / 5000.0 - 1.0).abs() < 0.05, "mean {mean}");
+        // Past the floor, lasting another 4 s is as likely from 1 s as from 9 s.
+        let past = |from: u32| {
+            let left: Vec<_> = all.iter().filter(|&&ms| ms >= from).collect();
+            left.iter().filter(|&&&ms| ms >= from + 4000).count() as f64 / left.len() as f64
+        };
+        let (early, late) = (past(1000), past(9000));
+        assert!((early - late).abs() < 0.04, "{early} {late}");
+        assert!((early - (-1.0f64).exp()).abs() < 0.03, "{early}");
+    }
+
+    /// A burst is two presses or three, three as likely as [`BURST_MORE`].
+    #[test]
+    fn a_burst_is_two_presses_or_three() {
+        let all = draws(20_000, burst_len);
+        assert!(all.iter().all(|&n| (2..=3).contains(&n)));
+        let three = all.iter().filter(|&&n| n == 3).count() as f64 / all.len() as f64;
+        assert!((three - BURST_MORE).abs() < 0.02, "{three}");
     }
 
     /// A place's spread stays within its bound and is mostly small.
