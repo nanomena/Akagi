@@ -208,14 +208,6 @@ impl AutoplayManager {
             }
         }
 
-        // Throwing the tile just drawn: see `Hand::rest_after`.
-        let threw_draw = matches!(
-            resp.action,
-            MjaiEvent::Dahai {
-                tsumogiri: true,
-                ..
-            }
-        );
         let (mut plan, glance) = {
             let action_ctx =
                 decision.context(&resp.action, &self.state, self.delay_script.script());
@@ -319,7 +311,7 @@ impl AutoplayManager {
         {
             return;
         }
-        self.prove(&plan, rect, ticket, &decision, &resp.action, threw_draw)
+        self.prove(&plan, rect, ticket, &decision, &resp.action)
             .await;
     }
 
