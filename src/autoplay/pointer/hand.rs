@@ -108,11 +108,18 @@ impl Hand {
             let (x, y) = humanize::rest_spot(&mut rng);
             rect.pixel(x, y)
         });
+        // The runner-up is rested on where a tile is: high on it, as a press.
+        let glance = glance.map(|(x, y)| {
+            rect.pixel(
+                x + humanize::LOOK_OFF_X.draw(&mut rng),
+                y + humanize::on_tile_y(&mut rng),
+            )
+        });
         let mut approach = approach(
             *duration_ms,
             from,
             rect.pixel(*x_norm, *y_norm),
-            glance.map(|(x, y)| rect.pixel(x, y)),
+            glance,
             rest_ms,
             rect.width / 16.0,
             &mut rng,
@@ -225,10 +232,10 @@ impl Hand {
             if crate::autoplay::majsoul::on_tile(at, pointer) {
                 return;
             }
-            // Not the middle of the tile every time.
+            // Not the middle of the tile every time, and high on it, as a press.
             let at = (
                 at.0 + humanize::LOOK_OFF_X.draw(&mut rng),
-                at.1 + humanize::LOOK_OFF_Y.draw(&mut rng),
+                at.1 + humanize::on_tile_y(&mut rng),
             );
             let to = rect.pixel(at.0, at.1);
             let from = self.at.unwrap_or(to);
