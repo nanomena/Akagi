@@ -253,9 +253,9 @@ pub fn frame_ms<R: Rng + ?Sized>(rng: &mut R) -> u64 {
 // ---- Between decisions ----
 
 /// From a hand's result showing to the hand starting to press its way
-/// through it: a reaction, then any moment as likely as the next.
+/// through it: a look at the result, then any moment as likely as the next.
 pub const RESULT_START: Hazard = Hazard {
-    floor: 600.0,
+    floor: 2100.0,
     mean: 3000.0,
     most: 30_000.0,
 };
@@ -263,10 +263,10 @@ pub const RESULT_START: Hazard = Hazard {
 /// result show before it starts pressing through it ([`RESULT_START`]): a
 /// player looks at their own hand's score.
 pub const OUR_WIN_LINGER: f64 = 2.5;
-/// Between one burst of presses on the result and the next: half a second
-/// on average, never under 300 ms.
+/// Between one burst of presses on the result and the next: a third of a
+/// second on average, never under 120 ms.
 pub const RESULT_PAUSE: Hazard = Hazard {
-    floor: 300.0,
+    floor: 120.0,
     mean: 200.0,
     most: 7_000.0,
 };

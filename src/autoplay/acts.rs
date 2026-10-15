@@ -3,12 +3,14 @@
 //! - **A hand's result.** From the moment a hand's result shows, the hand
 //!   presses its way through it: bursts of two to seven quick presses at the
 //!   confirm button, bottom right, which skip the animation and then confirm. The first
-//!   burst starts at any moment as likely as the next, after a reaction
-//!   (`humanize::RESULT_START`), and each burst after it follows a pause
-//!   (`humanize::RESULT_PAUSE`). It stops the moment the client confirms
-//!   the result, so no press reaches the next hand, and a game's last
-//!   result is never pressed: the game ends as it shows, and nothing is
-//!   pressed after the end (the screens that follow are not a hand's).
+//!   burst starts at any moment as likely as the next, after a look at the
+//!   result (`humanize::RESULT_START`; longer after a win of our own), and
+//!   each burst after it follows a pause (`humanize::RESULT_PAUSE`). No
+//!   burst starts once the client confirms the result; one already begun is
+//!   pressed to its end, its last presses on the empty corner of the next
+//!   hand's table. A game's last result is never pressed: the game ends as
+//!   it shows, and nothing is pressed after the end (the screens that follow
+//!   are not a hand's).
 //! - **Auto-win after a riichi.** Once our riichi is accepted, the hand may
 //!   switch the client's own auto-win on, at any moment as likely as the next
 //!   (`humanize::AUTO_WIN_ON`): an early riichi, with longer to go, is the
@@ -215,7 +217,7 @@ mod tests {
         let mut acts = Acts::default();
         acts.result_shown(4, false, t0, &mut rng);
         let first = acts.due().expect("a burst is due");
-        assert!(first >= ms(t0, 600), "after a reaction");
+        assert!(first >= ms(t0, 2100), "after a look at the result");
         assert_eq!(
             acts.next(ms(t0, 1), 4, &mut rng),
             None,

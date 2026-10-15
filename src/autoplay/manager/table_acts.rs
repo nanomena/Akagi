@@ -58,8 +58,10 @@ impl AutoplayManager {
 
     /// One burst of `presses` at the result's confirm button: the first
     /// press as any press between decisions, the rest quick and on the spot.
-    /// Stops as soon as the client confirms the result, or the user's hand
-    /// is back on the mouse.
+    /// A burst once begun is pressed to its end, as a hand clicking fast does
+    /// not stop the moment the screen changes: the confirm button's corner is
+    /// empty table in the next hand. Only the user's hand back on the mouse
+    /// stops it; whether another burst follows is asked after it.
     async fn press_through(&mut self, presses: u32, hover_ms: u32, hold_ms: u32) {
         let watch = self.ctx.input_watch.clone();
         if let Some(rect) = self.canvas.resolve(&self.ctx).await {
@@ -70,7 +72,8 @@ impl AutoplayManager {
                     let gap = humanize::BURST_GAP.draw_ms(&mut rand::rng());
                     tokio::time::sleep(Duration::from_millis(u64::from(gap))).await;
                 }
-                if !self.acts.result_up(watch.confirmed()) || user_active() {
+                let gone = press == 0 && !self.acts.result_up(watch.confirmed());
+                if gone || user_active() {
                     break;
                 }
                 let pressed = if press == 0 {
