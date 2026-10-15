@@ -60,6 +60,7 @@ test('the table is passed on, and nothing about the bot', () => {
       { round: 2, bakaze: 'E', kyoku: 2, honba: 1, result: null },
     ],
     account: null,
+    started_at: null,
   })
   const sent = JSON.stringify(state)
   for (const left of ['secret', 'Model A', 'autoplay', 'tehai', 'drawn', 'decision', 'facts', 'service', '5z']) {
@@ -80,6 +81,18 @@ test("the player's own ranks are passed on, and not who the player is", () => {
   const sent = JSON.stringify(publicState(snapshot({ account, names: [] })))
   for (const left of ['23456789', 'Ann', 'extra']) assert.ok(!sent.includes(left), `"${left}" must not be in the feed`)
   assert.deepEqual(publicState(snapshot({ account: { level: null, level3: { id: 'x' }, at: 5 } }))?.account, { level: null, level3: null, at: null })
+})
+
+test('the table says when this run of the app began, so that pages can count from it', () => {
+  const startedAt = new Date('2026-10-15T04:18:17.000Z')
+  const feed = new Feed({ readResults: async () => [], startedAt })
+  feed.update(snapshot())
+  assert.equal(feed.state?.started_at, '2026-10-15T04:18:17.000Z')
+  const before = Date.now()
+  const fresh = new Feed({ readResults: async () => [] })
+  fresh.update(snapshot())
+  const made = Date.parse(fresh.state?.started_at ?? '')
+  assert.ok(made >= before - 1000 && made <= Date.now(), 'by default, when the feed was made')
 })
 
 test('a game on record is passed on without where its log is or the ids of its replay', () => {

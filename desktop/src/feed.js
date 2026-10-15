@@ -1,7 +1,7 @@
 // @ts-check
 // What the game is doing, for pages a streaming program shows beside it: the
 // round and the scores, how each hand of this game ended, the player's own
-// ranks, and the games on record. Nothing about the bot — no decision, no candidate, nothing a bot or
+// ranks, when this run of the app began, and the games on record. Nothing about the bot — no decision, no candidate, nothing a bot or
 // its service said of itself, not even whether autoplay is on. The core's
 // monitor snapshot and its game records are cut down here to what anyone
 // watching the table could see, field by field: a field the core adds later is
@@ -77,8 +77,9 @@ function publicRound(/** @type {unknown} */ result) {
 /**
  * The table as anyone watching it sees it, from the core's monitor snapshot.
  * @param {unknown} snapshot
+ * @param {string | null} [startedAt] when this run of the app began (ISO 8601)
  */
-export function publicState(snapshot) {
+export function publicState(snapshot, startedAt = null) {
   if (!isObject(snapshot)) return null
   const game = isObject(snapshot.game) ? snapshot.game : null
   const players = game ? list(game.players).filter(isObject) : []
@@ -107,6 +108,7 @@ export function publicState(snapshot) {
       result: publicRound(hand.result),
     })),
     account: publicAccount(snapshot.account),
+    started_at: startedAt,
   }
 }
 
@@ -149,17 +151,21 @@ export class Feed {
   #read
   #again
   #log
+  #startedAt
 
   /**
-   * @param {{ readResults: () => Promise<unknown>, again?: number[], log?: (message: string) => void }} options
+   * @param {{ readResults: () => Promise<unknown>, again?: number[], log?: (message: string) => void, startedAt?: Date }} options
    *   `readResults` gives the games on record as the core keeps them; `again`
    *   is how long after a game ends or begins they are read again (a game that
-   *   has just ended is written a moment after its last event).
+   *   has just ended is written a moment after its last event); `startedAt` is
+   *   when this run of the app began, by default when the feed is made (the
+   *   app makes it as it starts), so that a page can count from it.
    */
-  constructor({ readResults, again = [1500, 5000], log }) {
+  constructor({ readResults, again = [1500, 5000], log, startedAt = new Date() }) {
     this.#read = readResults
     this.#again = again
     this.#log = log ?? (() => {})
+    this.#startedAt = startedAt.toISOString()
   }
 
   /** The table now, or null before the core has said anything. */
@@ -170,7 +176,7 @@ export class Feed {
 
   /** Take the core's latest monitor snapshot. @param {unknown} snapshot */
   update(snapshot) {
-    const state = publicState(snapshot)
+    const state = publicState(snapshot, this.#startedAt)
     const stateText = JSON.stringify(state)
     if (stateText === this.#stateText) return
     const before = this.#state
