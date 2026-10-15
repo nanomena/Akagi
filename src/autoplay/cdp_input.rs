@@ -33,6 +33,23 @@ pub fn user_active() -> bool {
     USER_HAND.load(Ordering::Relaxed)
 }
 
+/// Where the user's own mouse last left the game's pointer, when it came to
+/// rest over the game: the page's pointer is there, wherever autoplay last
+/// put it, since the user's input moves it too. Taken once (see
+/// [`take_user_left_pointer`]).
+static USER_LEFT: std::sync::Mutex<Option<(f64, f64)>> = std::sync::Mutex::new(None);
+
+pub fn user_left_pointer_at(at: (f64, f64)) {
+    if let Ok(mut left) = USER_LEFT.lock() {
+        *left = Some(at);
+    }
+}
+
+/// Where the user's mouse left the pointer since this was last asked, if it did.
+pub fn take_user_left_pointer() -> Option<(f64, f64)> {
+    USER_LEFT.lock().ok().and_then(|mut left| left.take())
+}
+
 /// Wait, up to `USER_WAIT`, for the user's mouse to rest or leave the game.
 /// After that the press goes ahead: a turn's clock does not wait.
 async fn wait_for_user_hand() {
@@ -374,6 +391,26 @@ pub async fn discard_tile(page: &Page, tile_index: u32) -> Result<bool> {
     let expr = crate::autoplay::tenhou::inject::discard_expression(tile_index);
     let result = page.evaluate(expr).await.context("CDP evaluate discard")?;
     Ok(result.value().and_then(|v| v.as_str()) == Some("ok"))
+}
+
+#[cfg(test)]
+mod user_left_tests {
+    use super::*;
+
+    /// Where the user's mouse left the pointer is taken once: the next move
+    /// goes on from there, and the one after from wherever that move ended.
+    #[test]
+    fn where_the_user_left_the_pointer_is_taken_once() {
+        let _ = take_user_left_pointer();
+        user_left_pointer_at((10.0, 20.0));
+        user_left_pointer_at((30.0, 40.0));
+        assert_eq!(
+            take_user_left_pointer(),
+            Some((30.0, 40.0)),
+            "the last place"
+        );
+        assert_eq!(take_user_left_pointer(), None);
+    }
 }
 
 #[cfg(test)]

@@ -56,6 +56,15 @@ impl Hand {
         self.at
     }
 
+    /// Go on from where the user's own mouse left the pointer, if it has
+    /// since autoplay last moved it: the page's pointer is there now, and a
+    /// move from anywhere else would start with a jump.
+    pub fn sync_with_user(&mut self) {
+        if let Some(at) = crate::autoplay::cdp_input::take_user_left_pointer() {
+            self.at = Some(at);
+        }
+    }
+
     /// When the pointer next looks at the seat's next turn, while it looks.
     pub fn glance_due(&self) -> Option<Instant> {
         self.glance_at
@@ -76,6 +85,7 @@ impl Hand {
         rect: CanvasRect,
         glance: Option<(f64, f64)>,
     ) -> Option<Approach> {
+        self.sync_with_user();
         let rest_ms = plan.look_ms.unwrap_or(LOOK_MS);
         let [Step::Sleep { duration_ms }, Step::Click { x_norm, y_norm }, ..] =
             plan.steps.as_mut_slice()
@@ -172,6 +182,7 @@ impl Hand {
     /// Look at `spot` of a hand at rest holding `tehai`, on the canvas at
     /// `rect`.
     pub async fn look_at(&mut self, spot: Spot, tehai: &[String], rect: CanvasRect) {
+        self.sync_with_user();
         let pointer = self.at.map(|(x, y)| rect.norm(x, y));
         let leg = {
             let mut rng = rand::rng();
@@ -243,6 +254,7 @@ impl Hand {
     /// Move the pointer to `to` over `travel_ms`. False when it could not
     /// be moved.
     async fn move_to(&mut self, to: Point, travel_ms: u32, bend: f64) -> bool {
+        self.sync_with_user();
         let from = self.at.unwrap_or(to);
         let page_guard = self.ctx.page.read().await;
         let Some(page) = page_guard.as_ref() else {
