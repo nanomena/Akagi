@@ -17,11 +17,12 @@ use super::{Bridge, Direction, ParseResult};
 use crate::{
     autoplay::budget::{BudgetSource, SharedTimeBudget, TimeBudget},
     config::Platform,
+    event_bus::AccountBus,
     logger::{FlowLogger, Session},
-    schema::{mjai::Actor, GameMeta, MatchInfo, MjaiEvent},
+    schema::{mjai::Actor, AccountLevels, GameMeta, Level, MatchInfo, MjaiEvent},
 };
 use anyhow::{bail, Context, Result};
-use chrono::Local;
+use chrono::{Local, Utc};
 use parser::{LiqiParser, MessageType, ParsedMessage};
 use serde_json::{json, Value as JsonValue};
 use std::{
@@ -50,6 +51,15 @@ const METHOD_INPUT_CHI_PENG_GANG: &str = ".lq.FastTest.inputChiPengGang";
 /// setting. Observed as exactly this value on both input methods.
 const TIMEUSE_CLIENT_AUTO: u64 = 1_000_000;
 const METHOD_ENTER_GAME: &str = ".lq.FastTest.enterGame";
+/// The lobby's ways of logging in. Each answers with the account, ranks and all.
+const METHODS_LOGIN: [&str; 3] = [
+    ".lq.Lobby.oauth2Login",
+    ".lq.Lobby.login",
+    ".lq.Lobby.emailLogin",
+];
+/// An account's profile. The client asks for its own after every game, and
+/// for other players' when their profile is opened.
+const METHOD_FETCH_ACCOUNT_INFO: &str = ".lq.Lobby.fetchAccountInfo";
 /// The lobby call a replay opens with; its answer is the whole game record.
 const METHOD_FETCH_GAME_RECORD: &str = ".lq.Lobby.fetchGameRecord";
 const ACTION_NEW_ROUND: &str = "ActionNewRound";
@@ -176,6 +186,9 @@ pub struct MajsoulBridge {
     /// autoplay manager for click verification (see `autoplay::verify`).
     /// `None` when the autoplay context isn't wired (MITM path, tests).
     input_watch: Option<crate::autoplay::verify::SharedInputWatch>,
+    /// Where our own ranks go when the server says them. `None` when no one
+    /// listens (tests).
+    account_bus: Option<AccountBus>,
     /// Where an opened replay is written as a tenhou.net/6 log (see
     /// `tenhou_log`). `None` leaves replays alone (tests, offline tools that
     /// do not ask for it).
@@ -203,6 +216,7 @@ impl MajsoulBridge {
             replaying: false,
             restore_budget: None,
             input_watch: None,
+            account_bus: None,
             replay_dir: None,
         }
     }
@@ -249,6 +263,22 @@ impl MajsoulBridge {
     ) -> Self {
         self.input_watch = watch;
         self
+    }
+
+    /// Install the bus our own ranks are said on (builder-style; used by
+    /// `bridge::for_platform`).
+    pub fn with_account_bus(mut self, bus: Option<AccountBus>) -> Self {
+        self.account_bus = bus;
+        self
+    }
+
+    /// Say our own ranks, from an account's or a seated player's `level` and
+    /// `level3`, if it has either.
+    fn publish_account(&self, account: &JsonValue) {
+        let Some(bus) = &self.account_bus else { return };
+        if let Some(levels) = account_levels(account) {
+            let _ = bus.send(levels);
+        }
     }
 
     /// Open a fresh `majsoul_<ts>.mjai.jsonl` in the platform subdir and
@@ -345,6 +375,28 @@ impl MajsoulBridge {
                 let rank_points = parse_rank_points(&msg.payload, self.num_players);
                 vec![MjaiEvent::confirmed_game(final_scores, final_ranks)
                     .with_rank_points(rank_points)]
+            }
+            // Logging in says who we are and where we stand.
+            (MessageType::Response, method) if METHODS_LOGIN.contains(&method) => {
+                if let Some(id) = msg.payload.get("account_id").and_then(JsonValue::as_u64) {
+                    self.account_id = Some(id);
+                }
+                if let Some(account) = msg.payload.get("account") {
+                    self.publish_account(account);
+                }
+                Vec::new()
+            }
+            // After a game the client asks for its own account again, with
+            // the ranks that game left; other players' profiles come the same
+            // way and are not ours to tell.
+            (MessageType::Response, METHOD_FETCH_ACCOUNT_INFO) => {
+                if let Some(account) = msg.payload.get("account").filter(|account| {
+                    self.account_id.is_some()
+                        && account.get("account_id").and_then(JsonValue::as_u64) == self.account_id
+                }) {
+                    self.publish_account(account);
+                }
+                Vec::new()
             }
             (MessageType::Notify, METHOD_NOTIFY_GAME_TERMINATE) => {
                 info!(
@@ -1441,6 +1493,25 @@ impl MajsoulBridge {
             .and_then(JsonValue::as_u64)
             .and_then(|value| u8::try_from(value).ok());
         let names = names_from_payload(payload, seat_list);
+        // Each seated player comes with their ranks; ours is where we stand
+        // as this game begins.
+        let us = payload
+            .get("players")
+            .and_then(JsonValue::as_array)
+            .and_then(|players| {
+                players
+                    .iter()
+                    .find(|p| p.get("account_id").and_then(JsonValue::as_u64) == Some(account_id))
+            });
+        if let Some(us) = us {
+            self.publish_account(us);
+        }
+        let ladder = if self.num_players == 3 {
+            "level3"
+        } else {
+            "level"
+        };
+        let our_level = level_of(us.and_then(|us| us.get(ladder)));
         info!(
             target: "akagi::bridge::majsoul",
             "seat resolved: account_id={account_id} seat={seat} num_players={np} mode_id={mode_id:?} match_mode={match_mode:?} names={names:?}",
@@ -1461,6 +1532,7 @@ impl MajsoulBridge {
                     room_id,
                     contest_uid,
                 }),
+                our_level,
             }),
         }]
     }
@@ -1476,6 +1548,33 @@ fn stable_game_id(game_uuid: &str) -> u64 {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     hash
+}
+
+/// A `{id, score}` rank of an `Account` or a seated `PlayerGameView`; `None`
+/// when it names none (id 0: a ladder never played).
+fn level_of(value: Option<&JsonValue>) -> Option<Level> {
+    let value = value?;
+    let id = u32::try_from(value.get("id")?.as_u64()?)
+        .ok()
+        .filter(|&id| id != 0)?;
+    // A zero score may be left out on the wire.
+    let score = match value.get("score") {
+        None => 0,
+        Some(score) => i32::try_from(score.as_i64()?).ok()?,
+    };
+    Some(Level { id, score })
+}
+
+/// The ranks of an account or a seated player, stamped now; `None` when it
+/// has neither ladder.
+fn account_levels(account: &JsonValue) -> Option<AccountLevels> {
+    let level = level_of(account.get("level"));
+    let level3 = level_of(account.get("level3"));
+    (level.is_some() || level3.is_some()).then(|| AccountLevels {
+        level,
+        level3,
+        at: Utc::now(),
+    })
 }
 
 /// How a `HuleInfo` scored its hand: the yaku it lists (`fans`), han, fu and
@@ -1914,6 +2013,160 @@ mod tests {
             method_name: Arc::from(method),
             payload,
         }
+    }
+
+    /// Our own ranks are said at login, when a game begins and when the
+    /// client asks for its own account again after a game; another player's
+    /// profile, or another seat, is never taken for ours.
+    #[test]
+    fn our_own_ranks_are_said_and_no_one_elses() {
+        let bus = crate::event_bus::account_bus();
+        let mut heard = bus.subscribe();
+        let mut lobby = MajsoulBridge::new(None, None).with_account_bus(Some(bus.clone()));
+
+        lobby.dispatch(&resp(
+            ".lq.Lobby.oauth2Login",
+            json!({
+                "account_id": 7,
+                "account": {
+                    "account_id": 7,
+                    "nickname": "demo",
+                    "level": { "id": 10203, "score": 761 },
+                    "level3": { "id": 20101, "score": 0 },
+                },
+            }),
+        ));
+        let said = heard.try_recv().expect("login says our ranks");
+        assert_eq!(
+            said.level,
+            Some(Level {
+                id: 10203,
+                score: 761
+            })
+        );
+        assert_eq!(
+            said.level3,
+            Some(Level {
+                id: 20101,
+                score: 0
+            })
+        );
+
+        lobby.dispatch(&resp(
+            METHOD_FETCH_ACCOUNT_INFO,
+            json!({ "account": { "account_id": 8, "level": { "id": 10301, "score": 900 } } }),
+        ));
+        assert!(heard.try_recv().is_err(), "someone else's profile");
+
+        lobby.dispatch(&resp(
+            METHOD_FETCH_ACCOUNT_INFO,
+            json!({
+                "account": {
+                    "account_id": 7,
+                    "level": { "id": 10203, "score": 800 },
+                    "level3": { "id": 20101 },
+                },
+            }),
+        ));
+        let said = heard.try_recv().expect("our own account, asked for again");
+        assert_eq!(
+            said.level,
+            Some(Level {
+                id: 10203,
+                score: 800
+            })
+        );
+        assert_eq!(
+            said.level3,
+            Some(Level {
+                id: 20101,
+                score: 0
+            }),
+            "a score left out is zero"
+        );
+
+        // A game has a connection of its own: our seat's ranks as it begins.
+        let mut game = MajsoulBridge::new(None, None).with_account_bus(Some(bus));
+        game.dispatch(&req(METHOD_AUTH_GAME, json!({ "account_id": 7 })));
+        let started = game.dispatch(&resp(
+            METHOD_AUTH_GAME,
+            json!({
+                "players": [
+                    { "account_id": 9, "nickname": "a", "level": { "id": 10202, "score": 296 } },
+                    {
+                        "account_id": 7,
+                        "nickname": "b",
+                        "level": { "id": 10203, "score": 833 },
+                        "level3": { "id": 20101, "score": 0 },
+                    },
+                ],
+                "seat_list": [9u64, 3, 7u64, 2],
+            }),
+        ));
+        let said = heard.try_recv().expect("our seat's ranks");
+        assert_eq!(
+            said.level,
+            Some(Level {
+                id: 10203,
+                score: 833
+            })
+        );
+        assert!(heard.try_recv().is_err(), "only our seat");
+        // And the game keeps where we stood on its own ladder.
+        assert!(matches!(
+            &started[0],
+            MjaiEvent::StartGame { game_meta: Some(meta), .. }
+                if meta.our_level == Some(Level { id: 10203, score: 833 })
+        ));
+    }
+
+    /// A three-player game keeps our place on the three-player ladder.
+    #[test]
+    fn a_three_player_game_keeps_our_three_player_rank() {
+        let mut game = MajsoulBridge::new(None, None);
+        game.dispatch(&req(METHOD_AUTH_GAME, json!({ "account_id": 7 })));
+        let started = game.dispatch(&resp(
+            METHOD_AUTH_GAME,
+            json!({
+                "players": [{
+                    "account_id": 7,
+                    "nickname": "demo",
+                    "level": { "id": 10203, "score": 833 },
+                    "level3": { "id": 20102, "score": 410 },
+                }],
+                "seat_list": [7u64, 1, 2],
+            }),
+        ));
+        assert!(matches!(
+            &started[0],
+            MjaiEvent::StartGame { game_meta: Some(meta), num_players: 3, .. }
+                if meta.our_level == Some(Level { id: 20102, score: 410 })
+        ));
+    }
+
+    /// Nothing is said of an account before we know it is ours, nor of a
+    /// ladder never played (id 0).
+    #[test]
+    fn ranks_wait_for_who_we_are() {
+        let bus = crate::event_bus::account_bus();
+        let mut heard = bus.subscribe();
+        let mut lobby = MajsoulBridge::new(None, None).with_account_bus(Some(bus));
+
+        lobby.dispatch(&resp(
+            METHOD_FETCH_ACCOUNT_INFO,
+            json!({ "account": { "account_id": 7, "level": { "id": 10203, "score": 800 } } }),
+        ));
+        assert!(heard.try_recv().is_err(), "whose account is it?");
+
+        lobby.dispatch(&resp(
+            ".lq.Lobby.login",
+            json!({
+                "account_id": 7,
+                "account": { "account_id": 7, "level": { "id": 0, "score": 0 } },
+            }),
+        ));
+        assert_eq!(lobby.account_id, Some(7));
+        assert!(heard.try_recv().is_err(), "no ladder played");
     }
 
     /// Autoplay tells a click that registered from one the UI swallowed by

@@ -7,7 +7,9 @@
 use crate::autoplay::AutoplayContext;
 use crate::capture::embedded::EmbeddedGame;
 use crate::config::AppConfig;
-use crate::event_bus::{BotResponseBus, BotStatusBus, CaptureStatusBus, MjaiBus, NotifyBus};
+use crate::event_bus::{
+    self, AccountBus, BotResponseBus, BotStatusBus, CaptureStatusBus, MjaiBus, NotifyBus,
+};
 use crate::game_state::GameTracker;
 use crate::logger::Session;
 use crate::monitor::MonitorHandle;
@@ -50,6 +52,8 @@ pub struct AppState {
     pub bot_status_bus: BotStatusBus,
     pub capture_status_bus: CaptureStatusBus,
     pub notify_bus: NotifyBus,
+    /// The player's own ranks, from capture to the monitor.
+    pub account_bus: AccountBus,
 
     /// The game view the shell has made, once it has told the core of one.
     pub embedded_game: Arc<Mutex<Option<EmbeddedGame>>>,
@@ -90,6 +94,7 @@ impl AppState {
             bot_status_bus,
             capture_status_bus,
             notify_bus,
+            account_bus: event_bus::account_bus(),
             embedded_game: Arc::new(Mutex::new(None)),
             capture_control: Arc::new(Mutex::new(CaptureControl::default())),
             game_tracker,

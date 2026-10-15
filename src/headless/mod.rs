@@ -458,8 +458,9 @@ fn start_autoplay(state: &AppState, enabled: bool) {
     });
 }
 
-/// Keep the monitor in step with the bot's and capture's status and with what
-/// the core has to say, and the capture control's copy of its status with it.
+/// Keep the monitor in step with the bot's and capture's status, with what the
+/// core has to say and with the player's own ranks, and the capture control's
+/// copy of its status with it.
 fn mirror_statuses(state: &AppState) {
     let mut bots = state.bot_status_bus.subscribe();
     let monitor = state.monitor.clone();
@@ -497,6 +498,18 @@ fn mirror_statuses(state: &AppState) {
                 Err(broadcast::error::RecvError::Lagged(n)) => {
                     monitor.gap(format!("Missed {n} status notices."))
                 }
+                Err(broadcast::error::RecvError::Closed) => return,
+            }
+        }
+    });
+
+    let mut accounts = state.account_bus.subscribe();
+    let monitor = state.monitor.clone();
+    tokio::spawn(async move {
+        loop {
+            match accounts.recv().await {
+                Ok(levels) => monitor.set_account(levels),
+                Err(broadcast::error::RecvError::Lagged(_)) => {}
                 Err(broadcast::error::RecvError::Closed) => return,
             }
         }

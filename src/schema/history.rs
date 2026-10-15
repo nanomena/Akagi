@@ -226,6 +226,11 @@ pub struct GameRecord {
     #[serde(default)]
     pub our_rank_points: Option<i32>,
 
+    /// Where we stood on this game's rank ladder as it began, when the
+    /// platform said; `None` for records written before this was kept.
+    #[serde(default)]
+    pub our_level: Option<crate::schema::Level>,
+
     /// Our wins by yaku: the platform's id for a yaku, and how many of our
     /// winning hands this game had it. Empty when the platform does not say
     /// how a hand was scored, and for records written before this was kept.
@@ -384,6 +389,7 @@ mod tests {
     fn game_record_without_match_info_still_parses() {
         let r = GameRecord {
             our_rank_points: None,
+            our_level: None,
             yaku: Default::default(),
             id: "OLD".into(),
             started_at: Utc::now(),
@@ -417,6 +423,7 @@ mod tests {
     fn history_filter_default_matches_everything() {
         let r = GameRecord {
             our_rank_points: None,
+            our_level: None,
             yaku: Default::default(),
             id: "01ARZ".into(),
             started_at: Utc::now(),
@@ -441,6 +448,7 @@ mod tests {
     fn history_filter_platform_mismatch() {
         let r = GameRecord {
             our_rank_points: None,
+            our_level: None,
             yaku: Default::default(),
             id: "x".into(),
             started_at: Utc::now(),
@@ -469,6 +477,7 @@ mod tests {
     fn history_event_recorded_round_trips() {
         let rec = GameRecord {
             our_rank_points: None,
+            our_level: None,
             yaku: Default::default(),
             id: "rec1".into(),
             started_at: Utc::now(),

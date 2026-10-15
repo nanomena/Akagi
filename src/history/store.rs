@@ -238,6 +238,7 @@ mod tests {
         let now = Utc::now();
         GameRecord {
             our_rank_points: None,
+            our_level: None,
             yaku: Default::default(),
             id: id.into(),
             started_at: now + Duration::seconds(offset_secs),

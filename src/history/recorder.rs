@@ -279,6 +279,7 @@ mod tests {
                 game_id: Some(game_id),
                 match_mode: Some(2),
                 match_info: None,
+                our_level: None,
             });
         }
         event

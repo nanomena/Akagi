@@ -77,10 +77,12 @@ impl EmbeddedGame {
                 tenhou_state: Some(a.tenhou_state.clone()),
                 riichi_inject: None,
                 notify: None,
+                account: None,
                 replay_dir: None,
             })
             .unwrap_or_default();
         hooks.notify = Some(ctx.notify_bus.clone());
+        hooks.account = Some(ctx.account_bus.clone());
         hooks.replay_dir = Some(crate::util::resolve_dir(std::path::Path::new(REPLAY_DIR)));
         let bridges = Arc::new(FlowBridges::<cdp::FlowKey>::new(
             ctx.session.clone(),
