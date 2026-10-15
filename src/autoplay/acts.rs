@@ -231,7 +231,7 @@ mod tests {
         assert!(acts.result_up(4));
         acts.burst_done(first, 4, &mut rng);
         let second = acts.due().expect("another burst");
-        assert!(second >= first + Duration::from_millis(300));
+        assert!(second >= first + Duration::from_millis(RESULT_PAUSE.floor as u64));
         // The client confirms: the result is gone, and no burst follows.
         assert!(!acts.result_up(5));
         assert_eq!(acts.next(second, 5, &mut rng), None);
