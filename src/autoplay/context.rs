@@ -76,6 +76,15 @@ impl CanvasRect {
         )
     }
 
+    /// The inverse of [`Self::pixel`]: a CSS-pixel point as a 16:9
+    /// normalised one.
+    pub fn norm(&self, x: f64, y: f64) -> (f64, f64) {
+        (
+            (x - self.x) / self.width * 16.0,
+            (y - self.y) / self.height * 9.0,
+        )
+    }
+
     /// Sanity check for a normalised point — clamps off-canvas requests
     /// before we hand them to CDP.
     pub fn contains(&self, x: f64, y: f64) -> bool {
@@ -96,6 +105,19 @@ mod tests {
             height: 900.0,
         };
         assert_eq!(rect.pixel(8.0, 4.5), (800.0, 450.0));
+    }
+
+    #[test]
+    fn a_pixel_reads_back_as_the_point_it_came_from() {
+        let rect = CanvasRect {
+            x: 100.0,
+            y: 50.0,
+            width: 1280.0,
+            height: 720.0,
+        };
+        let (px, py) = rect.pixel(12.509_375, 8.362_5);
+        let (x, y) = rect.norm(px, py);
+        assert!((x - 12.509_375).abs() < 1e-9 && (y - 8.362_5).abs() < 1e-9);
     }
 
     #[test]

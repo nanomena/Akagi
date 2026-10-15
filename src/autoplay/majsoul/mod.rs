@@ -394,14 +394,33 @@ pub fn discard_point(pai: &str, ctx: &ActionContext) -> Option<(f64, f64)> {
     }
 }
 
-/// Where a tile of a hand at rest — between turns, nothing drawn — lies:
-/// one of its copies, at random. For the pointer's lean (`autoplay::lean`).
-pub fn hand_point(pai: &str, tehai: &[String], rng: &mut impl Rng) -> Option<(f64, f64)> {
+/// Where a tile of a hand at rest — between turns, nothing drawn — lies: the
+/// copy `pointer` is already on, else one of its copies at random. For the
+/// pointer's lean (`autoplay::pointer::lean`).
+pub fn hand_point(
+    pai: &str,
+    tehai: &[String],
+    pointer: Option<(f64, f64)>,
+    rng: &mut impl Rng,
+) -> Option<(f64, f64)> {
     let mut sorted = tehai.to_vec();
     sorted.sort_by(|a, b| compare_pai(a, b));
     let copies: Vec<usize> = (0..sorted.len()).filter(|&i| sorted[i] == pai).collect();
-    let idx = any_of(&copies, rng)?;
-    (idx < TILES.len() - 1).then(|| get_pai_coord(idx, sorted.len()))
+    let at = |i: usize| (i < TILES.len() - 1).then(|| get_pai_coord(i, sorted.len()));
+    at(pick_copy(&copies, at, pointer, rng)?)
+}
+
+/// How far up or down from a tile's middle the pointer is still on it.
+const ON_TILE_HEIGHT: f64 = 0.75;
+
+/// Whether `pointer` is on the tile whose middle is `tile`: within half the
+/// rack's pitch across, and most of a tile's height up or down. Both are
+/// normalised 16:9 points.
+pub fn on_tile(tile: (f64, f64), pointer: Option<(f64, f64)>) -> bool {
+    let half_pitch = (TILES[1].0 - TILES[0].0) / 2.0;
+    pointer.is_some_and(|(x, y)| {
+        (x - tile.0).abs() <= half_pitch && (y - tile.1).abs() <= ON_TILE_HEIGHT
+    })
 }
 
 /// Where the next draw will land on a hand of `count` tiles at rest.
@@ -424,10 +443,27 @@ enum Whence {
     Unsaid,
 }
 
-/// One of `places` at random. Identical tiles are interchangeable to the game,
-/// and a hand that always took the leftmost would be a pattern.
+/// One of `places` at random.
 fn any_of(places: &[usize], rng: &mut impl Rng) -> Option<usize> {
     (!places.is_empty()).then(|| places[rng.random_range(0..places.len())])
+}
+
+/// Which of the copies at `places` to press, each lying where `at` says: the
+/// one the pointer is already on, for a hand resting on a tile does not leave
+/// it for its twin; else any of them at random. Identical tiles are
+/// interchangeable to the game, and a hand that always took the leftmost
+/// would be a pattern.
+fn pick_copy(
+    places: &[usize],
+    at: impl Fn(usize) -> Option<(f64, f64)>,
+    pointer: Option<(f64, f64)>,
+    rng: &mut impl Rng,
+) -> Option<usize> {
+    places
+        .iter()
+        .copied()
+        .find(|&i| at(i).is_some_and(|tile| on_tile(tile, pointer)))
+        .or_else(|| any_of(places, rng))
 }
 
 /// Plan a hand-tile click for a discard or riichi-declaring discard.
@@ -454,7 +490,7 @@ fn plan_dahai_click_with(
         let mut sorted = ctx.snapshot.players[our_seat].tehai.clone();
         sorted.sort_by(|a, b| compare_pai(a, b));
         let copies: Vec<usize> = (0..sorted.len()).filter(|&i| sorted[i] == pai).collect();
-        let idx = any_of(&copies, rng)?;
+        let idx = pick_copy(&copies, |i| TILES.get(i).copied(), ctx.pointer, rng)?;
         let (x, y) = TILES.get(idx).copied()?;
         return Some(Step::Click {
             x_norm: x,
@@ -509,11 +545,13 @@ fn plan_dahai_click_with(
                 y_norm: y,
             });
         }
-        let idx = any_of(&copies, rng)?;
+        let rack = tehai.len() - 1;
+        let at = |i: usize| (i < TILES.len() - 1).then(|| get_pai_coord(i, rack));
+        let idx = pick_copy(&copies, at, ctx.pointer, rng)?;
         if idx >= TILES.len() - 1 {
             return None;
         }
-        let (x, y) = get_pai_coord(idx, tehai.len() - 1);
+        let (x, y) = get_pai_coord(idx, rack);
         return Some(Step::Click {
             x_norm: x,
             y_norm: y,
@@ -524,7 +562,8 @@ fn plan_dahai_click_with(
     let copies: Vec<usize> = (0..sorted_tehai.len())
         .filter(|&i| sorted_tehai[i] == pai)
         .collect();
-    let idx = any_of(&copies, rng)?;
+    let at = |i: usize| (i < TILES.len() - 1).then(|| get_pai_coord(i, tehai.len()));
+    let idx = pick_copy(&copies, at, ctx.pointer, rng)?;
     if idx >= TILES.len() - 1 {
         return None;
     }
@@ -832,7 +871,7 @@ mod tests {
     use crate::autoplay::context::CanvasRect;
     use crate::config::MajsoulAutoplayConfig;
     use crate::game_state::snapshot::{GameStateSnapshot, Phase, PlayerSnapshot};
-    use coords::CANDIDATES;
+    use coords::{ACTIONS, CANDIDATES};
 
     fn cfg() -> MajsoulAutoplayConfig {
         MajsoulAutoplayConfig {
@@ -923,6 +962,7 @@ mod tests {
             reading: Default::default(),
             delay_script: None,
             tenhou: None,
+            pointer: None,
         }
     }
 
@@ -1038,7 +1078,7 @@ mod tests {
         .collect();
         let mut rng = rand::rngs::StdRng::seed_from_u64(5);
         let places: Vec<f64> = (0..40)
-            .map(|_| hand_point("7p", &hand, &mut rng).unwrap().0)
+            .map(|_| hand_point("7p", &hand, None, &mut rng).unwrap().0)
             .collect();
         let (a, b) = (get_pai_coord(11, 13).0, get_pai_coord(12, 13).0);
         assert!(places
@@ -1048,7 +1088,7 @@ mod tests {
             places.iter().any(|x| (x - a).abs() < 1e-9)
                 && places.iter().any(|x| (x - b).abs() < 1e-9)
         );
-        assert_eq!(hand_point("E", &hand, &mut rng), None);
+        assert_eq!(hand_point("E", &hand, None, &mut rng), None);
         assert!((draw_point(13).0 - (TILES[13].0 + TSUMO_SPACE)).abs() < 1e-9);
     }
 
@@ -1085,6 +1125,103 @@ mod tests {
             seen[at.unwrap_or_else(|| panic!("seed {seed}: {x} is not a 1m"))] = true;
         }
         assert_eq!(seen, [true, true]);
+    }
+
+    /// A point on the tile at `idx` of a rack of `count`, a little off its
+    /// middle as a resting hand would be.
+    fn on(idx: usize, count: usize) -> Option<(f64, f64)> {
+        let (x, y) = get_pai_coord(idx, count);
+        Some((x + 0.18, y - 0.27))
+    }
+
+    #[test]
+    fn a_discard_presses_the_copy_the_pointer_is_already_on() {
+        let snap = doubled_hand();
+        let cfg_ref = cfg();
+        for (pai, places) in [("1m", [0, 1]), ("5p", [10, 11])] {
+            let act = MjaiEvent::Dahai {
+                actor: 0,
+                pai: pai.into(),
+                tsumogiri: false,
+            };
+            for at in places {
+                let ctx = ActionContext {
+                    pointer: on(at, 13),
+                    ..ctx_for(&act, &snap, &[], Some("1m"), Some("5p"), false, &cfg_ref)
+                };
+                let want = get_pai_coord(at, 13).0;
+                for seed in 0..32 {
+                    let x = dahai_x(pai, Whence::Hand, &ctx, seed);
+                    assert!(
+                        (x - want).abs() < 1e-9,
+                        "{pai} seed {seed}: {x}, not {want}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_tsumogiri_presses_the_drawn_tile_whichever_copy_the_pointer_is_on() {
+        let snap = doubled_hand();
+        let act = MjaiEvent::Dahai {
+            actor: 0,
+            pai: "5p".into(),
+            tsumogiri: true,
+        };
+        let cfg_ref = cfg();
+        let ctx = ActionContext {
+            pointer: on(10, 13),
+            ..ctx_for(&act, &snap, &[], Some("1m"), Some("5p"), false, &cfg_ref)
+        };
+        let drawn = get_pai_coord(13, 13).0;
+        assert!((dahai_x("5p", Whence::Drawn, &ctx, 0) - drawn).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_pointer_off_the_hand_leaves_the_copy_to_chance() {
+        let snap = doubled_hand();
+        let act = MjaiEvent::Dahai {
+            actor: 0,
+            pai: "1m".into(),
+            tsumogiri: false,
+        };
+        let cfg_ref = cfg();
+        // By the buttons, where the pointer rests between turns.
+        let ctx = ActionContext {
+            pointer: Some(ACTIONS[0]),
+            ..ctx_for(&act, &snap, &[], Some("1m"), Some("5p"), false, &cfg_ref)
+        };
+        let places = [get_pai_coord(0, 13).0, get_pai_coord(1, 13).0];
+        let mut seen = [false, false];
+        for seed in 0..64 {
+            let x = dahai_x("1m", Whence::Hand, &ctx, seed);
+            let at = places.iter().position(|p| (x - p).abs() < 1e-9);
+            seen[at.unwrap_or_else(|| panic!("seed {seed}: {x} is not a 1m"))] = true;
+        }
+        assert_eq!(seen, [true, true]);
+    }
+
+    #[test]
+    fn a_hand_at_rest_keeps_to_the_copy_it_is_looking_at() {
+        use rand::SeedableRng;
+        let hand: Vec<String> = [
+            "1m", "1m", "3m", "4m", "5m", "6m", "7m", "8m", "9m", "1p", "5p", "7p", "7p",
+        ]
+        .iter()
+        .map(|t| t.to_string())
+        .collect();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(5);
+        for at in [11, 12] {
+            let want = get_pai_coord(at, 13);
+            for _ in 0..20 {
+                assert_eq!(hand_point("7p", &hand, on(at, 13), &mut rng), Some(want));
+            }
+            assert!(on_tile(want, on(at, 13)));
+        }
+        // On one 7p is not on the other.
+        assert!(!on_tile(get_pai_coord(12, 13), on(11, 13)));
+        assert!(!on_tile(get_pai_coord(11, 13), None));
     }
 
     #[test]

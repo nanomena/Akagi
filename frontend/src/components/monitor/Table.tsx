@@ -84,8 +84,10 @@ export function ResultCard({ result, snapshot: s, previous = false, title, pager
     <div className="mresult-hands">
       {result.hands.length === 0 && <p className="mslot-empty">{tr('这一局没有公开的手牌')}</p>}
       {result.hands.slice(0, 4).map(h => {
-        // Open melds are only known while this round is still on the table.
-        const melds = previous ? [] : game?.players[h.seat]?.melds.map(m => meldView(m, h.seat, table)) ?? []
+        // The melds kept with the hand; a core that kept none leaves only the
+        // table to read them from, and only while this round is still on it.
+        const open = h.melds ?? (previous ? [] : game?.players[h.seat]?.melds ?? [])
+        const melds = open.map(m => meldView(m, h.seat, table))
         return <div key={h.seat} className="mreveal">
           <div className="mreveal-who"><SeatTag seat={h.seat} table={table} /><b>{seatLabel(h.seat, table)}</b><span>{handOutcome(h, table)}</span></div>
           <Hand tiles={h.tiles} drawn={h.winning_tile} melds={melds} room={HAND_ROOM} max={28} />
@@ -108,7 +110,7 @@ export function ResultPages({ snapshot: s }: { snapshot: MonitorSnapshot }) {
   const at = found < 0 ? ended.length - 1 : found
   const hand = ended[at]
   const go = (to: number) => setTurned(to === ended.length - 1 ? null : ended[to].round)
-  // Open melds are known only for the hand still on the table.
+  // Whether this is the hand whose table is still shown.
   const onTable = !!s.result && hand.round === s.hands.at(-1)?.round
   const pager = <span className="mpager">
     <button aria-label={tr('上一局')} disabled={at === 0} onClick={() => go(at - 1)}><ChevronLeft size={14} /></button>
