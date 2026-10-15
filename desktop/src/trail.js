@@ -17,7 +17,7 @@ const DONE = [29, 50, 135] // hsl(228 65% 32%)
 const canvas = /** @type {HTMLCanvasElement} */ (document.querySelector('canvas'))
 const pen = /** @type {CanvasRenderingContext2D} */ (canvas.getContext('2d'))
 
-/** @typedef {{ x: number, y: number, t: number }} Spot */
+/** @typedef {{ x: number, y: number, t: number, fresh?: boolean }} Spot */
 /** @type {Spot[]} */
 let path = []
 /** @type {Spot[]} */
@@ -73,6 +73,8 @@ function draw(now) {
   pen.lineCap = 'round'
   pen.lineJoin = 'round'
   for (let i = 1; i < path.length; i++) {
+    // Where the user's own mouse moved the pointer, the path did not go.
+    if (path[i].fresh) continue
     const fresh = 1 - (now - path[i].t) / FADE_MS
     pen.strokeStyle = colour(LIVE, 0.8 * fresh)
     pen.lineWidth = 1 + 3 * fresh
@@ -96,10 +98,10 @@ function draw(now) {
 }
 
 /** What trail-preload.cjs exposes. */
-const marks = /** @type {{ onMark: (listener: (mark: { x: number, y: number, down: boolean }) => void) => void }} */ (
+const marks = /** @type {{ onMark: (listener: (mark: { x: number, y: number, down: boolean, fresh?: boolean }) => void) => void }} */ (
   /** @type {any} */ (window).trail)
 marks.onMark(mark => {
-  const spot = { x: mark.x, y: mark.y, t: performance.now() }
+  const spot = { x: mark.x, y: mark.y, t: performance.now(), fresh: Boolean(mark.fresh) }
   path.push(spot)
   if (mark.down && !pressed) presses.push(spot)
   pressed = mark.down

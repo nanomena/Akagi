@@ -11,9 +11,9 @@
 //!   movement ends;
 //! - with a small lean of its own, drawn once a session: a person tends to the
 //!   same side of a target;
-//! - on a hand tile, high rather than low: from the top quarter of its face
-//!   and down from there (`humanize::on_tile_y`), as a hand reaching down to
-//!   a tile stops on it.
+//! - on a hand tile, high rather than low: on average at the top quarter of
+//!   its face, from just inside its top and down from there
+//!   (`humanize::on_tile_y`), as a hand reaching down to a tile stops on it.
 //!
 //! A press that is made again, because the first did not register, lands at a
 //! fresh point of the same target ([`again`]).
@@ -184,9 +184,9 @@ mod tests {
         assert!(along > across * 1.5, "along {along} across {across}");
     }
 
-    /// A hand tile is pressed from the top quarter of its face down: never
-    /// above it, mostly in the upper half, never in the bottom fifth, and
-    /// across within the tile.
+    /// A hand tile is pressed on average at the top quarter of its face, down
+    /// from just inside its top: never above that, mostly in the upper half,
+    /// never in the bottom fifth, and across within the tile.
     #[test]
     fn a_tile_is_pressed_high_rather_than_low() {
         let mut rng = StdRng::seed_from_u64(5);
@@ -206,8 +206,10 @@ mod tests {
         assert!(points.iter().all(|p| (p.0 - middle.0).abs() <= tile.half_x));
         let high = points.iter().filter(|p| p.1 < middle.1).count();
         assert!(high > 3200, "mostly the upper half: {high} of 4000");
-        let mean = points.iter().map(|p| p.1 - top).sum::<f64>() / points.len() as f64;
-        assert!((mean - humanize::TILE_DROP.mean).abs() < 0.015, "{mean}");
+        assert!(bottom < middle.1 + 0.35, "never in the bottom fifth");
+        // On average at the top quarter of a face some 1.13 high.
+        let mean = points.iter().map(|p| p.1).sum::<f64>() / points.len() as f64;
+        assert!((mean - (middle.1 - 1.13 / 4.0)).abs() < 0.03, "{mean}");
     }
 
     /// Scattering a plan moves each press within its own target and keeps
