@@ -3,7 +3,9 @@
 
 use crate::bot::{BotResponse, ServiceStatus};
 use crate::game_state::{GameStateSnapshot, MahgenView};
-use crate::schema::{BotStatus, CaptureStatus, MjaiEvent, Notification, NotifyLevel};
+use crate::schema::{
+    AccountLevels, BotStatus, CaptureStatus, MjaiEvent, Notification, NotifyLevel,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -153,6 +155,9 @@ pub struct MonitorSnapshot {
     /// The events of the hand being played.
     pub events: VecDeque<MonitorEvent>,
     pub last_event_ms: Option<i64>,
+    /// The player's own ranks as the platform last said them; kept across
+    /// games. `None` until it has said them.
+    pub account: Option<AccountLevels>,
 }
 
 impl Default for MonitorSnapshot {
@@ -186,6 +191,7 @@ impl Default for MonitorSnapshot {
             hands: vec![],
             events: VecDeque::new(),
             last_event_ms: None,
+            account: None,
         }
     }
 }
@@ -597,6 +603,10 @@ impl MonitorHandle {
     pub fn set_brand(&self, brand: String) {
         self.update(|i| i.snapshot.brand = brand);
     }
+    /// The player's own ranks, as the platform has just said them.
+    pub fn set_account(&self, levels: AccountLevels) {
+        self.update(|i| i.snapshot.account = Some(levels));
+    }
 
     pub fn notification(&self, notice: &Notification) {
         let Some(id) = notice.id.as_deref() else {
@@ -780,6 +790,38 @@ mod tests {
             }),
         };
         m.game_event(&start, None, None);
+    }
+
+    /// The player's own ranks are not a game's: a new game keeps them, and
+    /// what the platform says next replaces them.
+    #[test]
+    fn our_ranks_outlast_a_game() {
+        let m = MonitorHandle::default();
+        assert!(m.snapshot().account.is_none());
+        let first = AccountLevels {
+            level: Some(crate::schema::Level {
+                id: 10203,
+                score: 761,
+            }),
+            level3: None,
+            at: chrono::Utc::now(),
+        };
+        m.set_account(first.clone());
+        hand(&m);
+        assert_eq!(m.snapshot().account, Some(first));
+        let next = AccountLevels {
+            level: Some(crate::schema::Level {
+                id: 10203,
+                score: 800,
+            }),
+            level3: Some(crate::schema::Level {
+                id: 20101,
+                score: 0,
+            }),
+            at: chrono::Utc::now(),
+        };
+        m.set_account(next.clone());
+        assert_eq!(m.snapshot().account, Some(next));
     }
 
     /// A game's hands stay: how each ended in the snapshot, its events on

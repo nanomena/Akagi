@@ -4,11 +4,13 @@
 //! core's parts report about themselves, persisted records — lives here so it
 //! isn't owned by any single subsystem.
 
+pub mod account;
 pub mod history;
 pub mod inspector;
 pub mod mjai;
 pub mod status;
 
+pub use account::{AccountLevels, Level};
 pub use history::{
     GameRecord, GameStats, HistoryEvent, HistoryEventLog, HistoryFilter, KyokuMode, MatchInfo,
     Platform,

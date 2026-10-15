@@ -74,9 +74,11 @@ impl EmbeddedGame {
                 tenhou_state: Some(a.tenhou_state.clone()),
                 riichi_inject: None,
                 notify: None,
+                account: None,
             })
             .unwrap_or_default();
         hooks.notify = Some(ctx.notify_bus.clone());
+        hooks.account = Some(ctx.account_bus.clone());
         let bridges = Arc::new(FlowBridges::<cdp::FlowKey>::new(
             ctx.session.clone(),
             ctx.platform,
