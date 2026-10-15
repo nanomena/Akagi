@@ -4,11 +4,15 @@
 //! state inside its engine, out of reach of the page's script. Some of that
 //! state shows only as colour: whether one of the client's own toggles (auto
 //! sort, auto win, no calls, auto tsumogiri) is on is whether its glyph is
-//! green. A screenshot of the glyph's few pixels reads it.
+//! green. A screenshot of the page reads it, cropped here to the glyph's box.
+//!
+//! The screenshot is of the whole view, as the stream's are: a clipped one
+//! has Chromium change the page's viewport for the moment it takes, which
+//! the game shows as a flash.
 
 use anyhow::{anyhow, Context, Result};
 use chromiumoxide::cdp::browser_protocol::page::{
-    CaptureScreenshotFormat, CaptureScreenshotParams, Viewport,
+    CaptureScreenshotFormat, CaptureScreenshotParams,
 };
 use chromiumoxide::page::Page;
 use std::io::Read;
@@ -26,15 +30,18 @@ pub enum Glyph {
 
 /// What the glyph in the CSS-pixel box `(x, y, w, h)` of the page shows.
 pub async fn glyph(page: &Page, x: f64, y: f64, w: f64, h: f64) -> Result<Glyph> {
+    // The view's width in CSS pixels: the screenshot is in device pixels.
+    let css_width = page
+        .evaluate("window.innerWidth")
+        .await
+        .context("CDP evaluate innerWidth")?
+        .value()
+        .and_then(serde_json::Value::as_f64)
+        .filter(|w| *w > 0.0)
+        .ok_or_else(|| anyhow!("screenshot: the view has no width"))?;
     let params = CaptureScreenshotParams::builder()
         .format(CaptureScreenshotFormat::Png)
-        .clip(Viewport {
-            x,
-            y,
-            width: w.max(1.0),
-            height: h.max(1.0),
-            scale: 1.0,
-        })
+        .optimize_for_speed(true)
         .build();
     let shot = page
         .execute(params)
@@ -44,8 +51,42 @@ pub async fn glyph(page: &Page, x: f64, y: f64, w: f64, h: f64) -> Result<Glyph>
     let png = base64::engine::general_purpose::STANDARD
         .decode(AsRef::<str>::as_ref(&shot.result.data))
         .context("screenshot: base64")?;
-    let pixels = decode_png(&png).ok_or_else(|| anyhow!("screenshot: not a PNG this reads"))?;
-    Ok(classify(&pixels))
+    let image = decode_png(&png).ok_or_else(|| anyhow!("screenshot: not a PNG this reads"))?;
+    let scale = image.width as f64 / css_width;
+    Ok(classify(&image.crop(
+        x * scale,
+        y * scale,
+        w * scale,
+        h * scale,
+    )))
+}
+
+/// A decoded screenshot: its RGB pixels, row by row.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Image {
+    pub width: usize,
+    pub height: usize,
+    pub pixels: Vec<[u8; 3]>,
+}
+
+impl Image {
+    /// The pixels of the box `(x, y, w, h)`, in this image's pixels, clipped
+    /// to the image: at least one pixel wide and high where it overlaps.
+    pub fn crop(&self, x: f64, y: f64, w: f64, h: f64) -> Vec<[u8; 3]> {
+        let span = |at: f64, len: f64, most: usize| {
+            let start = (at.max(0.0).floor() as usize).min(most);
+            let end = ((at + len).ceil().max(0.0) as usize)
+                .max(start + 1)
+                .min(most);
+            start..end
+        };
+        let (columns, rows) = (span(x, w, self.width), span(y, h, self.height));
+        rows.flat_map(|row| {
+            let line = &self.pixels[row * self.width..(row + 1) * self.width];
+            line[columns.clone()].iter().copied()
+        })
+        .collect()
+    }
 }
 
 /// A glyph is lit when enough of its box is the toggles' green, unlit when
@@ -71,9 +112,9 @@ pub fn classify(pixels: &[[u8; 3]]) -> Glyph {
     }
 }
 
-/// The RGB pixels of an 8-bit, non-interlaced RGB or RGBA PNG, as Chromium
-/// writes its screenshots; `None` for anything else.
-pub fn decode_png(png: &[u8]) -> Option<Vec<[u8; 3]>> {
+/// An 8-bit, non-interlaced RGB or RGBA PNG, as Chromium writes its
+/// screenshots; `None` for anything else.
+pub fn decode_png(png: &[u8]) -> Option<Image> {
     const SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
     if png.len() < 8 || png[..8] != SIGNATURE {
         return None;
@@ -144,7 +185,11 @@ pub fn decode_png(png: &[u8]) -> Option<Vec<[u8; 3]>> {
         out.extend(current.chunks_exact(channels).map(|p| [p[0], p[1], p[2]]));
         previous = current;
     }
-    Some(out)
+    Some(Image {
+        width,
+        height,
+        pixels: out,
+    })
 }
 
 fn paeth(a: u8, b: u8, c: u8) -> u8 {
@@ -213,9 +258,39 @@ mod tests {
         ];
         for filter in [0, 1, 2] {
             let read = decode_png(&png(2, &rows, filter)).expect("decoded");
-            assert_eq!(read, rows.concat(), "filter {filter}");
+            assert_eq!((read.width, read.height), (2, 2));
+            assert_eq!(read.pixels, rows.concat(), "filter {filter}");
         }
         assert!(decode_png(b"not a png").is_none());
+    }
+
+    /// A box of the whole view is cut out of it, clipped to its edges, and
+    /// never comes out empty where it overlaps.
+    #[test]
+    fn a_box_is_cut_out_of_the_whole_view() {
+        let width = 4;
+        let pixels: Vec<[u8; 3]> = (0..12u8).map(|i| [i, 0, 0]).collect();
+        let image = Image {
+            width,
+            height: 3,
+            pixels,
+        };
+        let red = |cut: Vec<[u8; 3]>| cut.iter().map(|p| p[0]).collect::<Vec<_>>();
+        assert_eq!(red(image.crop(1.0, 1.0, 2.0, 2.0)), [5, 6, 9, 10]);
+        assert_eq!(
+            red(image.crop(3.0, 0.0, 5.0, 1.0)),
+            [3],
+            "clipped at the edge"
+        );
+        assert_eq!(
+            red(image.crop(1.2, 0.0, 0.3, 0.3)),
+            [1],
+            "a sliver is a pixel"
+        );
+        assert!(
+            image.crop(9.0, 9.0, 2.0, 2.0).is_empty(),
+            "outside the view"
+        );
     }
 
     /// The toggles' green reads lit, their grey-blue unlit, the dark strip
