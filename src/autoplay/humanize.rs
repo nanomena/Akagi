@@ -225,6 +225,14 @@ pub const SETTLE_REST: Tail = Tail {
     low: 0.2,
     high: 2.0,
 };
+/// A hand weighing two tiles: how much longer each stop is than the one
+/// before it, the wait before it moves the first.
+pub const LONGER: Tail = Tail {
+    median: 1.5,
+    spread: 0.2,
+    low: 1.15,
+    high: 2.5,
+};
 
 /// Between two steps of a move: about a display frame, never quite even, as
 /// a real mouse's events come.
