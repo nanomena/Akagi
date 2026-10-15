@@ -38,6 +38,9 @@ pub struct GameMeta {
     /// Persisted match identity (rank room, game/paifu id) copied into
     /// `GameRecord.match_info` by the history aggregator.
     pub match_info: Option<MatchInfo>,
+    /// Where we stood on this game's rank ladder (four- or three-player) as
+    /// it began, when the platform says; copied into `GameRecord.our_level`.
+    pub our_level: Option<crate::schema::Level>,
 }
 
 /// Why an in-process game-end event was emitted. The reason and standings are
@@ -456,6 +459,7 @@ mod tests {
                     room_id: None,
                     contest_uid: None,
                 }),
+                our_level: None,
             }),
         };
         let start_json = serde_json::to_value(start).unwrap();

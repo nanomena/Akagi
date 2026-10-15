@@ -71,6 +71,54 @@ the stream up again by itself when the application restarts. A Media source
 can open `stream.mjpg` too, but Motion JPEG carries no timing, and ffmpeg
 plays it at 25 frames a second whatever comes in.
 
+### Pages of your own beside the game
+
+For overlays and control pages around the game, the same server says what the
+table is doing and serves a folder of your own pages (`src/feed.js`,
+`src/pages.js`):
+
+```text
+http://127.0.0.1:<port>/<token>/feed        server-sent events: `state` (the table, on every change) and `results` (the games on record)
+http://127.0.0.1:<port>/<token>/feed.json   the same two, once: {"state": …, "results": […]}
+http://127.0.0.1:<port>/<token>/board       server-sent events: `board` (every value, at once) and `set` ({name, value}, each value put)
+http://127.0.0.1:<port>/<token>/board.json  the board, once
+PUT  …/<token>/board/<name>                 put a JSON value under a name, from a page of this origin
+http://127.0.0.1:<port>/<token>/pages/…     the files in <data>/stream-pages/, a folder's index.html for the folder
+```
+
+The feed is what anyone watching the table could see, and nothing about the
+bot: `state` has the names, our seat, the round (wind, hand, honba, sticks,
+dealer), each seat's score and riichi, the dora indicators, how each hand of
+this game ended with the hands shown when it did, and the player's own ranks
+(`account`: the four- and three-player `{id, score}` as Mahjong Soul last said
+them, at login, a game's start or after a game, and `at`, when) and when this
+run of the app began (`started_at`); `results` has
+the games on record — scores, placements, rank points, our rank as the game
+began (`our_level`), per-game counts and yaku — without the path of their logs
+or the ids that lead to a replay, and never who the player is. No decision, no
+candidate, nothing a bot said of itself, and not whether autoplay is on. Every
+field is named in `src/feed.js`; one the core adds later stays out until it is
+named there. `state.version` goes up when a field changes meaning or goes away.
+
+The pages folder is yours: put a page there and add it to the streaming
+program as a browser source (an overlay) or as a custom browser dock (a
+control page). Its pages may load their own files and open a WebSocket to a
+program on this computer (`ws://127.0.0.1:*`, OBS's remote control), and
+nothing else. Names with `..` or a leading dot are refused; a link inside the
+folder, such as a junction to a music library, is followed. Media files answer
+range requests, so audio and video can seek. A page under `pages/` finds the
+feed at the top of its own address: `/<token>/feed`.
+
+The board (`src/board.js`) is how those pages talk to each other: a control
+page says what an overlay should show, a music page says what it is playing.
+They share an origin, but a streaming program may run them in browsers that
+share no storage (OBS keeps its docks apart from its sources), so they meet
+here. A name is lower-case letters, digits and dashes; a value is JSON, 64 KB
+at most, 32 names at most. The board is kept in memory while the application
+runs: a page that owns a value puts it again when it connects. Only a page of
+this origin may write (a browser names the page a write comes from); the
+secret in the address keeps everything else out.
+
 ## Running it from a checkout
 
 ```sh
@@ -110,7 +158,7 @@ executables:
 
 ```sh
 npm run check   # type-check the JavaScript (JSDoc types, no build step)
-npm test        # the window's geometry, the content policy, the stream's server and frames, and the shell's end of the protocol against a stand-in core
+npm test        # the window's geometry, the content policy, the stream's server, frames, feed, board and pages, and the shell's end of the protocol against a stand-in core
 npm run smoke   # the shell for real — Electron, the built interface, a stand-in core — looked at over its DevTools port
 ```
 

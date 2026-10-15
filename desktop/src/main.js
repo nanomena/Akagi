@@ -17,7 +17,9 @@ import fs from 'node:fs'
 import { createServer } from 'node:net'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { Board } from './board.js'
 import { Core } from './core.js'
+import { Feed } from './feed.js'
 import { FrameSource } from './frames.js'
 import { MIN, RATIO, conform, framedRatio, gameBounds, handOnGame, openingSize, restoredBounds, settle, trailBounds } from './layout.js'
 import { policyFor } from './policy.js'
@@ -40,6 +42,8 @@ const DATA = path.resolve(option('data') || path.join(app.getPath('appData'), 'a
 const CORE = path.resolve(option('core') || (app.isPackaged ? path.join(process.resourcesPath, 'core', CORE_NAME) : path.join(HERE, '..', '..', 'target', 'release', CORE_NAME)))
 const DOCK_FILES = path.resolve(option('dock') || (app.isPackaged ? path.join(process.resourcesPath, 'dock') : path.join(HERE, '..', '..', 'frontend', 'dist')))
 const WINDOW_STATE = path.join(DATA, 'window.json')
+/** The user's own pages for the streaming program, served beside the stream while it is. */
+const STREAM_PAGES = path.join(DATA, 'stream-pages')
 
 /** @returns {Promise<number>} a local port nothing is listening on */
 const freePort = () => new Promise((done, fail) => {
@@ -81,6 +85,10 @@ let options = { always_on_top: false }
 /** The game offered to a streaming program: served while the option is on, drawn for it while anyone watches. */
 /** @type {StreamServer | null} */
 let stream = null
+/** What the table is doing, kept from the core's snapshots for the stream's `/feed`; nothing about the bot. */
+const feed = new Feed({ readResults: () => running().call('get_history'), log: message => console.warn(message) })
+/** What the pages beside the stream share; kept while the application runs, through the stream going off and on. */
+const board = new Board()
 /** @type {FrameSource | null} */
 let frames = null
 /** @type {NodeJS.Timeout | undefined} */
@@ -235,6 +243,7 @@ function openWindow(ready) {
   frame.on('closed', () => {
     frames?.stop()
     void stream?.close()
+    feed.close()
     // Views outlive the window they were in unless they are closed.
     game?.webContents.close()
     view.webContents.close()
@@ -314,7 +323,7 @@ function withStream(/** @type {Options} */ saved) {
  */
 async function startStream() {
   const token = options.stream_token || newToken()
-  const server = stream ?? new StreamServer({ token, onWatchers: watchStream })
+  const server = stream ?? new StreamServer({ token, onWatchers: watchStream, feed, board, pages: STREAM_PAGES })
   const port = await server.listen(options.stream_port ?? 0)
   stream = server
   if (!options.stream_output || port !== options.stream_port || token !== options.stream_token) {
@@ -524,6 +533,7 @@ async function start() {
     // The pointer's marks are the trail's alone, and come many a second.
     if (name === 'pointer') trail?.webContents.send('trail:mark', payload)
     else dock?.webContents.send('akagi:event', name, payload)
+    if (name === 'monitor-updated') feed.update(payload)
   })
   child.on('exit', reason => fail('Akagi has stopped.', `${reason}\n\n${lastWords()}`))
   try {
