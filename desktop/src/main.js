@@ -71,7 +71,7 @@ const USER_STILL_MS = 150
 /** @type {import('./layout.js').Rect | null} */
 let gameAt = null
 /** The window's options as the core last saved them. */
-/** @type {{ always_on_top: boolean, pointer_trail?: boolean, pointer_lean?: boolean, version?: string }} */
+/** @type {{ always_on_top: boolean, pointer_trail?: boolean, pointer_lean?: boolean, quick_confirm?: boolean, riichi_auto_win?: boolean, version?: string }} */
 let options = { always_on_top: false }
 let cdpPort = 0
 let quitting = false
@@ -347,6 +347,16 @@ const commands = {
   set_monitor_autoplay: ({ enabled }) => running().call('set_monitor_autoplay', { enabled: enabled === true }),
   async set_monitor_lean({ enabled }) {
     const saved = /** @type {{ pointer_lean: boolean }} */ (await running().call('set_monitor_lean', { enabled: enabled === true }))
+    options = { ...options, ...saved }
+    return options
+  },
+  async set_monitor_confirm({ enabled }) {
+    const saved = /** @type {{ quick_confirm: boolean }} */ (await running().call('set_monitor_confirm', { enabled: enabled === true }))
+    options = { ...options, ...saved }
+    return options
+  },
+  async set_monitor_auto_win({ enabled }) {
+    const saved = /** @type {{ riichi_auto_win: boolean }} */ (await running().call('set_monitor_auto_win', { enabled: enabled === true }))
     options = { ...options, ...saved }
     return options
   },

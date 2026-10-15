@@ -10,6 +10,8 @@ type Props = {
   onAutoplay: ((enabled: boolean) => void) | null
   onTrail: ((enabled: boolean) => void) | null
   onLean: ((enabled: boolean) => void) | null
+  onConfirm: ((enabled: boolean) => void) | null
+  onAutoWin: ((enabled: boolean) => void) | null
 }
 
 function Row({ name, about, on, onChange }: { name: string; about: string; on: boolean; onChange: ((on: boolean) => void) | null }) {
@@ -27,7 +29,7 @@ const Line = ({ name, value, note }: { name: string; value: string; note?: strin
 /** What the window can be told, and what it runs. The switches are the ones the
  *  bar already has, with the words there is no room for up there; the model and
  *  its service are shown as they are, since both are the application's to run. */
-export function Settings({ snapshot: s, options, now, onPin, onAutoplay, onTrail, onLean }: Props) {
+export function Settings({ snapshot: s, options, now, onPin, onAutoplay, onTrail, onLean, onConfirm, onAutoWin }: Props) {
   const server = s?.server ?? { state: 'none' as const }
   const bot = s && 'bot' in s.bot ? s.bot.bot : null
   // The model service runs from the app's start; the bot itself joins each game as it starts.
@@ -41,6 +43,8 @@ export function Settings({ snapshot: s, options, now, onPin, onAutoplay, onTrail
         <Row name={tr('自动操作')} about={tr('关掉后只显示建议，不替你操作')} on={!!s?.autoplay_enabled} onChange={s ? onAutoplay : null} />
         <Row name={tr('光标轨迹')} about={tr('在游戏画面上画出自动操作的光标和点击')} on={!!options.pointer_trail} onChange={onTrail} />
         <Row name={tr('预推理')} about={tr('别家行动时，光标停在下一手可能要打的牌上')} on={!!options.pointer_lean} onChange={onLean} />
+        <Row name={tr('快速确认')} about={tr('和了或流局时，连点右下角的确认跳过结算')} on={!!options.quick_confirm} onChange={onConfirm} />
+        <Row name={tr('立直自动和牌')} about={tr('立直后的某个时刻打开雀魂的自动和牌')} on={!!options.riichi_auto_win} onChange={onAutoWin} />
         <div className="mset-row">
           <div><strong>{tr('界面语言')}</strong><small>{tr('只改变这个窗口里的文字')}</small></div>
           {/* Each language under its own name, whatever language is showing. */}
