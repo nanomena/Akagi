@@ -10,6 +10,7 @@
 //! create one `MajsoulBridge` per connection.
 
 pub mod parser;
+pub mod tenhou_log;
 pub mod tile;
 
 use super::{Bridge, Direction, ParseResult};
@@ -25,6 +26,7 @@ use parser::{LiqiParser, MessageType, ParsedMessage};
 use serde_json::{json, Value as JsonValue};
 use std::{
     collections::HashMap,
+    path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -48,6 +50,8 @@ const METHOD_INPUT_CHI_PENG_GANG: &str = ".lq.FastTest.inputChiPengGang";
 /// setting. Observed as exactly this value on both input methods.
 const TIMEUSE_CLIENT_AUTO: u64 = 1_000_000;
 const METHOD_ENTER_GAME: &str = ".lq.FastTest.enterGame";
+/// The lobby call a replay opens with; its answer is the whole game record.
+const METHOD_FETCH_GAME_RECORD: &str = ".lq.Lobby.fetchGameRecord";
 const ACTION_NEW_ROUND: &str = "ActionNewRound";
 const ACTION_DEAL_TILE: &str = "ActionDealTile";
 const ACTION_DISCARD_TILE: &str = "ActionDiscardTile";
@@ -172,6 +176,10 @@ pub struct MajsoulBridge {
     /// autoplay manager for click verification (see `autoplay::verify`).
     /// `None` when the autoplay context isn't wired (MITM path, tests).
     input_watch: Option<crate::autoplay::verify::SharedInputWatch>,
+    /// Where an opened replay is written as a tenhou.net/6 log (see
+    /// `tenhou_log`). `None` leaves replays alone (tests, offline tools that
+    /// do not ask for it).
+    replay_dir: Option<PathBuf>,
 }
 
 impl MajsoulBridge {
@@ -195,6 +203,34 @@ impl MajsoulBridge {
             replaying: false,
             restore_budget: None,
             input_watch: None,
+            replay_dir: None,
+        }
+    }
+
+    /// Install the folder opened replays are exported to (builder-style;
+    /// used by `bridge::for_platform`).
+    pub fn with_replay_dir(mut self, dir: Option<PathBuf>) -> Self {
+        self.replay_dir = dir;
+        self
+    }
+
+    /// Write the game record a replay just fetched as a tenhou.net/6 log and
+    /// NAGA's order-form lines. Failures are logged and go no further: the
+    /// replay itself plays on regardless.
+    fn export_replay(&self, payload: &JsonValue) {
+        let Some(dir) = &self.replay_dir else { return };
+        match tenhou_log::export(dir, payload) {
+            Ok(out) => info!(
+                target: "akagi::bridge::majsoul",
+                "replay {} exported: {} rounds, {}",
+                out.uuid,
+                out.rounds,
+                out.naga.display()
+            ),
+            Err(e) => warn!(
+                target: "akagi::bridge::majsoul",
+                "replay not exported: {e:#}"
+            ),
         }
     }
 
@@ -1812,6 +1848,11 @@ impl Bridge for MajsoulBridge {
                         "payload": msg.payload.clone(),
                     }),
                 });
+                if msg.msg_type == MessageType::Response
+                    && msg.method_name.as_ref() == METHOD_FETCH_GAME_RECORD
+                {
+                    self.export_replay(&msg.payload);
+                }
                 let events = self.dispatch(&msg);
                 // Rotate before writing so the StartGame event itself lands
                 // in the freshly-opened file, not the previous game's file.

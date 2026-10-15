@@ -6,6 +6,9 @@ use anyhow::{Context, Result};
 use std::sync::Arc;
 use std::time::Duration;
 
+/// Where opened replays are exported, under the home the shell gives the core.
+const REPLAY_DIR: &str = "./replays";
+
 /// Where the game view is: the shell's local DevTools endpoint, and the page
 /// there to watch and send to the game.
 #[derive(Debug, Clone)]
@@ -74,9 +77,11 @@ impl EmbeddedGame {
                 tenhou_state: Some(a.tenhou_state.clone()),
                 riichi_inject: None,
                 notify: None,
+                replay_dir: None,
             })
             .unwrap_or_default();
         hooks.notify = Some(ctx.notify_bus.clone());
+        hooks.replay_dir = Some(crate::util::resolve_dir(std::path::Path::new(REPLAY_DIR)));
         let bridges = Arc::new(FlowBridges::<cdp::FlowKey>::new(
             ctx.session.clone(),
             ctx.platform,

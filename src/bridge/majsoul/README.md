@@ -356,9 +356,35 @@ one JSON line. One file per game; multiple games on the same WS flow
 produce multiple files. Without a session (e.g. tests), rotation is a
 no-op and only the parsed-frame text log (if any) is written.
 
+## Replays → tenhou.net/6 and NAGA
+
+Opening a replay in the client sends `.lq.Lobby.fetchGameRecord`; its
+response holds the whole game, every seat's starting hand and draws included,
+which the live feed never shows. When the bridge has a replay folder
+(`with_replay_dir`; the embedded capture gives it `<home>/replays`), it
+converts that response with `tenhou_log` and writes two files named by the
+game's uuid:
+
+- `<uuid>.json` — the tenhou.net/6 log of the whole game, for any viewer
+  that reads that format.
+- `<uuid>.naga.txt` — one `http://tenhou.net/6/#json=` line per round, the
+  text NAGA's custom-game order form takes. Nothing is sent anywhere.
+
+Opening the same replay again rewrites both. A record that comes only as a
+`data_url`, a 3-player game or a malformed record is logged and skipped; the
+replay plays on either way. `cargo run --example replay_majsoul --
+<inspector.jsonl> <dir>` exports the replays a past capture opened.
+
+The conversion is ported from honvl/Majsoul-to-NAGA (MIT, see `NOTICE`),
+whose fixture is the test in `testdata/`. Abortive draws are named from
+`RecordLiuJu.type` with tenhou's names (九種九牌, 四風連打, 四槓散了,
+四家立直, 三家和了) rather than guessed from riichi and kan counts.
+
 ## Files
 
 - `parser.rs` — `LiqiParser`, the per-flow decoder.
+- `tenhou_log.rs` — a replay's game record → tenhou.net/6 log and NAGA lines.
+- `testdata/` — the reference replay record and the log it converts to.
 - `mod.rs` — `MajsoulBridge` that wraps the parser behind the `Bridge` trait.
 - `tile.rs` — Majsoul ↔ mjai tile-string mapping + canonical mjai sort order.
 - `liqi.json` — flat rpc-map: `".lq.Service.method" → {req, resp}` with

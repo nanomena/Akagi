@@ -291,6 +291,24 @@ pub fn decode_restore_action(name: &str, b64: &str) -> Result<JsonValue> {
     decode_named_action(name, &bytes)
 }
 
+/// Split a `Wrapper { name, data }` into the message name it carries
+/// (`.lq.RecordNewRound`) and that message's plain protobuf bytes — how a
+/// replay record (`.lq.Lobby.fetchGameRecord`) nests its parts.
+pub fn unwrap_message(buf: &[u8]) -> Result<(String, Vec<u8>)> {
+    let wrapper = decode_wrapper(buf)?;
+    Ok((wrapper.name, wrapper.data))
+}
+
+/// Decode `bytes` as the liqi message `name` (`.lq.ResGameRecord` or
+/// `lq.ResGameRecord`) into the same JSON shape every payload here takes.
+pub fn decode_message(name: &str, bytes: &[u8]) -> Result<JsonValue> {
+    let full_name = name.trim_start_matches('.');
+    let desc = POOL
+        .get_message_by_name(full_name)
+        .with_context(|| format!("unknown message: {full_name}"))?;
+    decode_to_json(&desc, bytes)
+}
+
 /// Position-dependent XOR scheme used by Majsoul for action payloads.
 /// Mirrors the algorithm in MajsoulMax-rs `parser.rs::wtf_decode`.
 fn wtf_decode(data: &mut [u8]) {
