@@ -93,6 +93,28 @@ impl Spread {
     }
 }
 
+/// A distance down from a point, never up: any length as likely to be where
+/// it stops as the next (exponential, mean `mean`), never past `most`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Drop {
+    pub mean: f64,
+    pub most: f64,
+}
+
+impl Drop {
+    pub fn draw<R: Rng + ?Sized>(&self, rng: &mut R) -> f64 {
+        // Drawn again past `most` rather than piled up on it.
+        for _ in 0..8 {
+            let u: f64 = rng.random();
+            let down = -self.mean * (1.0 - u).max(f64::MIN_POSITIVE).ln();
+            if down <= self.most {
+                return down;
+            }
+        }
+        self.most
+    }
+}
+
 /// A wait in which every moment is as likely as any other to be the one it
 /// ends: at least `floor` ms, then exponential with mean `mean` ms, never
 /// past `most`.
@@ -278,15 +300,26 @@ pub const BEND: Spread = Spread {
     sd: 0.06,
     most: 0.18,
 };
-/// Off the middle of a tile looked at, in units of the canvas.
+/// Off the middle of a tile looked at, across, in units of the canvas.
 pub const LOOK_OFF_X: Spread = Spread {
     sd: 0.08,
     most: 0.2,
 };
-pub const LOOK_OFF_Y: Spread = Spread {
-    sd: 0.12,
-    most: 0.3,
+/// Where on a hand tile's height a hand puts the pointer, to press it or to
+/// look at it: from the top quarter of its face (some 1.13 high about its
+/// middle), and down from there — mostly in the upper half, never in the
+/// bottom fifth. In units of the canvas, down from the middle positive.
+pub const TILE_TOP: f64 = -0.28;
+pub const TILE_DROP: Drop = Drop {
+    mean: 0.15,
+    most: 0.58,
 };
+
+/// Where on a hand tile's height the pointer goes, as an offset from its
+/// middle: [`TILE_TOP`], then [`TILE_DROP`] down.
+pub fn on_tile_y<R: Rng + ?Sized>(rng: &mut R) -> f64 {
+    TILE_TOP + TILE_DROP.draw(rng)
+}
 /// A press's scatter in its target, as a share of the target's reach: along
 /// the way the pointer came, across it, and with no way known.
 pub const AIM_ALONG: f64 = 0.38;
