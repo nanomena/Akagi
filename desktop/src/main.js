@@ -12,14 +12,16 @@
 //   --cdp-port=<n>    the local DevTools port (default: any free port)
 // Each can also be given as AKAGI_DATA, AKAGI_CORE, AKAGI_DOCK, AKAGI_CDP_PORT.
 
-import { BaseWindow, BrowserWindow, Menu, WebContentsView, app, dialog, ipcMain, net, protocol, screen } from 'electron'
+import { BaseWindow, BrowserWindow, Menu, WebContentsView, app, clipboard, dialog, ipcMain, net, protocol, screen } from 'electron'
 import fs from 'node:fs'
 import { createServer } from 'node:net'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Core } from './core.js'
+import { FrameSource } from './frames.js'
 import { MIN, RATIO, conform, framedRatio, gameBounds, handOnGame, openingSize, restoredBounds, settle, trailBounds } from './layout.js'
 import { policyFor } from './policy.js'
+import { STREAM_FPS, StreamServer, newToken, streamUrl } from './stream.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 /** The interface's address. A scheme of its own, so the page has an origin and absolute paths. */
@@ -68,9 +70,25 @@ const USER_STILL_MS = 400
 /** Where the game view is in the window's content, while it is shown. */
 /** @type {import('./layout.js').Rect | null} */
 let gameAt = null
-/** The window's options as the core last saved them. */
-/** @type {{ always_on_top: boolean, pointer_trail?: boolean, pointer_lean?: boolean, version?: string }} */
+/**
+ * The window's options as the core last saved them, the build's version, and
+ * where the stream is served while it is.
+ * @typedef {{ always_on_top: boolean, pointer_trail?: boolean, pointer_lean?: boolean,
+ *   stream_output?: boolean, stream_port?: number, stream_token?: string, stream_url?: string, version?: string }} Options
+ */
+/** @type {Options} */
 let options = { always_on_top: false }
+/** The game offered to a streaming program: served while the option is on, drawn for it while anyone watches. */
+/** @type {StreamServer | null} */
+let stream = null
+/** @type {FrameSource | null} */
+let frames = null
+/** @type {NodeJS.Timeout | undefined} */
+let framesIdle
+/** The stream being served at start: the interface is told the options once it is. */
+let streamStarting = Promise.resolve()
+/** Whether the core has been given the game view: frames are only taken from a view that is set up. */
+let gameOpen = false
 let cdpPort = 0
 let quitting = false
 
@@ -159,6 +177,13 @@ function holdRatio(frame) {
 /** @param {import('./core.js').Ready} ready */
 function openWindow(ready) {
   options = { ...ready.monitor, version: ready.version }
+  if (options.stream_output) {
+    // Served from the start, at the address the streaming program already has.
+    streamStarting = startStream().catch(error => {
+      console.warn(`stream: not served: ${error instanceof Error ? error.message : error}`)
+      options = { ...options, stream_output: false }
+    })
+  }
   const saved = restoredBounds(readJson(WINDOW_STATE), screen.getAllDisplays().map(display => display.workArea))
   const size = saved ?? openingSize(screen.getPrimaryDisplay().workAreaSize)
   const frame = window = new BaseWindow({
@@ -208,6 +233,8 @@ function openWindow(ready) {
     try { fs.writeFileSync(WINDOW_STATE, JSON.stringify({ x, y, ...contentSize(frame) })) } catch { /* where the window was is a convenience */ }
   })
   frame.on('closed', () => {
+    frames?.stop()
+    void stream?.close()
     // Views outlive the window they were in unless they are closed.
     game?.webContents.close()
     view.webContents.close()
@@ -257,6 +284,58 @@ function placeGame(/** @type {unknown} */ value) {
   if (bounds.visible) game.setBounds({ x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height })
   gameAt = bounds.visible ? { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height } : null
   placeTrail()
+  watchStream()
+}
+
+/**
+ * Take frames while anyone watches and the game view is on screen, and not
+ * otherwise. Being left is given a moment first, so that the streaming program
+ * reloading its page does not stop and start them.
+ */
+function watchStream() {
+  clearTimeout(framesIdle)
+  if (stream && stream.watchers > 0 && game && gameOpen && gameAt) {
+    frames ??= new FrameSource(game.webContents.debugger, { onFrame: jpeg => stream?.push(jpeg), fps: STREAM_FPS, log: message => console.warn(message) })
+    frames.start()
+  } else if (frames?.running) {
+    if (stream?.watchers === 0 && gameAt) framesIdle = setTimeout(() => frames?.stop(), 3000)
+    else frames.stop()
+  }
+}
+
+/** The options as the interface is told them: with the stream's address while it is served. */
+function withStream(/** @type {Options} */ saved) {
+  return { ...saved, stream_url: stream && saved.stream_output && saved.stream_token ? streamUrl(stream.port, saved.stream_token) : undefined }
+}
+
+/**
+ * Serve the stream at the address kept, or at a new one if there is none or
+ * its port has been taken since. The core keeps where it ended up.
+ */
+async function startStream() {
+  const token = options.stream_token || newToken()
+  const server = stream ?? new StreamServer({ token, onWatchers: watchStream })
+  const port = await server.listen(options.stream_port ?? 0)
+  stream = server
+  if (!options.stream_output || port !== options.stream_port || token !== options.stream_token) {
+    try {
+      const saved = /** @type {Options} */ (await running().call('set_monitor_stream', { enabled: true, port, token }))
+      options = { ...options, ...saved }
+    } catch (error) {
+      await stopStream()
+      throw error
+    }
+  }
+  options = withStream(options)
+}
+
+async function stopStream() {
+  clearTimeout(framesIdle)
+  frames?.stop()
+  frames = null
+  const server = stream
+  stream = null
+  await server?.close()
 }
 
 /**
@@ -338,7 +417,10 @@ const commands = {
   get_monitor: () => running().call('get_monitor'),
   get_hand_events: ({ round }) => running().call('get_hand_events', { round: Number(round) }),
   get_history: () => running().call('get_history'),
-  get_monitor_options: async () => options,
+  get_monitor_options: async () => {
+    await streamStarting
+    return options
+  },
   set_monitor_autoplay: ({ enabled }) => running().call('set_monitor_autoplay', { enabled: enabled === true }),
   async set_monitor_lean({ enabled }) {
     const saved = /** @type {{ pointer_lean: boolean }} */ (await running().call('set_monitor_lean', { enabled: enabled === true }))
@@ -350,6 +432,20 @@ const commands = {
     options = { ...options, ...saved }
     placeTrail()
     return options
+  },
+  async set_monitor_stream({ enabled }) {
+    if (enabled === true) {
+      await startStream()
+      return options
+    }
+    await stopStream()
+    const saved = /** @type {Options} */ (await running().call('set_monitor_stream', { enabled: false, port: options.stream_port ?? 0, token: options.stream_token ?? '' }))
+    options = withStream({ ...options, ...saved })
+    return options
+  },
+  async copy_stream_url() {
+    if (!options.stream_url) throw new Error('The stream is not on.')
+    clipboard.writeText(options.stream_url)
   },
   async set_monitor_pinned({ pinned }) {
     const saved = /** @type {{ always_on_top: boolean }} */ (await running().call('set_monitor_pinned', { pinned: pinned === true }))
@@ -370,6 +466,8 @@ const commands = {
       // The view starts blank; the core sends it to the game once it is listening.
       await view.webContents.loadURL('about:blank')
       await running().call('open_game', { port: cdpPort, target: await targetOf(view) })
+      gameOpen = true
+      watchStream()
     } catch (error) {
       if (game === view) game = null
       window?.contentView.removeChildView(view)
