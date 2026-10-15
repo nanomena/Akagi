@@ -86,6 +86,10 @@ impl AutoplayManager {
                 if self.is_ours(*actor) =>
             {
                 self.state.last_self_tsumo = None;
+                // The seat's own turn, as after a draw: no more looking ahead
+                // to it. A look still due would read a hand the tracker has
+                // not caught up with, and set off while the discard is chosen.
+                self.hand.stop_glances();
             }
             _ => {}
         }
