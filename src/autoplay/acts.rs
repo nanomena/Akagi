@@ -1,7 +1,7 @@
 //! What the hand does at the table between decisions, as a person's does.
 //!
 //! - **A hand's result.** From the moment a hand's result shows, the hand
-//!   presses its way through it: bursts of two or three presses at the
+//!   presses its way through it: bursts of two to seven quick presses at the
 //!   confirm button, bottom right, which skip the animation and then confirm. The first
 //!   burst starts at any moment as likely as the next, after a reaction
 //!   (`humanize::RESULT_START`), and each burst after it follows a pause
@@ -172,7 +172,7 @@ mod tests {
         let Some(Act::Burst(n)) = acts.next(first, 4, &mut rng) else {
             panic!("a burst")
         };
-        assert!((2..=3).contains(&n));
+        assert!((humanize::BURST_LEAST..=humanize::BURST_MOST).contains(&n));
         assert_eq!(acts.due(), None, "nothing while the burst is under way");
         assert!(acts.result_up(4));
         acts.burst_done(first, 4, &mut rng);

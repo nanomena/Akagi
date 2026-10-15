@@ -93,6 +93,28 @@ impl Spread {
     }
 }
 
+/// A distance down from a point, never up: any length as likely to be where
+/// it stops as the next (exponential, mean `mean`), never past `most`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Drop {
+    pub mean: f64,
+    pub most: f64,
+}
+
+impl Drop {
+    pub fn draw<R: Rng + ?Sized>(&self, rng: &mut R) -> f64 {
+        // Drawn again past `most` rather than piled up on it.
+        for _ in 0..8 {
+            let u: f64 = rng.random();
+            let down = -self.mean * (1.0 - u).max(f64::MIN_POSITIVE).ln();
+            if down <= self.most {
+                return down;
+            }
+        }
+        self.most
+    }
+}
+
 /// A wait in which every moment is as likely as any other to be the one it
 /// ends: at least `floor` ms, then exponential with mean `mean` ms, never
 /// past `most`.
@@ -203,6 +225,14 @@ pub const SETTLE_REST: Tail = Tail {
     low: 0.2,
     high: 2.0,
 };
+/// A hand weighing two tiles: how much longer each stop is than the one
+/// before it, the wait before it moves the first.
+pub const LONGER: Tail = Tail {
+    median: 1.5,
+    spread: 0.2,
+    low: 1.15,
+    high: 2.5,
+};
 
 /// Between two steps of a move: about a display frame, never quite even, as
 /// a real mouse's events come.
@@ -219,15 +249,18 @@ pub const RESULT_START: Hazard = Hazard {
     mean: 3000.0,
     most: 30_000.0,
 };
-/// Between one burst of presses on the result and the next.
+/// Between one burst of presses on the result and the next: half a second
+/// on average, never under 300 ms.
 pub const RESULT_PAUSE: Hazard = Hazard {
     floor: 300.0,
-    mean: 1500.0,
-    most: 20_000.0,
+    mean: 200.0,
+    most: 7_000.0,
 };
-/// The chance a burst has a third press, after its two.
-pub const BURST_MORE: f64 = 0.5;
-/// Between the presses of a burst.
+/// The fewest and the most presses a burst has.
+pub const BURST_LEAST: u32 = 2;
+pub const BURST_MOST: u32 = 7;
+/// Between the presses of a burst, from one's release to the next one's
+/// press: a hand clicking as fast as it does.
 pub const BURST_GAP: Tail = Tail {
     median: 150.0,
     spread: 0.35,
@@ -252,9 +285,10 @@ pub const AUTO_WIN_ON: Hazard = Hazard {
     most: 600_000.0,
 };
 
-/// How many presses a burst has: two, or three as likely as [`BURST_MORE`].
+/// How many presses a burst has: any number from [`BURST_LEAST`] to
+/// [`BURST_MOST`], each as likely.
 pub fn burst_len<R: Rng + ?Sized>(rng: &mut R) -> u32 {
-    2 + u32::from(chance(BURST_MORE, rng))
+    BURST_LEAST + one_of((BURST_MOST - BURST_LEAST + 1) as usize, rng) as u32
 }
 
 // ---- Shapes of an approach ----
@@ -274,15 +308,26 @@ pub const BEND: Spread = Spread {
     sd: 0.06,
     most: 0.18,
 };
-/// Off the middle of a tile looked at, in units of the canvas.
+/// Off the middle of a tile looked at, across, in units of the canvas.
 pub const LOOK_OFF_X: Spread = Spread {
     sd: 0.08,
     most: 0.2,
 };
-pub const LOOK_OFF_Y: Spread = Spread {
-    sd: 0.12,
-    most: 0.3,
+/// Where on a hand tile's height a hand puts the pointer, to press it or to
+/// look at it: from the top quarter of its face (some 1.13 high about its
+/// middle), and down from there — mostly in the upper half, never in the
+/// bottom fifth. In units of the canvas, down from the middle positive.
+pub const TILE_TOP: f64 = -0.28;
+pub const TILE_DROP: Drop = Drop {
+    mean: 0.15,
+    most: 0.58,
 };
+
+/// Where on a hand tile's height the pointer goes, as an offset from its
+/// middle: [`TILE_TOP`], then [`TILE_DROP`] down.
+pub fn on_tile_y<R: Rng + ?Sized>(rng: &mut R) -> f64 {
+    TILE_TOP + TILE_DROP.draw(rng)
+}
 /// A press's scatter in its target, as a share of the target's reach: along
 /// the way the pointer came, across it, and with no way known.
 pub const AIM_ALONG: f64 = 0.38;
@@ -470,13 +515,15 @@ mod tests {
         assert!((early - (-1.0f64).exp()).abs() < 0.03, "{early}");
     }
 
-    /// A burst is two presses or three, three as likely as [`BURST_MORE`].
+    /// A burst is two presses to seven, each count as likely.
     #[test]
-    fn a_burst_is_two_presses_or_three() {
-        let all = draws(20_000, burst_len);
-        assert!(all.iter().all(|&n| (2..=3).contains(&n)));
-        let three = all.iter().filter(|&&n| n == 3).count() as f64 / all.len() as f64;
-        assert!((three - BURST_MORE).abs() < 0.02, "{three}");
+    fn a_burst_is_two_presses_to_seven_each_as_likely() {
+        let all = draws(30_000, burst_len);
+        assert!(all.iter().all(|&n| (2..=7).contains(&n)));
+        for n in 2..=7 {
+            let share = all.iter().filter(|&&m| m == n).count() as f64 / all.len() as f64;
+            assert!((share - 1.0 / 6.0).abs() < 0.015, "{n}: {share}");
+        }
     }
 
     /// A place's spread stays within its bound and is mostly small.
