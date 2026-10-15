@@ -350,9 +350,6 @@ impl AutoplayManager {
         if crate::autoplay::cdp_input::user_active() {
             return;
         }
-        if !self.hand.may_look_at(&spot) {
-            return;
-        }
         let Some(seat) = self.state.cached_our_seat else {
             return;
         };
@@ -373,6 +370,8 @@ impl AutoplayManager {
         let Some(rect) = self.canvas.resolve(&self.ctx).await else {
             return;
         };
+        // Where its next draw lands is kept clear until the tile is there.
+        self.hand.saw_hand(tehai.len(), rect);
         self.hand.look_at(spot, &tehai, rect);
     }
 

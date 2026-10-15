@@ -1,17 +1,26 @@
-//! The pointer over one hand, and the moves that send it to the page.
+//! The pointer over one hand, and the one place it is moved and pressed.
 //!
 //! [`Hand`] keeps where the pointer is and what the bot expects of the seat's
-//! next turn, and makes the moves the rest of [`super`] plans: the way to a
-//! press ([`super::approach`]), the looks between turns ([`super::lean`]), and
-//! leaving a press for a rest by the buttons ([`super::leave`]), and the
-//! presses between decisions (`autoplay::acts`). What it knows belongs to one
-//! hand, but for where the pointer is: the manager resets it at every hand's
-//! start and end, and the pointer stays where it was.
+//! next turn, and makes every move and every press autoplay makes — no other
+//! code sends the pointer anywhere. Others say what they want: the way to a
+//! decision's press ([`super::approach`]), a plan's next press, a press made
+//! again, a press between decisions, the rest after a press, the lift after
+//! a tsumogiri, the looks between turns ([`super::lean`]). Where each ends is
+//! [`super::spots`]'s and [`super::aim`]'s, every time and distance
+//! `humanize`'s, and every move passes [`super::rules`] here, in-line or
+//! queued ([`super::queue`]), whoever planned it: [`Hand::go`] for a move
+//! made at once, [`Hand::step`] for one that waited its turn, [`Hand::press`]
+//! for a press.
+//!
+//! What it knows belongs to one hand, but for where the pointer is: the
+//! manager resets it at every hand's start and end, and the pointer stays
+//! where it was.
 
 use super::approach::{approach, changed_mind, wait_to_see, Approach, LOOK_MS, LOOK_REACH};
 use super::lean::{self, Lean, Spot};
 use super::queue::{self, Errand, Motion, Queue};
-use super::{along, distance, leave, Point};
+use super::rules::{self, Bound, Sight};
+use super::{along, distance, leave, spots, Point};
 use crate::autoplay::context::{AutoplayContext, CanvasRect};
 use crate::autoplay::humanize;
 use crate::autoplay::platform::{PlanResult, Step};
@@ -37,8 +46,10 @@ pub struct Hand {
     /// does: a decision that presses another moves as a changed mind.
     looked_at: Option<Spot>,
     /// The way the pointer last moved, as a unit direction, and when it got
-    /// there: a sharp turn from it waits for a stop (see [`turn_wait`]).
+    /// there: a sharp turn from it waits for a stop ([`rules::turn_wait`]).
     last_move: Option<(Point, Instant)>,
+    /// What the rules need to know of the table ([`rules::refusal`]).
+    sight: Sight,
     /// The rest and the looks waiting their turn, and the one under way.
     queue: Queue,
     moving: Option<Moving>,
@@ -66,6 +77,7 @@ impl Hand {
             expected_tsumogiri: false,
             looked_at: None,
             last_move: None,
+            sight: Sight::default(),
             queue: Queue::default(),
             moving: None,
         }
@@ -116,11 +128,6 @@ impl Hand {
         self.glance_at
     }
 
-    /// The pointer pressed at `at`.
-    pub fn pressed(&mut self, at: Point) {
-        self.at = Some(at);
-    }
-
     /// Plan the pointer's way to the plan's first press and take its time
     /// out of the pause that leads the plan. `None` for a plan that does not
     /// open with a pause and a press: there is no thinking time to move in.
@@ -148,17 +155,9 @@ impl Hand {
         let mut rng = rand::rng();
         // A pointer that has not been anywhere yet starts from where it
         // would have been resting.
-        let from = *self.at.get_or_insert_with(|| {
-            let (x, y) = humanize::rest_spot(&mut rng);
-            rect.pixel(x, y)
-        });
+        let from = *self.at.get_or_insert_with(|| spots::rest(rect, &mut rng));
         // The runner-up is rested on where a tile is: high on it, as a press.
-        let glance = glance.map(|(x, y)| {
-            rect.pixel(
-                x + humanize::LOOK_OFF_X.draw(&mut rng),
-                y + humanize::on_tile_y(&mut rng),
-            )
-        });
+        let glance = glance.map(|at| spots::on_tile(at, rect, &mut rng));
         let press = rect.pixel(*x_norm, *y_norm);
         let mut approach = match (looked_at, pressed_spot(action)) {
             (Some(old), Some(new)) if old != new => {
@@ -191,10 +190,7 @@ impl Hand {
     /// Walk the pointer along `approach`. False when it could not be moved.
     pub async fn walk(&mut self, approach: &Approach) -> bool {
         for leg in &approach.legs {
-            if !self
-                .move_to("approach", leg.to, leg.travel_ms, leg.bend)
-                .await
-            {
+            if !self.go("approach", leg.to, leg.travel_ms, leg.bend).await {
                 return false;
             }
             if leg.dwell_ms > 0 {
@@ -215,10 +211,18 @@ impl Hand {
     }
 
     /// Our draw came: whether the bot expected to throw it, read before the
-    /// looks stop for our turn.
+    /// looks stop for our turn. The tile is on screen: where it lands is no
+    /// longer kept clear.
     pub fn drew(&mut self) {
         self.expected_tsumogiri =
             self.lean.as_ref().and_then(|lean| lean.first()) == Some(Spot::Draw);
+        self.sight.draw_slot = None;
+    }
+
+    /// The seat's hand at rest holds `count` tiles, on the canvas at `rect`:
+    /// where its next draw lands is kept clear until the tile is there.
+    pub fn saw_hand(&mut self, count: usize, rect: CanvasRect) {
+        self.sight.draw_slot = Some(spots::draw_slot(count, rect));
     }
 
     /// Start looking at the next turn, a while after the pointer was last
@@ -247,14 +251,6 @@ impl Hand {
         spot
     }
 
-    /// Whether `spot` can be looked at between turns. Where the draw lands
-    /// never is: it is empty until our draw, and pressing what lands there
-    /// is the decision's own way, made once the tile has been seen. A hand
-    /// expecting to throw what it draws waits where it is.
-    pub fn may_look_at(&self, spot: &Spot) -> bool {
-        *spot != Spot::Draw
-    }
-
     /// Look at `spot` of a hand at rest holding `tehai`, on the canvas at
     /// `rect`: the look waits its turn in the queue.
     pub fn look_at(&mut self, mut spot: Spot, tehai: &[String], rect: CanvasRect) {
@@ -280,23 +276,20 @@ impl Hand {
                     }
                 }
             }
-            // Where the draw lands is not looked at before the tile is there
-            // (see [`Self::may_look_at`]), not even in place of a tile too far
-            // from it: with a tsumogiri the likeliest, that look is no look.
-            if !self.may_look_at(&spot) {
-                return;
-            }
             // A look at the tile the hand is already on is a look that stays.
             if crate::autoplay::majsoul::on_tile(at, pointer) {
                 self.looked_at = Some(spot);
                 return;
             }
             // Not the middle of the tile every time, and high on it, as a press.
-            let at = (
-                at.0 + humanize::LOOK_OFF_X.draw(&mut rng),
-                at.1 + humanize::on_tile_y(&mut rng),
-            );
-            let to = rect.pixel(at.0, at.1);
+            let to = spots::on_tile(at, rect, &mut rng);
+            // A look the rules would refuse — where the draw lands, with a
+            // tsumogiri the likeliest — is no look, and not queued to be
+            // refused again and again; the rules still have the last word
+            // when a look sets off.
+            if rules::refusal(to, Bound::Errand, &self.sight).is_some() {
+                return;
+            }
             let from = self.at.unwrap_or(to);
             leave(from, to, rect.width / 16.0, &mut rng)
         };
@@ -348,17 +341,10 @@ impl Hand {
     /// Queue the hand lifting straight up off the tile it threw at `from`,
     /// after lingering on it, and the looks at the next turn once it is up.
     fn queue_lift(&mut self, from: Point, rect: CanvasRect) {
-        let unit = rect.width / 16.0;
         let leg = {
             let mut rng = rand::rng();
-            let up = humanize::LIFT_UP.draw(&mut rng);
-            let side = humanize::LIFT_SIDE.draw(&mut rng);
-            leave(
-                from,
-                (from.0 + side * unit, from.1 - up * unit),
-                unit,
-                &mut rng,
-            )
+            let to = spots::lift(from, rect, &mut rng);
+            leave(from, to, rect.width / 16.0, &mut rng)
         };
         self.queue.push(Motion {
             errand: Errand::Rest { settle: true },
@@ -384,8 +370,8 @@ impl Hand {
     fn queue_rest(&mut self, from: Point, rect: CanvasRect, settle: bool) {
         let leg = {
             let mut rng = rand::rng();
-            let (x, y) = humanize::rest_spot(&mut rng);
-            leave(from, rect.pixel(x, y), rect.width / 16.0, &mut rng)
+            let to = spots::rest(rect, &mut rng);
+            leave(from, to, rect.width / 16.0, &mut rng)
         };
         self.queue.push(Motion {
             errand: Errand::Rest { settle },
@@ -417,7 +403,7 @@ impl Hand {
                 );
             }
             self.queue
-                .put_off(Instant::now() + Duration::from_millis(USER_PUT_OFF_MS));
+                .put_off(Instant::now() + Duration::from_millis(humanize::USER_PUT_OFF_MS));
             return;
         }
         if self.moving.is_none() && !self.set_off() {
@@ -427,16 +413,25 @@ impl Hand {
     }
 
     /// Start the first waiting move, if it may go now. False when none does:
-    /// none is due, or a sharp turn waits for its stop first.
+    /// none is due, the rules refuse it (it is dropped), or a sharp turn
+    /// waits for its stop first.
     fn set_off(&mut self) -> bool {
         self.sync_with_user();
         let now = Instant::now();
         let Some(motion) = self.queue.take(now) else {
             return false;
         };
+        if let Some(refusal) = rules::refusal(motion.to, Bound::Errand, &self.sight) {
+            info!(
+                "autoplay: pointer {} to ({:.0}, {:.0}) not made: {refusal:?}",
+                motion.errand.name(),
+                motion.to.0,
+                motion.to.1
+            );
+            return false;
+        }
         let from = self.at.unwrap_or(motion.to);
-        // Whoever planned this move, a hand turns sharply only from a stop.
-        let wait = turn_wait(self.last_move, from, motion.to, now, &mut rand::rng());
+        let wait = rules::turn_wait(self.last_move, from, motion.to, now, &mut rand::rng());
         if let Some(wait) = wait {
             let not_before = now + wait;
             self.queue.push_front(Motion {
@@ -497,7 +492,7 @@ impl Hand {
         let Some(arrived) = self.moving.take() else {
             return;
         };
-        if let Some(way) = direction(arrived.from, arrived.motion.to) {
+        if let Some(way) = rules::direction(arrived.from, arrived.motion.to) {
             self.last_move = Some((way, now));
         }
         match arrived.motion.errand {
@@ -563,7 +558,7 @@ impl Hand {
             let frame = humanize::frame_ms(&mut rand::rng());
             tokio::time::sleep(Duration::from_millis(frame)).await;
         }
-        if let Some(way) = direction(moving.from, stop) {
+        if let Some(way) = rules::direction(moving.from, stop) {
             self.last_move = Some((way, Instant::now()));
         }
     }
@@ -583,69 +578,32 @@ impl Hand {
         }
     }
 
-    /// Take the pointer to `to`, in CSS pixels, and press there, as a press
-    /// between decisions is made: a way of its own, then [`Self::tap`]. False
-    /// when the pointer could not be moved or the press failed.
-    pub async fn press_at(
-        &mut self,
-        to: Point,
-        rect: CanvasRect,
-        hover_ms: u32,
-        hold_ms: u32,
-    ) -> bool {
-        self.sync_with_user();
-        let leg = {
-            let mut rng = rand::rng();
-            // A pointer that has not been anywhere yet starts from where it
-            // would have been resting.
-            let from = *self.at.get_or_insert_with(|| {
-                let (x, y) = humanize::rest_spot(&mut rng);
-                rect.pixel(x, y)
-            });
-            leave(from, to, rect.width / 16.0, &mut rng)
-        };
-        self.move_to("press", leg.to, leg.travel_ms, leg.bend).await
-            && self.tap(to, hover_ms, hold_ms).await
-    }
-
-    /// Take the pointer to `to`, in CSS pixels, along an arc, for a press no
-    /// approach led to: a plan's later presses (the riichi button's tile, a
-    /// call's candidate) and presses made again. The press would otherwise
-    /// put the pointer there in one jump. Nothing to do where it already is.
-    /// False when the pointer could not be moved.
-    pub async fn reach(&mut self, to: Point, rect: CanvasRect) -> bool {
-        self.sync_with_user();
-        let leg = {
-            let mut rng = rand::rng();
-            let from = *self.at.get_or_insert_with(|| {
-                let (x, y) = humanize::rest_spot(&mut rng);
-                rect.pixel(x, y)
-            });
-            if distance(from, to) < 1.0 {
-                return true;
-            }
-            leave(from, to, rect.width / 16.0, &mut rng)
-        };
-        // The pause after the press before is the plan's own, already made.
-        self.move_to("next press", leg.to, leg.travel_ms, leg.bend)
-            .await
-    }
-
-    /// Press at `to`, in CSS pixels, where the pointer is or all but is:
-    /// about `hover_ms` on it first, the button held about `hold_ms`. False
-    /// when the press failed.
-    pub async fn tap(&mut self, to: Point, hover_ms: u32, hold_ms: u32) -> bool {
+    /// Press at `to`, in CSS pixels: the one way any press is made — a
+    /// decision's (after its approach), a plan's next press, a press made
+    /// again, a press between decisions. The pointer goes there first if it
+    /// is not there ([`Self::go`]), then rests on it about `touch.hover_ms`
+    /// and holds the button about `touch.hold_ms` (`cdp_input`). False when
+    /// the pointer could not be moved there or the press failed.
+    pub async fn press(&mut self, why: &str, to: Point, rect: CanvasRect, touch: Touch) -> bool {
+        if !self.reach(why, to, rect).await {
+            return false;
+        }
         let page_guard = self.ctx.page.read().await;
         let Some(page) = page_guard.as_ref() else {
-            warn!("autoplay: no page handle — cannot press");
+            warn!("autoplay: no page handle — cannot press ({why})");
             return false;
         };
         if let Err(e) = crate::autoplay::cdp_input::dispatch_click_shaped(
-            page, to.0, to.1, hover_ms, hold_ms, false,
+            page,
+            to.0,
+            to.1,
+            touch.hover_ms,
+            touch.hold_ms,
+            touch.jiggle,
         )
         .await
         {
-            warn!("autoplay: a press between decisions failed: {e:#}");
+            warn!("autoplay: a press ({why}) failed: {e:#}");
             return false;
         }
         drop(page_guard);
@@ -653,19 +611,52 @@ impl Hand {
         true
     }
 
-    /// Move the pointer to `to` over `travel_ms`, a move of the `kind` the
-    /// log names. False when it could not be moved.
-    async fn move_to(&mut self, kind: &str, to: Point, travel_ms: u32, bend: f64) -> bool {
+    /// Take the pointer to `to` for a press, along an arc ([`super::leave`])
+    /// from wherever it is — from where it would have been resting, before
+    /// it has been anywhere. Nothing to do where it already is.
+    async fn reach(&mut self, why: &str, to: Point, rect: CanvasRect) -> bool {
+        self.sync_with_user();
+        let leg = {
+            let mut rng = rand::rng();
+            let from = *self.at.get_or_insert_with(|| spots::rest(rect, &mut rng));
+            if distance(from, to) < 1.0 {
+                return true;
+            }
+            leave(from, to, rect.width / 16.0, &mut rng)
+        };
+        self.go(why, leg.to, leg.travel_ms, leg.bend).await
+    }
+
+    /// Move the pointer to `to` over `travel_ms` now, on the way to a press,
+    /// a move the log calls `why`: the one way a move is made in-line. A
+    /// move under way of the unhurried ones gives way to it; it passes the
+    /// rules as a press's ([`Bound::Press`]), and a sharp turn waits for its
+    /// stop; a nudge of a few pixels is one step. False when it was refused
+    /// or could not be made.
+    async fn go(&mut self, why: &str, to: Point, travel_ms: u32, bend: f64) -> bool {
         self.give_way().await;
         self.sync_with_user();
+        if let Some(refusal) = rules::refusal(to, Bound::Press, &self.sight) {
+            warn!(
+                "autoplay: pointer {why} to ({:.0}, {:.0}) not made: {refusal:?}",
+                to.0, to.1
+            );
+            return false;
+        }
         let from = self.at.unwrap_or(to);
-        // Whoever planned this move, a hand turns sharply only from a stop.
-        let wait = turn_wait(self.last_move, from, to, Instant::now(), &mut rand::rng());
+        if distance(from, to) < humanize::NUDGE_PX {
+            if !self.send(to).await {
+                return false;
+            }
+            self.at = Some(to);
+            return true;
+        }
+        let wait = rules::turn_wait(self.last_move, from, to, Instant::now(), &mut rand::rng());
         if let Some(wait) = wait {
             tokio::time::sleep(wait).await;
         }
         info!(
-            "autoplay: pointer {kind} ({:.0}, {:.0}) -> ({:.0}, {:.0}) in {travel_ms} ms{}",
+            "autoplay: pointer {why} ({:.0}, {:.0}) -> ({:.0}, {:.0}) in {travel_ms} ms{}",
             from.0,
             from.1,
             to.0,
@@ -684,42 +675,21 @@ impl Hand {
         }
         drop(page_guard);
         self.at = Some(to);
-        if let Some(way) = direction(from, to) {
+        if let Some(way) = rules::direction(from, to) {
             self.last_move = Some((way, Instant::now()));
         }
         true
     }
 }
 
-/// How long a move from `from` to `to` waits before it sets off, when it
-/// turns sharply — by more than 60 degrees — from the last move (`last`: its
-/// direction and when it ended): long enough that the hand has been still
-/// [`humanize::TURN_STOP`] since. A gentle bend, a turn after such a stop
-/// anyway (a press's hover and hold count), or a move of a few pixels waits
-/// nothing.
-fn turn_wait<R: rand::Rng + ?Sized>(
-    last: Option<(Point, Instant)>,
-    from: Point,
-    to: Point,
-    now: Instant,
-    rng: &mut R,
-) -> Option<Duration> {
-    let (was, ended) = last?;
-    let way = direction(from, to)?;
-    if was.0 * way.0 + was.1 * way.1 >= 0.5 {
-        return None;
-    }
-    let stop = Duration::from_millis(u64::from(humanize::TURN_STOP.draw_ms(rng)));
-    stop.checked_sub(now.saturating_duration_since(ended))
-        .filter(|wait| !wait.is_zero())
-}
-
-/// Which way a move from `from` to `to` goes, as a unit vector; `None` for a
-/// move of a few pixels, which has no way worth turning from.
-fn direction(from: Point, to: Point) -> Option<Point> {
-    let (dx, dy) = (to.0 - from.0, to.1 - from.1);
-    let length = (dx * dx + dy * dy).sqrt();
-    (length >= 6.0).then(|| (dx / length, dy / length))
+/// How a press is made: about `hover_ms` on the target before pressing it,
+/// the button held about `hold_ms` (each drawn about by `humanize::HOVER` and
+/// `humanize::HOLD`), and with `jiggle` nudged a pixel while it is down.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Touch {
+    pub hover_ms: u32,
+    pub hold_ms: u32,
+    pub jiggle: bool,
 }
 
 /// The spot of the hand a decision presses: for a discard, or a riichi's,
@@ -755,9 +725,6 @@ fn discards_next(action: &MjaiEvent) -> bool {
     )
 }
 
-/// How long the waiting moves are put off while the user's hand is on the mouse.
-const USER_PUT_OFF_MS: u64 = 300;
-
 /// A reaction time from now: how soon a changed plan moves the pointer.
 fn after_a_reaction() -> Instant {
     let reaction = humanize::REACTION.draw_ms(&mut rand::rng());
@@ -767,51 +734,6 @@ fn after_a_reaction() -> Instant {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::rngs::StdRng;
-    use rand::SeedableRng;
-
-    /// A move that reverses, or turns a corner, right after the last one
-    /// waits for a stop; one that goes on the same way, or turns after a
-    /// stop long enough, or barely moves, does not.
-    #[test]
-    fn a_sharp_turn_waits_for_a_stop_and_nothing_else_does() {
-        let mut rng = StdRng::seed_from_u64(41);
-        let ended = Instant::now();
-        let right = Some(((1.0, 0.0), ended));
-        let just_after = ended + Duration::from_millis(20);
-        let from = (500.0, 500.0);
-        // Back the way it came, and a right angle: a stop first.
-        for to in [(300.0, 500.0), (500.0, 700.0)] {
-            let wait = turn_wait(right, from, to, just_after, &mut rng).expect("a stop");
-            let least = humanize::TURN_STOP.low as u64 - 20;
-            assert!(wait >= Duration::from_millis(least), "{wait:?}");
-            assert!(wait <= Duration::from_millis(humanize::TURN_STOP.high as u64));
-        }
-        // On the same way, or bending gently: no stop.
-        assert_eq!(
-            turn_wait(right, from, (700.0, 520.0), just_after, &mut rng),
-            None
-        );
-        assert_eq!(
-            turn_wait(right, from, (650.0, 620.0), just_after, &mut rng),
-            None
-        );
-        // Still long enough already, or a nudge of a pixel or two: no stop.
-        let later = ended + Duration::from_millis(humanize::TURN_STOP.high as u64);
-        assert_eq!(
-            turn_wait(right, from, (300.0, 500.0), later, &mut rng),
-            None
-        );
-        assert_eq!(
-            turn_wait(right, from, (497.0, 501.0), just_after, &mut rng),
-            None
-        );
-        // Nothing moved before: nothing to turn from.
-        assert_eq!(
-            turn_wait(None, from, (300.0, 500.0), just_after, &mut rng),
-            None
-        );
-    }
 
     #[test]
     fn a_call_is_followed_by_the_seats_own_discard_and_a_discard_is_not() {

@@ -22,9 +22,6 @@ use tokio::sync::broadcast;
 /// can be read by the client as part of the user's drag, and come to nothing.
 static USER_HAND: AtomicBool = AtomicBool::new(false);
 
-/// How long a press waits, at most, for the user's mouse to rest.
-const USER_WAIT: Duration = Duration::from_millis(1500);
-
 /// Until when a hand that has come to rest still counts as on the mouse:
 /// autoplay has the pointer back a while after the user stops, a while of its
 /// own each time (`humanize::HAND_BACK`).
@@ -79,14 +76,15 @@ pub fn take_user_left_pointer() -> Option<(f64, f64)> {
 /// The next mark starts a fresh stretch of the path (see [`PointerMark::fresh`]).
 static FRESH: AtomicBool = AtomicBool::new(false);
 
-/// Wait, up to `USER_WAIT`, for the user's mouse to rest or leave the game.
+/// Wait, up to `humanize::USER_WAIT_MS`, for the user's mouse to rest or leave the game.
 /// After that the press goes ahead: a turn's clock does not wait.
 async fn wait_for_user_hand() {
     if !user_active() {
         return;
     }
     let started = tokio::time::Instant::now();
-    while user_active() && started.elapsed() < USER_WAIT {
+    let most = Duration::from_millis(crate::autoplay::humanize::USER_WAIT_MS);
+    while user_active() && started.elapsed() < most {
         tokio::time::sleep(Duration::from_millis(30)).await;
     }
     tracing::info!(

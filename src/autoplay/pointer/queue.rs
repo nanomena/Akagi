@@ -14,6 +14,7 @@
 
 use super::lean::Spot;
 use super::Point;
+use crate::autoplay::humanize;
 use std::time::Instant;
 
 /// What an unhurried move is for, the more urgent first.
@@ -119,24 +120,16 @@ impl Queue {
     }
 }
 
-/// How hard a hand brakes, in CSS pixels per millisecond squared: from a
-/// brisk 1 px/ms to a stop in a tenth of a second.
-const DECELERATION: f64 = 0.01;
-/// The longest a brake takes.
-const BRAKE_MOST_MS: f64 = 180.0;
-/// Below this speed, in px/ms, a hand is as good as still.
-const STILL: f64 = 0.05;
-
 /// A hand cut short in a move does not halt dead: it brakes to a stop along
 /// the way it was going. For a pointer at `at` moving at `velocity` (px/ms),
 /// `left` pixels short of where it was going: where it stops, never past
 /// that, and how long the braking takes in ms.
 pub fn brake(at: Point, velocity: Point, left: f64) -> (Point, u32) {
     let speed = (velocity.0 * velocity.0 + velocity.1 * velocity.1).sqrt();
-    if !speed.is_finite() || speed < STILL {
+    if !speed.is_finite() || speed < humanize::STILL_SPEED {
         return (at, 0);
     }
-    let ms = (speed / DECELERATION).min(BRAKE_MOST_MS);
+    let ms = (speed / humanize::BRAKE_DECELERATION).min(humanize::BRAKE_MOST_MS);
     let distance = (speed * ms / 2.0).min(left.max(0.0));
     let way = (velocity.0 / speed, velocity.1 / speed);
     (
@@ -223,7 +216,7 @@ mod tests {
     #[test]
     fn a_cut_short_move_brakes_along_its_way() {
         let (stop, ms) = brake((100.0, 100.0), (1.0, 0.0), 500.0);
-        assert!(ms > 50 && ms <= BRAKE_MOST_MS as u32, "{ms}");
+        assert!(ms > 50 && ms <= humanize::BRAKE_MOST_MS as u32, "{ms}");
         assert!(
             stop.0 > 100.0 && stop.0 < 200.0 && stop.1 == 100.0,
             "{stop:?}"
