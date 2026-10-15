@@ -149,6 +149,16 @@ pub const HOLD: Scaled = Scaled {
     floor: 40.0,
     high: 3.0,
 };
+/// From one press of a plan to the hand setting off for the next: the client
+/// answers the first (the tiles a riichi may throw, a call's choices) and a
+/// person sees it before moving. Never shorter than the configured gap
+/// ([`BETWEEN_PRESSES`]).
+pub const SEE_NEXT: Tail = Tail {
+    median: 420.0,
+    spread: 0.3,
+    low: 250.0,
+    high: 1200.0,
+};
 /// Between the presses of one plan, about the configured gap.
 pub const BETWEEN_PRESSES: Scaled = Scaled {
     spread: 0.35,
@@ -163,6 +173,14 @@ pub const TRAVEL: Scaled = Scaled {
     low: 0.7,
     floor: 0.0,
     high: 1.9,
+};
+/// How long a hand is still before it turns sharply: it never reverses or
+/// cuts a corner at speed, whatever planned the next move.
+pub const TURN_STOP: Tail = Tail {
+    median: 280.0,
+    spread: 0.3,
+    low: 180.0,
+    high: 600.0,
 };
 /// On what it pressed, before leaving it.
 pub const LINGER: Tail = Tail {
@@ -243,16 +261,20 @@ pub fn frame_ms<R: Rng + ?Sized>(rng: &mut R) -> u64 {
 // ---- Between decisions ----
 
 /// From a hand's result showing to the hand starting to press its way
-/// through it: a reaction, then any moment as likely as the next.
+/// through it: a look at the result, then any moment as likely as the next.
 pub const RESULT_START: Hazard = Hazard {
-    floor: 600.0,
+    floor: 2100.0,
     mean: 3000.0,
     most: 30_000.0,
 };
-/// Between one burst of presses on the result and the next: half a second
-/// on average, never under 300 ms.
+/// After a win of the seat's own, how many times longer the hand lets the
+/// result show before it starts pressing through it ([`RESULT_START`]): a
+/// player looks at their own hand's score.
+pub const OUR_WIN_LINGER: f64 = 2.5;
+/// Between one burst of presses on the result and the next: a third of a
+/// second on average, never under 120 ms.
 pub const RESULT_PAUSE: Hazard = Hazard {
-    floor: 300.0,
+    floor: 120.0,
     mean: 200.0,
     most: 7_000.0,
 };
@@ -271,10 +293,27 @@ pub const BURST_GAP: Tail = Tail {
 /// draws it: quick, and with no hover first, the pointer already on it.
 pub const TAP_HOLD_MS: u32 = 70;
 /// How far, in the 16:9 unit, the pointer drifts between the presses of a
-/// burst: a pixel or two, a hand clicking fast not moving the mouse.
-pub const TAP_DRIFT: Spread = Spread {
+/// burst, sideways and up and down: a pixel or two, a hand clicking fast not
+/// moving the mouse. A press pushes the mouse more along the hand than across
+/// it, so mostly up and down.
+pub const TAP_DRIFT_X: Spread = Spread {
+    sd: 0.005,
+    most: 0.02,
+};
+pub const TAP_DRIFT_Y: Spread = Spread {
+    sd: 0.016,
+    most: 0.05,
+};
+/// From one burst on the same button to the next, the hand still on it: it
+/// stays where it was, moved a little more than between two presses, again
+/// mostly up and down.
+pub const STAY_DRIFT_X: Spread = Spread {
     sd: 0.012,
     most: 0.04,
+};
+pub const STAY_DRIFT_Y: Spread = Spread {
+    sd: 0.035,
+    most: 0.10,
 };
 /// From our riichi being accepted to the hand switching the client's
 /// auto-win on: any moment as likely as the next, so an early riichi, with
@@ -314,13 +353,14 @@ pub const LOOK_OFF_X: Spread = Spread {
     most: 0.2,
 };
 /// Where on a hand tile's height a hand puts the pointer, to press it or to
-/// look at it: from the top quarter of its face (some 1.13 high about its
-/// middle), and down from there — mostly in the upper half, never in the
-/// bottom fifth. In units of the canvas, down from the middle positive.
-pub const TILE_TOP: f64 = -0.28;
+/// look at it: from just inside the top of its face (some 1.13 high about its
+/// middle), and down from there, on average at the top quarter — mostly in
+/// the upper half, never in the bottom fifth. In units of the canvas, down
+/// from the middle positive.
+pub const TILE_TOP: f64 = -0.50;
 pub const TILE_DROP: Drop = Drop {
-    mean: 0.15,
-    most: 0.58,
+    mean: 0.22,
+    most: 0.80,
 };
 
 /// Where on a hand tile's height the pointer goes, as an offset from its

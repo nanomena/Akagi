@@ -50,6 +50,8 @@ impl AutoplayManager {
             self.acts.later(act, Instant::now(), PUT_OFF);
             return;
         }
+        // A rest or a look under way brakes where it is.
+        self.hand.give_way().await;
         match act {
             Act::Burst(presses) => self.press_through(presses, hover_ms, hold_ms).await,
             Act::AutoWinOn => self.switch_auto_win_on(hover_ms, hold_ms).await,
@@ -58,19 +60,41 @@ impl AutoplayManager {
 
     /// One burst of `presses` at the result's confirm button: the first
     /// press as any press between decisions, the rest quick and on the spot.
-    /// Stops as soon as the client confirms the result, or the user's hand
-    /// is back on the mouse.
+    /// A burst once begun is pressed to its end, as a hand clicking fast does
+    /// not stop the moment the screen changes: the confirm button's corner is
+    /// empty table in the next hand. Only the user's hand back on the mouse
+    /// stops it; whether another burst follows is asked after it.
     async fn press_through(&mut self, presses: u32, hover_ms: u32, hold_ms: u32) {
         let watch = self.ctx.input_watch.clone();
         if let Some(rect) = self.canvas.resolve(&self.ctx).await {
             let reach = reach_of(coords::CONFIRM);
-            let mut at = aim::again(coords::CONFIRM, reach, &mut rand::rng());
+            let (cx, cy) = coords::CONFIRM;
+            // Never off the button.
+            let nudged = |at: (f64, f64), x: humanize::Spread, y: humanize::Spread| {
+                let mut rng = rand::rng();
+                (
+                    (at.0 + x.draw(&mut rng)).clamp(cx - reach.half_x, cx + reach.half_x),
+                    (at.1 + y.draw(&mut rng)).clamp(cy - reach.half_y, cy + reach.half_y),
+                )
+            };
+            // A hand still on the button from the burst before stays on its
+            // spot, a little moved; one coming from elsewhere lands anywhere
+            // in it.
+            let on_button =
+                self.hand.at().map(|(x, y)| rect.norm(x, y)).filter(|p| {
+                    (p.0 - cx).abs() <= reach.half_x && (p.1 - cy).abs() <= reach.half_y
+                });
+            let mut at = match on_button {
+                Some(p) => nudged(p, humanize::STAY_DRIFT_X, humanize::STAY_DRIFT_Y),
+                None => aim::again(coords::CONFIRM, reach, &mut rand::rng()),
+            };
             for press in 0..presses {
                 if press > 0 {
                     let gap = humanize::BURST_GAP.draw_ms(&mut rand::rng());
                     tokio::time::sleep(Duration::from_millis(u64::from(gap))).await;
                 }
-                if !self.acts.result_up(watch.confirmed()) || user_active() {
+                let gone = press == 0 && !self.acts.result_up(watch.confirmed());
+                if gone || user_active() {
                     break;
                 }
                 let pressed = if press == 0 {
@@ -78,17 +102,8 @@ impl AutoplayManager {
                         .press_at(rect.pixel(at.0, at.1), rect, hover_ms, hold_ms)
                         .await
                 } else {
-                    // A hand clicking fast barely moves, and never off the button.
-                    at = {
-                        let mut rng = rand::rng();
-                        let (cx, cy) = coords::CONFIRM;
-                        (
-                            (at.0 + humanize::TAP_DRIFT.draw(&mut rng))
-                                .clamp(cx - reach.half_x, cx + reach.half_x),
-                            (at.1 + humanize::TAP_DRIFT.draw(&mut rng))
-                                .clamp(cy - reach.half_y, cy + reach.half_y),
-                        )
-                    };
+                    // A hand clicking fast barely moves.
+                    at = nudged(at, humanize::TAP_DRIFT_X, humanize::TAP_DRIFT_Y);
                     self.hand
                         .tap(rect.pixel(at.0, at.1), 0, humanize::TAP_HOLD_MS)
                         .await
@@ -137,7 +152,7 @@ impl AutoplayManager {
                 "autoplay: switching the client's auto-win on did not take; it reads {glyph:?}"
             ),
         }
-        self.hand.rest(rect).await;
+        self.hand.rest(rect);
     }
 
     /// What the toggle whose glyph is at `at` (a normalised point) shows.

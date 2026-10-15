@@ -282,9 +282,10 @@ fn push_pre_delay(
 ) -> delay::DelayDecision {
     let cfg = ctx.cfg;
     let per_click = cfg.hover_delay_ms + cfg.click_hold_ms;
+    let see_next =
+        (crate::autoplay::humanize::SEE_NEXT.median as u32).max(cfg.inter_click_delay_ms);
     let click_overhead_ms = per_click
-        + extra_clicks
-            * (per_click + cfg.inter_click_delay_ms + crate::autoplay::pointer::next_press_ms());
+        + extra_clicks * (per_click + see_next + crate::autoplay::pointer::next_press_ms());
 
     let opening_animation = match kind {
         DecisionKind::Dahai => is_dealer_first_discard(ctx),

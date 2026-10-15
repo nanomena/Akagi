@@ -66,9 +66,18 @@ pub fn user_left_pointer_at(at: (f64, f64)) {
 }
 
 /// Where the user's mouse left the pointer since this was last asked, if it did.
+/// The next mark then starts a fresh stretch of the path: the pointer got there
+/// by the user's hand, not by a move autoplay made.
 pub fn take_user_left_pointer() -> Option<(f64, f64)> {
-    USER_LEFT.lock().ok().and_then(|mut left| left.take())
+    let left = USER_LEFT.lock().ok().and_then(|mut left| left.take());
+    if left.is_some() {
+        FRESH.store(true, Ordering::Relaxed);
+    }
+    left
 }
+
+/// The next mark starts a fresh stretch of the path (see [`PointerMark::fresh`]).
+static FRESH: AtomicBool = AtomicBool::new(false);
 
 /// Wait, up to `USER_WAIT`, for the user's mouse to rest or leave the game.
 /// After that the press goes ahead: a turn's clock does not wait.
@@ -94,6 +103,9 @@ pub struct PointerMark {
     pub x: f64,
     pub y: f64,
     pub down: bool,
+    /// The path does not come here from the mark before: the user's own
+    /// mouse moved the pointer in between.
+    pub fresh: bool,
 }
 
 static MARKS: OnceLock<broadcast::Sender<PointerMark>> = OnceLock::new();
@@ -110,7 +122,14 @@ pub fn pointer_marks() -> broadcast::Receiver<PointerMark> {
 }
 
 fn mark(x: f64, y: f64, down: bool) {
-    let _ = marks().send(PointerMark { x, y, down });
+    let fresh = FRESH.swap(false, Ordering::Relaxed);
+    let _ = marks().send(PointerMark { x, y, down, fresh });
+}
+
+/// Put the pointer at `(x, y)` in one step: one frame of a move made a frame
+/// at a time (`autoplay::pointer::queue`).
+pub async fn step_to(page: &Page, x: f64, y: f64) -> Result<()> {
+    move_to(page, x, y).await
 }
 
 /// Move the pointer, and say so.
