@@ -155,7 +155,7 @@ export function SeatColumns({ snapshot: s }: { snapshot: MonitorSnapshot }) {
           <span className="mseat-name">{s.names[p.seat] ?? ''}</span>
           <b>{fmtScore(p.score)}</b>
         </header>
-        <div className="mseat-pond" title={tr('横置：立直宣言牌　变暗：摸切　被鸣走的牌不在牌河')}><River river={p.river} room={4} /></div>
+        <div className="mseat-pond" title={tr('横置：立直宣言牌　变暗：摸切　虚线：被鸣走的牌')}><River river={p.river} room={4} /></div>
         <div className="mseat-foot">
           <Melds melds={p.melds} seat={p.seat} table={table} max={20} perRow={4} />
           {p.melds.length === 0 && <small>{self ? tr('手牌 {0} 张', p.tehai.length) : tr('暗手 {0} 张，未公开', p.tehai.length)}</small>}

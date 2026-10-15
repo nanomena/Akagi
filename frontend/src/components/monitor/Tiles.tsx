@@ -13,8 +13,9 @@ const faceUnits = (faces: Face[]) => faces.reduce((sum, f) => sum + (f.side ? SI
 
 export function Tile({ face, pick = false }: { face: Face; pick?: boolean }) {
   const src = useFace(faceSeq(face.tile, face.side, face.back))
-  const name = face.back ? tr('牌背') : tileLabel(face.tile)
-  const cls = `mt${face.side ? ' mt--side' : ''}${face.dim ? ' mt--dim' : ''}${pick ? ' mt--pick' : ''}`
+  const label = face.back ? tr('牌背') : tileLabel(face.tile)
+  const name = face.called ? tr('{0}（被鸣）', label) : label
+  const cls = `mt${face.side ? ' mt--side' : ''}${face.dim ? ' mt--dim' : ''}${face.called ? ' mt--called' : ''}${pick ? ' mt--pick' : ''}`
   return <span className={cls} title={name}>
     {src ? <img src={src} alt={name} draggable={false} /> : <span className="mt-ghost" role="img" aria-label={name}>{face.back ? '' : name}</span>}
   </span>
@@ -57,18 +58,20 @@ export function Hand({ tiles, drawn, marks, melds = [], room, max = 46 }: HandPr
 }
 
 /** Discards six to a row, as on the table. A sideways tile declared riichi; a
- *  dimmed one was discarded straight from the draw. Claimed discards have left
- *  the pond and are not drawn.
+ *  dimmed one was discarded straight from the draw; a dashed outline is a
+ *  discard another seat called, kept where it lay so that nothing after it
+ *  moves up.
  *
  *  `room` is the number of rows the pond is sized for. Its tiles are one size
  *  up to that many rows; only a longer pond shrinks them, rather than spill
  *  over its neighbours. The dock's ponds have room for four rows — twenty-four
  *  discards, more than a seat makes in play — so theirs never change size. */
 export function River({ river, room = 3 }: { river: DiscardEntry[]; room?: number }) {
-  const faces: Face[] = river.filter(d => !d.called).map(d => ({ tile: d.tile, side: d.is_riichi, dim: !d.tedashi }))
+  const faces: Face[] = river.map(d => ({ tile: d.tile, side: d.is_riichi, dim: !d.tedashi && !d.called, called: d.called }))
   const rows: Face[][] = []
   for (let i = 0; i < faces.length; i += 6) rows.push(faces.slice(i, i + 6))
-  return <div className="mriver" style={{ '--rows': Math.max(room, rows.length) } as CSSProperties} aria-label={tr('牌河 {0} 张', faces.length)}>
+  const lying = river.filter(d => !d.called).length
+  return <div className="mriver" style={{ '--rows': Math.max(room, rows.length) } as CSSProperties} aria-label={tr('牌河 {0} 张', lying)}>
     {rows.map((row, i) => <Faces key={i} faces={row} />)}
   </div>
 }
