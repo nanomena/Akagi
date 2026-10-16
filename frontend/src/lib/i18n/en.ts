@@ -59,7 +59,7 @@ export const en: Record<string, string> = {
   '预推理': 'Look-ahead',
   '别家行动时，光标停在下一手可能要打的牌上': 'Rests the pointer on the likely next discard while others play',
   '快速确认': 'Quick confirm',
-  '和了或流局时，连点右下角的确认跳过结算': 'Clicks through a hand\'s result with the confirm button, bottom right',
+  '和了或流局时，等确认按钮出现再点掉结算': 'Confirms a hand\'s result once its confirm button shows',
   '立直自动和牌': 'Auto-win after riichi',
   '立直后的某个时刻打开雀魂的自动和牌': 'Turns on Mahjong Soul\'s auto-win some time after riichi',
   '直播输出': 'Stream output',
