@@ -1,7 +1,7 @@
-# Akagi's desktop shell
+# The desktop shell
 
-One window on Windows, Linux and macOS: the game on a 16:9 stage and the
-monitor's dock under it, 4:3 in all.
+The Electron application: the window, the game view and the dock in it, and
+the local DevTools port.
 
 Capture and autoplay both go through the Chrome DevTools Protocol, and of the
 webviews an operating system provides only Windows' is a Chromium. This shell

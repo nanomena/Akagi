@@ -1,6 +1,20 @@
-# Washizu
+<!-- markdownlint-disable MD033 MD041 -->
 
-Derived from [Akagi](https://github.com/shinkuan/Akagi) v3 by Shinkuan.
+<h1 align="center">Washizu</h1>
+
+<p align="center">
+  Derived from <a href="https://github.com/shinkuan/Akagi">Akagi</a> v3 by Shinkuan.
+</p>
+
+<p align="center">
+  <a href="./LICENSE.txt"><img src="https://img.shields.io/badge/license-Apache%202.0-blue?logo=apache" alt="License: Apache-2.0" /></a>
+</p>
+
+---
+
+> For educational purposes only. Game developers and publishers may act against
+> accounts that break their terms of service; any consequences are the user's
+> responsibility.
 
 ## License
 
