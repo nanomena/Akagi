@@ -53,6 +53,11 @@ pub const ACTIONS: [(f64, f64); 9] = [
 /// The confirm button of a hand's result, bottom right, under its countdown.
 /// Measured on the client's result screen (2026-10-15).
 pub const CONFIRM: (f64, f64) = (14.59, 8.37);
+/// The confirm button's face, inside its rounded edge and clear of the
+/// network bars right of it, as (left, top, right, bottom): read to know
+/// whether the button has been drawn. Measured on the client's result
+/// screens at 2560x1440 (2026-10-16).
+pub const CONFIRM_FACE: (f64, f64, f64, f64) = (13.95, 8.13, 15.25, 8.59);
 
 /// The client's own toggles down the left of the table, top to bottom: auto
 /// sort, auto win, no calls, auto tsumogiri. Each is a glyph, green while on.
