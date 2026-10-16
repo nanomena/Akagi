@@ -17,6 +17,8 @@ const VIDEO_ID = 'akagi-game-view'
 let video = null
 /** @type {WritableStreamDefaultWriter<VideoFrame> | null} */
 let writer = null
+/** Frames received, and dropped because the video was behind. */
+const counts = { received: 0, dropped: 0 }
 
 /**
  * Where frames go: a track made of them, playing in the page's video. Made
@@ -44,8 +46,12 @@ sharedTexture?.setSharedTextureReceiver(async ({ importedSharedTexture: imported
   try {
     const out = sink()
     const frame = imported.getVideoFrame()
+    counts.received++
     if (out && (out.desiredSize ?? 0) > 0) void out.write(frame).catch(() => frame.close())
-    else frame.close()
+    else {
+      counts.dropped++
+      frame.close()
+    }
   } finally {
     imported.release()
   }
@@ -79,5 +85,9 @@ contextBridge.exposeInMainWorld('akagi', {
    */
   gameInput(input) {
     ipcRenderer.send('akagi:game-input', input)
+  },
+  /** How many of the game's frames have come, and how many were dropped. */
+  frameCounts() {
+    return { ...counts }
   },
 })
