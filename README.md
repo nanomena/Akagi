@@ -1,17 +1,20 @@
-# Akagi — the one-window build
+# Washizu
 
 Mahjong Soul in one window on Windows, Linux and macOS: the game on a 16:9
 stage, and under it a dock that shows what a mjai bot makes of every turn —
 its suggestion, the candidates it weighed, and whether the game then did what
 it said. With autoplay on, the suggestion is played.
 
-This tree began as a fork of [Akagi](https://github.com/shinkuan/Akagi) v3 and
-keeps its core: the Mahjong Soul protocol bridge, the game tracker, the bot
-manager and autoplay. Akagi's own application — the Tauri windows, the
-dashboard and settings pages, the MITM and launched-browser capture modes, the
-updater — is not here. What replaced it is a desktop shell with a Chromium of
-its own, because capture and autoplay both go through the Chrome DevTools
-Protocol and only a Chromium speaks it.
+Washizu is derived from [Akagi](https://github.com/shinkuan/Akagi) v3 by
+Shinkuan and keeps its core: the Mahjong Soul protocol bridge, the game
+tracker, the bot manager and autoplay. Akagi's own application — the Tauri
+windows, the dashboard and settings pages, the MITM and launched-browser
+capture modes, the updater — is not here. What replaced it is a desktop shell
+with a Chromium of its own, because capture and autoplay both go through the
+Chrome DevTools Protocol and only a Chromium speaks it.
+
+Inside, the program still goes by Akagi's names (`Akagi.exe`, `akagi-core`,
+`mjai_bot/`, `AKAGI_BOT_CONFIG`), so a bot written for Akagi runs as it is.
 
 ## The three parts
 
@@ -134,8 +137,9 @@ cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings && cargo
 
 ## License and attribution
 
-Licensed under the [Apache License 2.0](./LICENSE.txt). The core is Akagi v3's,
-copyright 2026 Shinkuan. Third-party attributions are in [`NOTICE`](./NOTICE);
+Licensed under the [Apache License 2.0](./LICENSE.txt). Washizu is a derivative
+of Akagi v3, copyright 2026 Shinkuan; what it changed is this repository's
+history. Third-party attributions are in [`NOTICE`](./NOTICE);
 per Apache-2.0 §4(d), redistributions must include both files.
 
 - **riichienv-core** / RiichiEnv (Apache-2.0) — Cargo dependency.
