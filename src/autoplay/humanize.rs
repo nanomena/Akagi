@@ -241,6 +241,10 @@ pub const SEE: Tail = Tail {
     low: 500.0,
     high: 2200.0,
 };
+/// From the frame that opens the dealer's first turn — a new hand being
+/// dealt — to the hand laid out, before [`SEE`] starts: Majsoul dropped
+/// presses 2.4 s in and took them from 2.7 s.
+pub const DEAL_MS: u32 = 2700;
 /// From a changed mind to the pointer moving.
 pub const REACTION: Tail = Tail {
     median: 650.0,

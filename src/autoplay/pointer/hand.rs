@@ -16,7 +16,9 @@
 //! manager resets it at every hand's start and end, and the pointer stays
 //! where it was.
 
-use super::approach::{approach, changed_mind, wait_to_see, Approach, LOOK_MS, LOOK_REACH};
+use super::approach::{
+    approach, changed_mind, dealt_lead, wait_to_see, Approach, LOOK_MS, LOOK_REACH,
+};
 use super::lean::{self, Lean, Spot};
 use super::queue::{self, Errand, Motion, Queue};
 use super::rules::{self, Bound, Sight};
@@ -132,8 +134,10 @@ impl Hand {
     /// out of the pause that leads the plan. `None` for a plan that does not
     /// open with a pause and a press: there is no thinking time to move in.
     /// `glance` is the runner-up to look at, as a normalised point; `shown_at`
-    /// when the frame that opened the decision came, before which the pointer
-    /// cannot have seen what it answers (see [`wait_to_see`]). A decision
+    /// when what the decision answers came on screen, before which the
+    /// pointer cannot have seen it (see [`wait_to_see`]); after a deal the
+    /// whole way is made once the hand can have been seen ([`dealt_lead`]).
+    /// A decision
     /// that presses another tile than the one the pointer rests on after its
     /// looks between turns is a changed mind ([`changed_mind`]).
     pub fn plan_approach(
@@ -147,12 +151,24 @@ impl Hand {
         self.sync_with_user();
         let looked_at = self.looked_at.take();
         let rest_ms = plan.look_ms.unwrap_or(LOOK_MS);
+        let dealt = plan.dealt;
         let [Step::Sleep { duration_ms }, Step::Click { x_norm, y_norm }, ..] =
             plan.steps.as_mut_slice()
         else {
             return None;
         };
         let mut rng = rand::rng();
+        // How long from now until what it answers can have been seen.
+        let see_ms = shown_at.map(|shown_at| {
+            let seen_at =
+                shown_at + Duration::from_millis(u64::from(humanize::SEE.draw_ms(&mut rng)));
+            let ms = seen_at
+                .saturating_duration_since(Instant::now())
+                .as_millis();
+            u32::try_from(ms).unwrap_or(u32::MAX)
+        });
+        let lead = see_ms.map_or(0, |see_ms| dealt_lead(dealt, see_ms, *duration_ms));
+        let think_ms = *duration_ms - lead;
         // A pointer that has not been anywhere yet starts from where it
         // would have been resting.
         let from = *self.at.get_or_insert_with(|| spots::rest(rect, &mut rng));
@@ -162,11 +178,11 @@ impl Hand {
         let mut approach = match (looked_at, pressed_spot(action)) {
             (Some(old), Some(new)) if old != new => {
                 info!("autoplay: a changed mind: the pointer was on {old:?}, pressing {new:?}");
-                let think = *duration_ms + humanize::CHANGED_MIND.draw_ms(&mut rng);
+                let think = think_ms + humanize::CHANGED_MIND.draw_ms(&mut rng);
                 changed_mind(think, from, press, rest_ms, rect.width / 16.0, &mut rng)
             }
             _ => approach(
-                *duration_ms,
+                think_ms,
                 from,
                 press,
                 glance,
@@ -175,13 +191,9 @@ impl Hand {
                 &mut rng,
             ),
         };
-        if let Some(shown_at) = shown_at {
-            let seen_at =
-                shown_at + Duration::from_millis(u64::from(humanize::SEE.draw_ms(&mut rng)));
-            let see_ms = seen_at
-                .saturating_duration_since(Instant::now())
-                .as_millis();
-            wait_to_see(&mut approach, u32::try_from(see_ms).unwrap_or(u32::MAX));
+        approach.pause_ms += lead;
+        if let Some(see_ms) = see_ms {
+            wait_to_see(&mut approach, see_ms);
         }
         *duration_ms = approach.pause_ms;
         Some(approach)

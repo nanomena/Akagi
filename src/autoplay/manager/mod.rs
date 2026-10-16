@@ -30,6 +30,7 @@ mod table_acts;
 
 use crate::autoplay::canvas::Canvas;
 use crate::autoplay::context::AutoplayContext;
+use crate::autoplay::humanize;
 use crate::autoplay::majsoul::MajsoulAutoplay;
 use crate::autoplay::platform::{PlatformAutoplay, Step};
 use crate::autoplay::pointer::{self, Hand};
@@ -41,7 +42,7 @@ use crate::event_bus::{BotResponseBus, MjaiBus, NotifyBus};
 use crate::game_state::tracker::GameTracker;
 use crate::schema::MjaiEvent;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::{broadcast::error::RecvError, Mutex, RwLock};
 use tracing::{debug, info, warn};
 
@@ -299,8 +300,12 @@ impl AutoplayManager {
         // time, not after it: the pause that leads the plan gives up
         // exactly what the way takes, so the press lands when it would
         // have (see `autoplay::pointer`).
-        // Not before what it answers can have been seen: the window opened with its frame.
-        let shown_at = decision.planned_budget.map(|b| b.opened_at);
+        // Not before what it answers can have been seen: the window opened with its frame,
+        // or, at the dealer's opening, with a deal still to be laid out.
+        let dealt = if plan.dealt { humanize::DEAL_MS } else { 0 };
+        let shown_at = decision
+            .planned_budget
+            .map(|b| b.opened_at + Duration::from_millis(u64::from(dealt)));
         // A rest or a look under way brakes where it is; the way to the
         // press starts from there.
         if rect.is_some() {
