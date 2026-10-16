@@ -252,6 +252,9 @@ impl PlatformAutoplay for MajsoulAutoplay {
             _ => {}
         }
 
+        // Anything the dealer presses on its first turn answers a hand that
+        // is still being dealt when the window opens.
+        result.dealt = !result.steps.is_empty() && is_dealer_opening(ctx);
         result
     }
 }
@@ -287,13 +290,18 @@ fn push_pre_delay(
     let click_overhead_ms = per_click
         + extra_clicks * (per_click + see_next + crate::autoplay::pointer::next_press_ms());
 
-    let opening_animation = match kind {
-        DecisionKind::Dahai => is_dealer_first_discard(ctx),
-        // A kita on the opening draw of a kyoku waits out the same
-        // dealing animation as the dealer's first discard.
-        DecisionKind::Kita => ctx.last_kawa_tile.is_none(),
-        _ => false,
-    };
+    // Whatever the dealer does first in a kyoku — a discard, a riichi, a
+    // concealed kan, a win off the deal, nine terminals, a kita — waits out
+    // the deal: presses issued during it are dropped.
+    let opening_animation = matches!(
+        kind,
+        DecisionKind::Dahai
+            | DecisionKind::Reach
+            | DecisionKind::Ankan
+            | DecisionKind::Hora
+            | DecisionKind::Ryukyoku
+            | DecisionKind::Kita
+    ) && is_dealer_opening(ctx);
 
     // Discard sub-kind: tsumogiri comes straight off the event; a
     // post-call discard is the only dahai decision with no just-drawn
@@ -544,7 +552,7 @@ fn plan_dahai_click_with(
     // the rack (sorted) — there's no "tsumohai" gap. Click position is
     // the index in the fully-sorted 14-tile array, using TILES[i]
     // directly (not get_pai_coord, which would add TSUMO_SPACE for i=13).
-    if is_dealer_first_discard(ctx) {
+    if is_dealer_opening(ctx) {
         let mut sorted = ctx.snapshot.players[our_seat].tehai.clone();
         sorted.sort_by(|a, b| compare_pai(a, b));
         let copies: Vec<usize> = (0..sorted.len()).filter(|&i| sorted[i] == pai).collect();
@@ -631,11 +639,12 @@ fn plan_dahai_click_with(
         y_norm: y,
     })
 }
-/// True for the dealer's very first discard of a kyoku — the moment
-/// when Mahjong Soul has dealt 14 tiles, played the hand-sort animation,
-/// and is showing all 14 tiles continuously on the rack (no tsumohai
-/// offset). Detected by: we're oya, our hand size is 14, and we have
-/// no discards or melds yet.
+/// True on the dealer's first turn of a kyoku, before it has done
+/// anything — the turn whose window opens as Mahjong Soul deals 14
+/// tiles and plays the hand-sort animation (presses during it are
+/// dropped), after which all 14 tiles sit continuously on the rack (no
+/// tsumohai offset). Detected by: we're oya, our hand size is 14, and
+/// we have no discards or melds yet.
 ///
 /// 3p caveat: a kita (北抜き) declared on the opening hand keeps the
 /// hand at 14 (North removed → rinshan drawn) with an empty river and
@@ -645,7 +654,7 @@ fn plan_dahai_click_with(
 /// non-empty kita pool must fall through to the normal tsumohai-offset
 /// path, otherwise every closed tile sorting after the rinshan gets
 /// clicked one slot too far right.
-fn is_dealer_first_discard(ctx: &ActionContext) -> bool {
+fn is_dealer_opening(ctx: &ActionContext) -> bool {
     let our_seat = ctx.our_seat as usize;
     let Some(player) = ctx.snapshot.players.get(our_seat) else {
         return false;
@@ -1853,6 +1862,85 @@ mod tests {
         }
     }
 
+    /// Whatever the dealer does first waits out the deal, not only a
+    /// discard — a double riichi, a concealed kan, a win off the deal, nine
+    /// terminals — and its plan says the window opened with a deal. Past
+    /// the dealer's first turn, or not the dealer, neither.
+    #[test]
+    fn whatever_the_dealer_does_first_waits_out_the_deal() {
+        let hand = vec![
+            "1m", "1m", "1m", "1m", "9m", "1p", "9p", "1s", "9s", "E", "S", "W", "N", "P",
+        ];
+        let cases = [
+            (
+                MjaiEvent::Reach {
+                    actor: 0,
+                    pai: Some("9m".into()),
+                    tsumogiri: None,
+                },
+                Action::new(ActionType::Riichi, None, vec![], Some(0)),
+            ),
+            (
+                MjaiEvent::Ankan {
+                    actor: 0,
+                    consumed: ["1m".into(), "1m".into(), "1m".into(), "1m".into()],
+                },
+                Action::new(ActionType::Ankan, None, vec![0, 1, 2, 3], Some(0)),
+            ),
+            (
+                MjaiEvent::Hora {
+                    score: None,
+                    actor: 0,
+                    target: 0,
+                    deltas: None,
+                    ura_markers: None,
+                    pai: None,
+                    tehai: None,
+                    scores: None,
+                },
+                Action::new(ActionType::Tsumo, None, vec![], Some(0)),
+            ),
+            (
+                MjaiEvent::Ryukyoku {
+                    deltas: None,
+                    tehais: None,
+                    scores: None,
+                    reason: None,
+                },
+                Action::new(ActionType::KyushuKyuhai, None, vec![], Some(0)),
+            ),
+        ];
+        let cfg_ref = cfg_with_dealer_delay(2000);
+        let sleep = |result: &PlanResult| match result.steps[0] {
+            Step::Sleep { duration_ms } => duration_ms,
+            ref other => panic!("expected a leading sleep, got {other:?}"),
+        };
+        let opening = snapshot_with_oya(0, 0, hand.clone());
+        let mut later = opening.clone();
+        later.players[0]
+            .river
+            .push(crate::game_state::snapshot::DiscardEntry {
+                tile: "S".into(),
+                tedashi: true,
+                is_riichi: false,
+                called: false,
+            });
+        let not_dealer = snapshot_with_oya(0, 1, hand);
+        for (act, legal) in &cases {
+            let legal = std::slice::from_ref(legal);
+            let ctx = ctx_for(act, &opening, legal, None, None, false, &cfg_ref);
+            let result = MajsoulAutoplay::new().plan(&ctx);
+            assert!(result.dealt, "{act:?}: {result:?}");
+            assert_eq!(sleep(&result), 2000, "{act:?} waits out the deal");
+            for snap in [&later, &not_dealer] {
+                let ctx = ctx_for(act, snap, legal, None, None, false, &cfg_ref);
+                let result = MajsoulAutoplay::new().plan(&ctx);
+                assert!(!result.dealt, "{act:?}: {result:?}");
+                assert!(sleep(&result) < 2000, "{act:?}: {result:?}");
+            }
+        }
+    }
+
     #[test]
     fn dealer_second_discard_uses_normal_tsumohai_path() {
         // After dealer's first discard, future turns are 13 closed + 1
@@ -2049,7 +2137,7 @@ mod tests {
         // 3p regression: dealer (oya == our seat) declares kita on the
         // opening hand, draws a rinshan replacement, then discards. The
         // North goes to the kita pool — NOT to `melds` and NOT to the
-        // river — so `is_dealer_first_discard`'s naive (oya + 14 tiles +
+        // river — so `is_dealer_opening`'s naive (oya + 14 tiles +
         // empty river + empty melds) test still matched, forcing the
         // "continuous 14-tile" dealer layout. But after a kita the rinshan
         // sits as a separated tsumohai on the far right, so every closed
