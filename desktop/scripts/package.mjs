@@ -2,11 +2,13 @@
 // Assemble the application for the platform this runs on: Electron, the shell,
 // the core with its Python runtime beside it, and the built interface.
 //
-//   node scripts/package.mjs [--core=<file>] [--dock=<dir>] [--runtime=<dir>] [--out=<dir>] [--without-runtime]
+//   node scripts/package.mjs [--core=<file>] [--dock=<dir>] [--runtime=<dir>] [--spout=<file>] [--out=<dir>] [--without-runtime]
 //
 //   --core      the core's executable        (default: target/<triple>/release, then target/release)
 //   --dock      the built interface          (default: frontend/dist)
 //   --runtime   holds python/<triple> and uv/<triple>, as scripts/fetch-runtime.sh leaves them (default: runtime)
+//   --spout     the Spout sender, Windows only (default: native/spout/build/spout-sender.exe, if built;
+//               without it the application has no Spout output)
 //   --out       where the application goes   (default: dist/desktop)
 //   --without-runtime   leave Python out; the core then needs python3 and uv on PATH for bots that use them
 //
@@ -41,6 +43,7 @@ const core = path.resolve(option('core')
 const dock = path.resolve(option('dock') ?? path.join(ROOT, 'frontend', 'dist'))
 const runtime = process.argv.includes('--without-runtime') ? null : path.resolve(option('runtime') ?? path.join(ROOT, 'runtime'))
 const out = path.resolve(option('out') ?? path.join(ROOT, 'dist', 'desktop'))
+const spout = process.platform === 'win32' ? path.resolve(option('spout') ?? path.join(DESKTOP, 'native', 'spout', 'build', 'spout-sender.exe')) : null
 
 /** @param {string} what @param {string} where @param {string} hint */
 const need = (what, where, hint) => { if (!fs.existsSync(where)) throw new Error(`${what} not found at ${where} — ${hint}`) }
@@ -59,6 +62,12 @@ fs.mkdirSync(path.join(stage, 'core'), { recursive: true })
 fs.copyFileSync(core, path.join(stage, 'core', coreName))
 fs.chmodSync(path.join(stage, 'core', coreName), 0o755)
 fs.cpSync(dock, path.join(stage, 'dock'), { recursive: true })
+const withSpout = spout !== null && fs.existsSync(spout)
+if (option('spout') && spout) need('The Spout sender', spout, 'native/spout/README.md says how to build it')
+if (withSpout) {
+  fs.mkdirSync(path.join(stage, 'spout'), { recursive: true })
+  fs.copyFileSync(spout, path.join(stage, 'spout', 'spout-sender.exe'))
+}
 if (runtime) {
   for (const part of ['python', 'uv']) {
     // Kept as they are, links included: a Python tree is full of them.
@@ -79,8 +88,8 @@ const [application] = await packager({
   // The shell is a handful of files with no dependencies of its own to hide.
   asar: false,
   prune: true,
-  ignore: [/^\/(tests|scripts|node_modules)($|\/)/, /^\/(tsconfig\.json|README\.md|package-lock\.json)$/],
-  extraResource: [path.join(stage, 'core'), path.join(stage, 'dock')],
+  ignore: [/^\/(tests|scripts|native|node_modules)($|\/)/, /^\/(tsconfig\.json|README\.md|package-lock\.json)$/],
+  extraResource: [path.join(stage, 'core'), path.join(stage, 'dock'), ...(withSpout ? [path.join(stage, 'spout')] : [])],
   win32metadata: { ProductName: 'Akagi', FileDescription: 'Akagi', CompanyName: 'Akagi' },
 })
 fs.rmSync(stage, { recursive: true, force: true })

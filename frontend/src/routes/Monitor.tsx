@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { LoaderCircle, Pin, PinOff, X } from 'lucide-react'
 import { CandidateList, DecisionCard } from '@/components/monitor/Decision'
+import { GameStage } from '@/components/monitor/GameStage'
 import { HandStrip, ResultCard, ResultPages, ScoreStrip, SeatColumns } from '@/components/monitor/Table'
 import { Diagnostics, EventList, FaultCard } from '@/components/monitor/Details'
 import { Settings } from '@/components/monitor/Settings'
@@ -10,9 +11,9 @@ import { useMonitor } from '@/hooks/useMonitor'
 import { pickShow } from '@/lib/botShow'
 import {
   MONITOR_DEFAULTS, alertsOf, candidatesOf, decisionView, healthOf, linkOf, roundLabel, seatWind, tableOf,
-  type Alert, type Candidate, type DecisionView, type Health, type MonitorConfig, type MonitorSnapshot,
+  type Alert, type Candidate, type DecisionView, type GameView, type Health, type MonitorConfig, type MonitorSnapshot,
 } from '@/lib/monitor'
-import { invoke } from '@/lib/host'
+import { invoke, listen } from '@/lib/host'
 import './Monitor.css'
 import { localized, tr, useLang } from '@/lib/i18n'
 
@@ -104,8 +105,10 @@ type DockProps = {
   onAutoWin: ((enabled: boolean) => void) | null
   onStream: ((enabled: boolean) => void) | null
   onCopyStream: (() => Promise<void>) | null
+  onGameView: ((view: GameView) => void) | null
+  onSpout: ((enabled: boolean) => void) | null
 }
-function Dock({ m, tab: chosen, setTab, tools, options, onAutoplay, onPin, onTrail, onLean, onConfirm, onAutoWin, onStream, onCopyStream }: DockProps) {
+function Dock({ m, tab: chosen, setTab, tools, options, onAutoplay, onPin, onTrail, onLean, onConfirm, onAutoWin, onStream, onCopyStream, onGameView, onSpout }: DockProps) {
   const { s, view } = m
   const game = s?.game ?? null
   const link = linkOf(m.health)
@@ -159,7 +162,7 @@ function Dock({ m, tab: chosen, setTab, tools, options, onAutoplay, onPin, onTra
       {tab === 'link' && <Diagnostics snapshot={s} health={m.health} now={m.now} />}
       {tab === 'settings' && <Settings snapshot={s} options={options} now={m.now} onPin={onPin} onAutoplay={onAutoplay} onTrail={onTrail} onLean={onLean}
         onConfirm={onConfirm} onAutoWin={onAutoWin}
-        onStream={onStream} onCopyStream={onCopyStream} />}
+        onStream={onStream} onCopyStream={onCopyStream} onGameView={onGameView} onSpout={onSpout} />}
     </div>
   </aside>
 }
@@ -185,8 +188,12 @@ export function Monitor() {
     )
     return () => { cancelled = true }
   }, [])
+  // Options the shell changes by itself: the Spout sender starting or stopping, the game view given up.
+  useEffect(() => listen<MonitorConfig>('monitor-options', setOptions), [])
 
   const k = useFit(STAGE.w, STAGE.h + DOCK.h)
+  // Drawn offscreen, the game is a picture on the stage rather than a view over it.
+  const offscreen = options.game_view_now === 'offscreen'
   // The game view outlives a reload of this page, and capture says so: it only
   // ever runs from a view the shell has made.
   const embedded = opened || (s != null && s.capture.state !== 'stopped')
@@ -220,6 +227,12 @@ export function Monitor() {
   const choose = async (command: string, enabled: boolean) => {
     setBusy(true); setUiError(null)
     try { setOptions(await invoke<MonitorConfig>(command, { enabled })) }
+    catch (e) { setUiError(String(e)) }
+    finally { setBusy(false) }
+  }
+  const chooseGameView = async (view: GameView) => {
+    setBusy(true); setUiError(null)
+    try { setOptions(await invoke<MonitorConfig>('set_monitor_game_view', { view })) }
     catch (e) { setUiError(String(e)) }
     finally { setBusy(false) }
   }
@@ -281,7 +294,8 @@ export function Monitor() {
     <div className="mon-fit">
       <div className="mon-stage" ref={stage}>
         <div className="mon-canvas mon-canvas--stage">
-          {embedded ? <div className="mon-stage-idle">
+          {embedded && offscreen ? <GameStage />
+          : embedded ? <div className="mon-stage-idle">
             <LoaderCircle size={22} className="mspin" />
             <p>{tr('雀魂视图在这里显示')}</p>
             <button className="mbtn" onClick={place}>{tr('重新对齐游戏视图')}</button>
@@ -307,7 +321,9 @@ export function Monitor() {
           onConfirm={ready && !busy ? enabled => void choose('set_monitor_confirm', enabled) : null}
           onAutoWin={ready && !busy ? enabled => void choose('set_monitor_auto_win', enabled) : null}
           onStream={ready && !busy ? enabled => void choose('set_monitor_stream', enabled) : null}
-          onCopyStream={ready ? copyStream : null} />
+          onCopyStream={ready ? copyStream : null}
+          onGameView={ready && !busy ? view => void chooseGameView(view) : null}
+          onSpout={ready && !busy ? enabled => void choose('set_monitor_spout', enabled) : null} />
         {local.length > 0 && <div className="mtoast" role="alert">
           <div><strong>{local[0].title}</strong><p>{local[0].message}</p></div>
           {uiError && <button aria-label={tr('知道了')} onClick={() => setUiError(null)}><X size={13} /></button>}

@@ -108,16 +108,37 @@ export function handOnGame(point, area, movedAt, now, stillMs) {
 }
 
 /**
- * Where on the game view the system cursor is, in the view's own pixels (the
- * game page's CSS pixels: the view is never zoomed); `null` off the view.
+ * Where on the game the system cursor is, in the game page's CSS pixels;
+ * `null` off the game. The view on screen is the page at its own size, unless
+ * the page is rendered offscreen at a size of its own (`page`) and the view
+ * is the monitor's picture of it.
  * @param {{ x: number, y: number }} point the system cursor, on screen
  * @param {Rect | null} area the game view, on screen
+ * @param {Size | null} [page] the page's size, when it is not the view's
  * @returns {{ x: number, y: number } | null}
  */
-export function onGame(point, area) {
+export function onGame(point, area, page = null) {
   if (!area) return null
   const inside = point.x >= area.x && point.x < area.x + area.width && point.y >= area.y && point.y < area.y + area.height
-  return inside ? { x: point.x - area.x, y: point.y - area.y } : null
+  if (!inside) return null
+  const sx = page ? page.width / area.width : 1
+  const sy = page ? page.height / area.height : 1
+  return { x: (point.x - area.x) * sx, y: (point.y - area.y) * sy }
+}
+
+/**
+ * A point on the game page, in the view that shows it: where the pointer's
+ * trail draws it. The inverse of `onGame`'s scaling, without the offset (the
+ * trail lies over the view).
+ * @template {{ x: number, y: number }} T
+ * @param {T} mark in the page's CSS pixels
+ * @param {Size} view the view's size
+ * @param {Size | null} page the page's size, when it is not the view's
+ * @returns {T}
+ */
+export function onView(mark, view, page) {
+  if (!page) return mark
+  return { ...mark, x: mark.x * view.width / page.width, y: mark.y * view.height / page.height }
 }
 
 /**

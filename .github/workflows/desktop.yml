@@ -117,6 +117,18 @@ jobs:
         shell: bash
         run: bash scripts/fetch-runtime.sh "${{ matrix.target }}"
 
+      # The Spout sender is a small Direct3D 11 program of its own, Windows only.
+      - name: Spout sender — build (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: desktop/native/spout
+        run: |
+          $vswhere = Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          New-Item -ItemType Directory -Force build | Out-Null
+          cmd /c "call ""$vs\VC\Auxiliary\Build\vcvars64.bat"" >nul && cl /nologo /O2 /EHsc /MT /W3 spout-sender.cpp /Fe:build\spout-sender.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Package
         working-directory: desktop
         run: node scripts/package.mjs
