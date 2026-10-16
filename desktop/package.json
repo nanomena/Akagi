@@ -3,7 +3,7 @@
   "productName": "Akagi",
   "private": true,
   "version": "0.1.0",
-  "description": "The window Akagi runs in: the game and the monitor's dock, on one Chromium.",
+  "description": "The desktop shell: the game view and the dock, on Electron.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "src/main.js",
