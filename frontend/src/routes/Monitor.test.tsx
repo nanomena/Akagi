@@ -325,20 +325,27 @@ describe('the record', () => {
   beforeEach(() => {
     fixture.snapshot = state(); fixture.options = { always_on_top: false }; fixture.calls = []; fixture.handEvents = []
     fixture.history = [
-      game(1, 120, 9, { round: 10, agari: 3, houjuu: 1, riichi: 2 }, { 2: 2, 12: 1 }),
-      game(4, -165, 9, { round: 10, agari: 1, houjuu: 3, riichi: 1 }, { 2: 1 }),
       // A friends' table: no rank points to speak of, and a record from before yaku were kept.
       game(2, 0, 0, { round: 8, agari: 2, houjuu: 0, riichi: 1 }),
+      game(1, 120, 9, { round: 10, agari: 3, houjuu: 1, riichi: 2 }, { 2: 2, 12: 1 }),
+      game(4, -165, 9, { round: 10, agari: 1, houjuu: 3, riichi: 1 }, { 2: 1 }),
     ]
   })
 
-  it('adds up rank points, placement, the usual figures and yaku, and narrows to a room', async () => {
-    render(<Monitor />)
+  it('adds up rank points, placement, the usual figures and yaku, for the room we play in or all', async () => {
+    const { unmount } = render(<Monitor />)
     fireEvent.click(screen.getByRole('tab', { name: '统计' }))
-    // Three games: 120 - 165 + 0.
-    expect(await screen.findByText('−45')).toBeTruthy()
-    expect(screen.getByText('3 场的段位分变化')).toBeTruthy()
+    // The latest game was in the gold room: its two games, 120 - 165.
+    expect(await screen.findByText('2 场的段位分变化')).toBeTruthy()
+    const scope = () => screen.getByRole('combobox', { name: '统计范围' }) as HTMLSelectElement
+    expect(scope().value).toBe('gold')
+    expect(screen.getByText('−45')).toBeTruthy()
     const figure = (name: string) => screen.getByText(name).closest('.mfact')!.querySelector('dd')!.textContent
+    expect(figure('和了率')).toBe('20.0%')
+    expect(screen.getByText('平均顺位').textContent).toBe('平均顺位 2.50')
+
+    fireEvent.change(scope(), { target: { value: 'all' } })
+    expect(screen.getByText('3 场的段位分变化')).toBeTruthy()
     expect(figure('和了率')).toBe('21.4%')
     expect(figure('放铳率')).toBe('14.3%')
     // Yaku count against the wins of the games that record them: 3 of 4.
@@ -346,10 +353,12 @@ describe('the record', () => {
     expect(yaku.textContent).toBe('立直375.0%')
     expect(screen.getByText('平均顺位').textContent).toBe('平均顺位 2.33')
 
-    fireEvent.change(screen.getByRole('combobox', { name: '统计范围' }), { target: { value: 'gold' } })
-    expect(screen.getByText('2 场的段位分变化')).toBeTruthy()
-    expect(figure('和了率')).toBe('20.0%')
-    expect(screen.getByText('平均顺位').textContent).toBe('平均顺位 2.50')
+    // Opened again, it is on the room we play in again.
+    unmount()
+    render(<Monitor />)
+    fireEvent.click(screen.getByRole('tab', { name: '统计' }))
+    expect(await screen.findByText('2 场的段位分变化')).toBeTruthy()
+    expect(scope().value).toBe('gold')
   })
 
   it('keeps its three panels in place with nothing on record', async () => {
