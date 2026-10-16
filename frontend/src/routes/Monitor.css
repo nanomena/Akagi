@@ -626,7 +626,7 @@
 /* The groups in a list on the left; the chosen one on the right, its settings in
  * two columns of three rows (what autoplay does | what the pointer does; how the
  * game is shown and streamed | the window), or its lines in two columns of six. */
-.msets { grid-template-columns: 132px minmax(0, 1fr); }
+.msets { grid-template-columns: 152px minmax(0, 1fr); }
 .mset-groups { grid-template-rows: repeat(4, minmax(0, 1fr)); row-gap: 4px; padding: 8px; }
 .mset-groups button { padding: 0 10px; border-radius: 6px; text-align: left; font-size: 13px; color: var(--m-ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mset-groups button:hover { color: var(--m-ink); background: hsl(35 20% 14% / 0.05); }
