@@ -16,11 +16,11 @@
 //!   from the result's arrival).
 //! - **The game's last result.** The game ends as its last result shows, and
 //!   the client confirms nothing more, so the hand cannot count it gone. Its
-//!   two screens are pressed through all the same, a press at a time, and then
-//!   the game's standings, whose confirm is yellow. The rank screen after the
-//!   standings has the same yellow button in the same place, and is left to
-//!   the player: once the first yellow button has gone, however it went,
-//!   nothing more is pressed. Nothing is pressed on a clock at the end.
+//!   two screens are pressed through all the same, a press at a time. The
+//!   game's own screens that follow, the final standings and then the rank,
+//!   are left to the player: they have a yellow confirm in the same place,
+//!   and the first sight of it ends the presses. Nothing is pressed on a
+//!   clock at the end.
 //! - **Auto-win after a riichi.** Once our riichi is accepted, the hand may
 //!   switch the client's own auto-win on, at any moment as likely as the next
 //!   (`humanize::AUTO_WIN_ON`): an early riichi, with longer to go, is the
@@ -43,7 +43,7 @@ use std::time::{Duration, Instant};
 /// hand pressing whatever came next.
 const RESULT_MOST: Duration = Duration::from_secs(30);
 /// The longest the game's last result is pressed after the game's end: its
-/// screens and the standings are past by then.
+/// two screens are past by then.
 const LAST_MOST: Duration = Duration::from_secs(45);
 
 /// What to do now.
@@ -88,9 +88,6 @@ struct Shown {
     /// The game's last result: the client confirms none, and the game's own
     /// screens follow it.
     last: bool,
-    /// The standings' yellow button has been seen: once it has gone, so has
-    /// everything of the game that is pressed.
-    standings: bool,
 }
 
 /// The acts in hand.
@@ -152,7 +149,6 @@ impl Acts {
                     press_at: None,
                     blind_at: blind(ours, rng),
                     last: false,
-                    standings: false,
                 });
             }
             // Two wins on one discard are one result; one of them ours makes
@@ -178,7 +174,8 @@ impl Acts {
     }
 
     /// The game is over at `now`. Its last result, if one is on screen, is
-    /// still pressed through, up to the standings; nothing else is due.
+    /// still pressed through, up to the game's own screens; nothing else is
+    /// due.
     pub fn game_over(&mut self, now: Instant) {
         self.win_on_at = None;
         if let Some(shown) = &mut self.result {
@@ -237,17 +234,17 @@ impl Acts {
             self.result = None;
             return;
         };
-        // The yellow button is the game's own, after its last result.
+        // The yellow button is the game's own, after its last result: its
+        // standings and rank are the player's, so it ends the presses.
         let sight = match sight {
             Sight::Standings if !shown.last => Sight::Nothing,
             sight => sight,
         };
-        let button = matches!(sight, Sight::Button | Sight::Standings).then_some(sight);
+        let button = (sight == Sight::Button).then_some(sight);
         let fresh = button.is_some() && shown.in_sight != button;
         shown.in_sight = button;
         shown.met |= button.is_some();
         if fresh {
-            shown.standings |= sight == Sight::Standings;
             shown.press_at = Some(now + shown.reaction(rng));
         }
         if button.is_none() {
@@ -255,13 +252,11 @@ impl Acts {
         }
         let every = now + Duration::from_millis(RESULT_LOOK_EVERY_MS);
         shown.next = match sight {
-            // The standings have gone, by our press or not: the rank screen
-            // that comes next is the player's.
-            Sight::Nothing if shown.standings => None,
+            Sight::Standings => None,
             Sight::Nothing => Some((every, Step::Look)),
             // A button in sight: watched while the reaction lasts, then
             // pressed; one still there after a burst is pressed now.
-            Sight::Button | Sight::Standings => match shown.press_at {
+            Sight::Button => match shown.press_at {
                 Some(at) if now < at => Some((every.min(at), Step::Look)),
                 _ => {
                     shown.press_at = None;
@@ -281,16 +276,12 @@ impl Acts {
     }
 
     /// A burst is over at `now`: if the result is still up, a look after a
-    /// pause says whether another follows. The standings pressed, nothing
-    /// does.
+    /// pause says whether another follows.
     pub fn burst_done<R: Rng + ?Sized>(&mut self, now: Instant, confirmed: u64, rng: &mut R) {
-        self.result = self
-            .result
-            .filter(|r| r.up(confirmed) && !r.standings)
-            .map(|r| Shown {
-                next: Some((after(now, RESULT_PAUSE, rng), Step::Look)),
-                ..r
-            });
+        self.result = self.result.filter(|r| r.up(confirmed)).map(|r| Shown {
+            next: Some((after(now, RESULT_PAUSE, rng), Step::Look)),
+            ..r
+        });
     }
 
     /// Not now: the act comes again a while after `now` — a riichi's auto-win
@@ -499,10 +490,10 @@ mod tests {
     }
 
     /// The game's last result is pressed through all the same, a press at a
-    /// time: its two screens, then the standings; the rank screen after them,
-    /// with the same yellow button, is never pressed.
+    /// time on each of its two screens; the game's final standings that come
+    /// next, with their yellow button, end the presses unpressed.
     #[test]
-    fn the_last_result_is_pressed_up_to_the_standings() {
+    fn the_last_result_is_pressed_up_to_the_game_s_own_screens() {
         let mut rng = StdRng::seed_from_u64(6);
         let t0 = Instant::now();
         let mut acts = Acts::default();
@@ -521,46 +512,18 @@ mod tests {
             let (look, _) = step(&mut acts, 7, &mut rng).unwrap();
             acts.looked(Sight::Nothing, look, 7, &mut rng);
         }
-        // The standings: one press, and then nothing more.
-        let at = see(&mut acts, Sight::Standings, 7, &mut rng);
-        assert_eq!(step(&mut acts, 7, &mut rng), Some((at, Act::Burst(1))));
-        acts.burst_done(at, 7, &mut rng);
+        // The standings: not pressed, and nothing more is.
+        let (look, act) = step(&mut acts, 7, &mut rng).unwrap();
+        assert_eq!(act, Act::Look);
+        acts.looked(Sight::Standings, look, 7, &mut rng);
         assert_eq!(acts.due(), None);
         assert!(!acts.result_up(7));
     }
 
-    /// Standings confirmed by the player, or by their own clock, before the
-    /// hand pressed them leave nothing to press: the yellow button that shows
-    /// next is the rank screen's.
-    #[test]
-    fn standings_gone_before_the_press_end_the_game_s_presses() {
-        let mut rng = StdRng::seed_from_u64(12);
-        let t0 = Instant::now();
-        let mut acts = Acts::default();
-        acts.result_shown(0, false, t0, &mut rng);
-        acts.game_over(t0);
-        let (at, _) = step(&mut acts, 0, &mut rng).unwrap();
-        acts.looked(Sight::Standings, at, 0, &mut rng);
-        let (again, _) = step(&mut acts, 0, &mut rng).unwrap();
-        acts.looked(Sight::Nothing, again, 0, &mut rng);
-        assert_eq!(acts.due(), None);
-        // And a press put off (the player's hand on the mouse) looks first.
-        let mut acts = Acts::default();
-        acts.result_shown(0, false, t0, &mut rng);
-        acts.game_over(t0);
-        let at = see(&mut acts, Sight::Standings, 0, &mut rng);
-        let (_, act) = step(&mut acts, 0, &mut rng).unwrap();
-        acts.later(act, at, Duration::from_millis(1200));
-        let (look, act) = step(&mut acts, 0, &mut rng).unwrap();
-        assert_eq!(act, Act::Look);
-        acts.looked(Sight::Nothing, look, 0, &mut rng);
-        assert_eq!(acts.due(), None);
-    }
-
     /// The yellow button belongs to the game's end: in a hand's result it is
-    /// not pressed.
+    /// not pressed, and the hand looks on for the hand's own button.
     #[test]
-    fn a_yellow_button_is_pressed_only_at_the_end() {
+    fn a_yellow_button_in_a_hand_s_result_is_not_pressed() {
         let mut rng = StdRng::seed_from_u64(13);
         let t0 = Instant::now();
         let mut acts = Acts::default();
