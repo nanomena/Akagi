@@ -4,12 +4,17 @@
 //! state inside its engine, out of reach of the page's script. Some of that
 //! state shows only as colour: whether one of the client's own toggles (auto
 //! sort, auto win, no calls, auto tsumogiri) is on is whether its glyph is
-//! green. A screenshot of the page reads it, cropped here to the glyph's box.
+//! green, and whether a hand's result is ready to confirm is whether its
+//! confirm button, blue with gold words, has been drawn (the game's own
+//! screens after its last result have a yellow one in the same place). A
+//! screenshot of the page reads them, cropped here to the box that matters.
 //!
 //! The screenshot is of the whole view, as the stream's are: a clipped one
 //! has Chromium change the page's viewport for the moment it takes, which
 //! the game shows as a flash.
 
+use crate::autoplay::context::CanvasRect;
+use crate::autoplay::majsoul::coords;
 use anyhow::{anyhow, Context, Result};
 use chromiumoxide::cdp::browser_protocol::page::{
     CaptureScreenshotFormat, CaptureScreenshotParams,
@@ -28,8 +33,86 @@ pub enum Glyph {
     Absent,
 }
 
+/// What a look at the screen found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sight {
+    /// A hand's result's confirm button, bottom right: blue with gold words.
+    Button,
+    /// The yellow confirm of the game's own screens after its last result,
+    /// in the same place: its standings, then its rank.
+    Standings,
+    /// No button: the result is still being drawn, or it has gone.
+    Nothing,
+    /// The screen could not be read.
+    Unread,
+}
+
+/// What a hand's result shows in `image`, a screenshot of the whole view at
+/// `scale` device pixels a CSS pixel, the game's canvas at `rect`.
+pub fn result_sight(image: &Image, scale: f64, rect: CanvasRect) -> Sight {
+    let (left, top, right, bottom) = coords::CONFIRM_FACE;
+    let (x0, y0) = rect.pixel(left, top);
+    let (x1, y1) = rect.pixel(right, bottom);
+    let face = image.crop(x0 * scale, y0 * scale, (x1 - x0) * scale, (y1 - y0) * scale);
+    if is_confirm(&face) {
+        Sight::Button
+    } else if is_game_confirm(&face) {
+        Sight::Standings
+    } else {
+        Sight::Nothing
+    }
+}
+
+/// The share of `pixels` that `f` holds for.
+fn share(pixels: &[[u8; 3]], f: impl Fn(i32, i32, i32) -> bool) -> f64 {
+    let count = pixels
+        .iter()
+        .filter(|&&[r, g, b]| f(i32::from(r), i32::from(g), i32::from(b)))
+        .count();
+    count as f64 / pixels.len().max(1) as f64
+}
+
+/// Whether a box holds a result's confirm button: enough of it the button's
+/// blue-violet face, and some of it the gold of its words ("(3) 确认"). The
+/// table, the dark veil over it while a result is drawn, and the words that
+/// replace the button once it is pressed are neither.
+pub fn is_confirm(pixels: &[[u8; 3]]) -> bool {
+    let face = share(pixels, |r, g, b| {
+        b >= 100 && b - r >= 45 && b - g >= 35 && r >= 35
+    });
+    let words = share(pixels, |r, g, b| {
+        r >= 170 && (110..=215).contains(&g) && b <= 150 && r - b >= 70
+    });
+    face >= 0.25 && words >= 0.03
+}
+
+/// Whether a box holds the yellow confirm of the game's standings or rank
+/// screen: most of it the button's yellow, some of it the dark red of its
+/// words ("确认"). The lobby's gold icons, which come after, are not.
+pub fn is_game_confirm(pixels: &[[u8; 3]]) -> bool {
+    let face = share(pixels, |r, g, b| {
+        r >= 200 && g >= 150 && b <= 160 && r - b >= 70 && g - b >= 40
+    });
+    let words = share(pixels, |r, g, b| {
+        (70..=170).contains(&r) && g <= 90 && b <= 90 && r - g >= 30
+    });
+    face >= 0.4 && words >= 0.03
+}
+
 /// What the glyph in the CSS-pixel box `(x, y, w, h)` of the page shows.
 pub async fn glyph(page: &Page, x: f64, y: f64, w: f64, h: f64) -> Result<Glyph> {
+    let (image, scale) = shot(page).await?;
+    Ok(classify(&image.crop(
+        x * scale,
+        y * scale,
+        w * scale,
+        h * scale,
+    )))
+}
+
+/// A screenshot of the whole view, and how many of its pixels make a CSS
+/// pixel.
+pub async fn shot(page: &Page) -> Result<(Image, f64)> {
     // The view's width in CSS pixels: the screenshot is in device pixels.
     let css_width = page
         .evaluate("window.innerWidth")
@@ -53,12 +136,7 @@ pub async fn glyph(page: &Page, x: f64, y: f64, w: f64, h: f64) -> Result<Glyph>
         .context("screenshot: base64")?;
     let image = decode_png(&png).ok_or_else(|| anyhow!("screenshot: not a PNG this reads"))?;
     let scale = image.width as f64 / css_width;
-    Ok(classify(&image.crop(
-        x * scale,
-        y * scale,
-        w * scale,
-        h * scale,
-    )))
+    Ok((image, scale))
 }
 
 /// A decoded screenshot: its RGB pixels, row by row.
@@ -308,5 +386,122 @@ mod tests {
         assert_eq!(classify(&with([150, 158, 170])), Glyph::Unlit);
         assert_eq!(classify(&vec![back; 100]), Glyph::Absent);
         assert_eq!(classify(&[]), Glyph::Absent);
+    }
+
+    /// A box of `parts` (colour, share in hundredths), in that order, a
+    /// hundred pixels for each share point.
+    fn mixed(parts: &[([u8; 3], usize)]) -> Vec<[u8; 3]> {
+        parts
+            .iter()
+            .flat_map(|&(colour, share)| std::iter::repeat_n(colour, share * 100))
+            .collect()
+    }
+
+    /// The confirm button reads as one by its blue face and gold words; the
+    /// table (even as bright as it is while a hand is dealt), the dark veil
+    /// over it while a result is drawn, and the white words left once it is
+    /// pressed do not. The colours are the ones measured on the client: the
+    /// face about (53, 69, 124), the words (221, 174, 121).
+    #[test]
+    fn the_confirm_button_reads_by_its_face_and_words() {
+        let button = mixed(&[
+            ([53, 69, 124], 44),
+            ([221, 174, 121], 7),
+            ([47, 58, 88], 49),
+        ]);
+        assert!(is_confirm(&button));
+        let dealt = mixed(&[([45, 65, 123], 39), ([30, 53, 95], 61)]);
+        assert!(!is_confirm(&dealt), "a bright table has no gold");
+        assert!(!is_confirm(&mixed(&[([30, 50, 87], 100)])), "the table");
+        assert!(!is_confirm(&mixed(&[([6, 10, 19], 100)])), "the veil");
+        let pressed = mixed(&[([17, 26, 44], 85), ([235, 235, 235], 15)]);
+        assert!(!is_confirm(&pressed), "the words once pressed");
+        assert!(!is_confirm(&[]));
+    }
+
+    /// The game's yellow confirm reads as one by its yellow face and dark red
+    /// words, and not as a hand's; the lobby's gold icons are neither. The
+    /// colours are the ones measured on the client: the face about
+    /// (241, 206, 107), the words (110, 51, 51); in the lobby a little of
+    /// both over pink.
+    #[test]
+    fn the_game_s_yellow_confirm_reads_by_its_face_and_words() {
+        let yellow = mixed(&[
+            ([241, 206, 107], 79),
+            ([110, 51, 51], 8),
+            ([116, 92, 52], 13),
+        ]);
+        assert!(is_game_confirm(&yellow));
+        assert!(!is_confirm(&yellow));
+        let button = mixed(&[
+            ([53, 69, 124], 44),
+            ([221, 174, 121], 7),
+            ([47, 58, 88], 49),
+        ]);
+        assert!(
+            !is_game_confirm(&button),
+            "a hand's button is not the game's"
+        );
+        let lobby = mixed(&[
+            ([216, 187, 124], 11),
+            ([132, 55, 45], 10),
+            ([172, 90, 100], 79),
+        ]);
+        assert!(!is_game_confirm(&lobby) && !is_confirm(&lobby), "the lobby");
+        assert!(
+            !is_game_confirm(&mixed(&[([30, 50, 87], 100)])),
+            "the table"
+        );
+        assert!(!is_game_confirm(&[]));
+    }
+
+    /// The button is looked for where the canvas has it, at the screenshot's scale.
+    #[test]
+    fn a_result_is_seen_by_its_button_where_the_canvas_has_it() {
+        // A canvas of 160x90 CSS pixels at (20, 10), shot at two device pixels a CSS pixel.
+        let rect = CanvasRect {
+            x: 20.0,
+            y: 10.0,
+            width: 160.0,
+            height: 90.0,
+        };
+        let (width, height) = (400, 220);
+        let table = Image {
+            width,
+            height,
+            pixels: vec![[30, 50, 87]; width * height],
+        };
+        assert_eq!(result_sight(&table, 2.0, rect), Sight::Nothing);
+        let mut shown = table.clone();
+        let (left, top, right, bottom) = coords::CONFIRM_FACE;
+        let (x0, y0) = rect.pixel(left, top);
+        let (x1, y1) = rect.pixel(right, bottom);
+        for y in (y0 * 2.0) as usize..(y1 * 2.0) as usize {
+            for x in (x0 * 2.0) as usize..(x1 * 2.0) as usize {
+                // Gold words on every tenth pixel of the face.
+                shown.pixels[y * width + x] = if (x + y) % 10 == 0 {
+                    [221, 174, 121]
+                } else {
+                    [53, 69, 124]
+                };
+            }
+        }
+        assert_eq!(result_sight(&shown, 2.0, rect), Sight::Button);
+        assert_eq!(
+            result_sight(&shown, 1.0, rect),
+            Sight::Nothing,
+            "at the wrong scale it is elsewhere"
+        );
+        let mut standings = table.clone();
+        for y in (y0 * 2.0) as usize..(y1 * 2.0) as usize {
+            for x in (x0 * 2.0) as usize..(x1 * 2.0) as usize {
+                standings.pixels[y * width + x] = if (x + y) % 10 == 0 {
+                    [110, 51, 51]
+                } else {
+                    [241, 206, 107]
+                };
+            }
+        }
+        assert_eq!(result_sight(&standings, 2.0, rect), Sight::Standings);
     }
 }
