@@ -24,12 +24,15 @@ impl AutoplayManager {
                 // than going through the tracker. This avoids the try_lock
                 // race entirely and makes cached_our_seat available from
                 // the very first event of the game.
+                self.acts.hand_over();
                 self.new_game();
                 self.state.cached_our_seat = *id;
                 self.state.num_players = *num_players;
             }
             MjaiEvent::EndGame { .. } => {
-                self.acts.hand_over();
+                // The game ends as its last result shows: that result is
+                // still pressed through, up to the game's rank screen.
+                self.acts.game_over(Instant::now());
                 self.new_game();
             }
             MjaiEvent::Hora { .. } | MjaiEvent::Ryukyoku { .. } => {

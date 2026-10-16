@@ -305,16 +305,37 @@ pub fn frame_ms<R: Rng + ?Sized>(rng: &mut R) -> u64 {
 
 // ---- Between decisions ----
 
-/// From a hand's result showing to the hand starting to press its way
-/// through it: a look at the result, then any moment as likely as the next.
+/// From a hand's result arriving to the first look for its confirm button,
+/// in ms: the client plays the win's or the draw's cut-in first.
+pub const RESULT_LOOK_FIRST_MS: u64 = 1500;
+/// Between two looks for the confirm button while it has not shown, in ms.
+pub const RESULT_LOOK_EVERY_MS: u64 = 250;
+/// From a confirm button showing to the first burst on it: a person sees it,
+/// then any moment as likely as the next. The button counts down from three
+/// and the client confirms by itself at nought, so the reaction, the move
+/// there and the hover all fit in about three seconds.
+pub const CONFIRM_SEEN: Hazard = Hazard {
+    floor: 250.0,
+    mean: 400.0,
+    most: 1_300.0,
+};
+/// After a win of the seat's own, how many times longer the hand looks at
+/// a confirm button before pressing it ([`CONFIRM_SEEN`]), never past
+/// [`CONFIRM_SEEN_MOST_MS`]: a player looks at their own hand's score.
+pub const OUR_BUTTON_LINGER: f64 = 1.5;
+/// The longest the hand looks at a confirm button before setting off for it, in ms.
+pub const CONFIRM_SEEN_MOST_MS: f64 = 1_600.0;
+/// From a hand's result arriving to the hand starting to press its way
+/// through it, when the screen cannot be read to see its button: a look at
+/// the result, then any moment as likely as the next.
 pub const RESULT_START: Hazard = Hazard {
     floor: 2100.0,
     mean: 3000.0,
     most: 30_000.0,
 };
 /// After a win of the seat's own, how many times longer the hand lets the
-/// result show before it starts pressing through it ([`RESULT_START`]): a
-/// player looks at their own hand's score.
+/// result show before it starts pressing through it, when it cannot see the
+/// button ([`RESULT_START`]): a player looks at their own hand's score.
 pub const OUR_WIN_LINGER: f64 = 2.5;
 /// Between one burst of presses on the result and the next: a third of a
 /// second on average, never under 120 ms.
