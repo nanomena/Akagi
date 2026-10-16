@@ -137,6 +137,11 @@ pub struct PlanResult {
     /// How long the pointer should rest on a tile it looks at, when the
     /// delay model said.
     pub look_ms: Option<u32>,
+    /// The decision's window opened with a new hand being dealt (Majsoul's
+    /// dealer opening): nothing in it is on screen before
+    /// `humanize::DEAL_MS`, and the pointer's way to the press, looks and
+    /// all, comes after (see `autoplay::pointer`).
+    pub dealt: bool,
     /// The middles of the targets the presses aim at, in press order, once
     /// they have been scattered within them (`autoplay::pointer::aim`); empty
     /// before.
