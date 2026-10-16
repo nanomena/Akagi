@@ -71,6 +71,30 @@ the stream up again by itself when the application restarts. A Media source
 can open `stream.mjpg` too, but Motion JPEG carries no timing, and ffmpeg
 plays it at 25 frames a second whatever comes in.
 
+### The game drawn offscreen
+
+The settings tab can have the game drawn apart from the window, from the next
+start (`game_view = offscreen`, kept in the data folder's `view.json`). The
+game's page is then always 1280 × 720 CSS pixels drawn at twice that, 2560 ×
+1440 — the size Mahjong Soul draws its own canvas at — whatever the window's
+size, screen or scale. Chromium hands the shell each frame as a texture on the
+GPU, and the shell lends it on (`src/relay.js`):
+
+- to the dock, which shows it on its stage as a video (`preload.cjs`) and sends
+  the user's mouse, wheel and keyboard back in the page's pixels
+  (`src/input.js`); text and pastes go in as text, so input methods work;
+- on Windows, with Spout output on, to a Spout sender (`native/spout`): in OBS,
+  a *Spout2 Capture* source (the Spout2 plugin) with the sender `Akagi`, on a
+  2560 × 1440 canvas scaled down to the output.
+
+No frame passes through the CPU on the way. The pointer's trail lies over the
+dock's picture, so it is never in what the streaming program gets. Autoplay's
+input still goes over DevTools, to the same page. If the GPU process goes, a
+page drawn offscreen draws nothing more until it is loaded again: the shell
+reloads it, and after a second time within ten minutes the window view is used
+from the next start. The Motion JPEG stream still works offscreen, but its
+screenshots hold up the page's frames; with Spout there is no need for it.
+
 ### Pages of your own beside the game
 
 For overlays and control pages around the game, the same server says what the

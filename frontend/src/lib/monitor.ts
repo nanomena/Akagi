@@ -10,7 +10,12 @@ export type MonitorConfig = {
   quick_confirm?: boolean; riichi_auto_win?: boolean
   stream_output?: boolean; stream_port?: number; stream_token?: string; stream_url?: string
   version?: string
+  /** How the game is shown from the next start, and how it is shown now: in the window, or drawn offscreen. */
+  game_view?: GameView; game_view_now?: GameView
+  /** Whether the game's frames go to a streaming program over Spout (Windows, offscreen only), and how that is going. */
+  spout_output?: boolean; spout_available?: boolean; spout_state?: 'off' | 'starting' | 'sending' | 'failed' | 'stopped'; spout_name?: string
 }
+export type GameView = 'window' | 'offscreen'
 export const MONITOR_DEFAULTS: MonitorConfig = { always_on_top: false, pointer_trail: false, pointer_lean: false, quick_confirm: false, riichi_auto_win: false }
 export type DecisionContext = { game: number; round: number; event_seq: number }
 export type MonitorDecision = {

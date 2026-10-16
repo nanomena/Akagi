@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Check, Copy } from 'lucide-react'
-import { serverLine, type MonitorConfig, type MonitorSnapshot } from '@/lib/monitor'
+import { serverLine, type GameView, type MonitorConfig, type MonitorSnapshot } from '@/lib/monitor'
 import { LANGS, setLang, tr, useLang, type Lang } from '@/lib/i18n'
 
 type Props = {
@@ -17,6 +17,8 @@ type Props = {
   onCopyStream: (() => Promise<void>) | null
   onConfirm: ((enabled: boolean) => void) | null
   onAutoWin: ((enabled: boolean) => void) | null
+  onGameView: ((view: GameView) => void) | null
+  onSpout: ((enabled: boolean) => void) | null
 }
 
 const Switch = ({ name, on, onChange }: { name: string; on: boolean; onChange: ((on: boolean) => void) | null }) =>
@@ -54,13 +56,33 @@ function StreamRow({ options, onChange, onCopy }: { options: MonitorConfig; onCh
   </div>
 }
 
+/** How the game is drawn: in the window, or offscreen at a size of its own.
+ *  The page's renderer is chosen as it starts, so a change waits for the next start. */
+function GameViewRow({ options, onChange }: { options: MonitorConfig; onChange: ((view: GameView) => void) | null }) {
+  const on = options.game_view === 'offscreen'
+  const pending = (options.game_view ?? 'window') !== (options.game_view_now ?? 'window')
+  return <Row name={tr('离屏渲染')} on={on} onChange={onChange && (next => onChange(next ? 'offscreen' : 'window'))}
+    about={pending ? tr('重启应用后生效') : tr('游戏在窗口外按 2560×1440 绘制，直播画面不随窗口变化')} />
+}
+
+/** The game's frames, handed to a streaming program's Spout source. */
+function SpoutRow({ options, onChange }: { options: MonitorConfig; onChange: ((enabled: boolean) => void) | null }) {
+  const about = !options.spout_available ? tr('只在 Windows 上可用')
+    : options.game_view_now !== 'offscreen' ? tr('先打开离屏渲染，重启后可用')
+    : !options.spout_output ? tr('把 2560×1440 的游戏画面交给 OBS 的 Spout2 源')
+    : options.spout_state === 'sending' ? tr('OBS 里选择 Spout 发送者「{0}」', options.spout_name ?? 'Akagi')
+    : options.spout_state === 'failed' ? tr('发送程序没有运行，正在重试')
+    : tr('正在启动发送程序')
+  return <Row name={tr('Spout 输出')} about={about} on={!!options.spout_output} onChange={options.spout_available ? onChange : null} />
+}
+
 const Line = ({ name, value, note }: { name: string; value: string; note?: string }) =>
   <div className="mfact" title={note}><dt>{name}</dt><dd>{value}</dd></div>
 
 /** What the window can be told, and what it runs. The switches are the ones the
  *  bar already has, with the words there is no room for up there; the model and
  *  its service are shown as they are, since both are the application's to run. */
-export function Settings({ snapshot: s, options, now, onPin, onAutoplay, onTrail, onLean, onConfirm, onAutoWin, onStream, onCopyStream }: Props) {
+export function Settings({ snapshot: s, options, now, onPin, onAutoplay, onTrail, onLean, onConfirm, onAutoWin, onStream, onCopyStream, onGameView, onSpout }: Props) {
   const server = s?.server ?? { state: 'none' as const }
   const bot = s && 'bot' in s.bot ? s.bot.bot : null
   // The model service runs from the app's start; the bot itself joins each game as it starts.
@@ -77,6 +99,8 @@ export function Settings({ snapshot: s, options, now, onPin, onAutoplay, onTrail
         <Row name={tr('快速确认')} about={tr('和了或流局时，连点右下角的确认跳过结算')} on={!!options.quick_confirm} onChange={onConfirm} />
         <Row name={tr('立直自动和牌')} about={tr('立直后的某个时刻打开雀魂的自动和牌')} on={!!options.riichi_auto_win} onChange={onAutoWin} />
         <StreamRow options={options} onChange={onStream} onCopy={onCopyStream} />
+        <GameViewRow options={options} onChange={onGameView} />
+        <SpoutRow options={options} onChange={onSpout} />
         <div className="mset-row">
           <div><strong>{tr('界面语言')}</strong><small>{tr('只改变这个窗口里的文字')}</small></div>
           {/* Each language under its own name, whatever language is showing. */}
@@ -107,6 +131,7 @@ export function Settings({ snapshot: s, options, now, onPin, onAutoplay, onTrail
         <Line name={tr('版本')} value={options.version ?? '—'} />
         <Line name={tr('平台')} value={tr('雀魂')} />
         <Line name={tr('游戏视图')} value={s?.capture.state === 'running' ? s.capture.descriptor : s?.capture.state === 'error' ? tr('异常') : tr('未打开')} />
+        <Line name={tr('游戏绘制')} value={options.game_view_now === 'offscreen' ? tr('离屏 2560×1440') : tr('窗口内')} />
       </dl>
     </section>
   </div>

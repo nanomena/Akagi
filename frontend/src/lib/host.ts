@@ -1,3 +1,5 @@
+import type { GameInput } from '@/lib/gameInput'
+
 /**
  * The page's way to the application it runs in: the bridge the desktop shell
  * puts on `window` (`desktop/src/preload.cjs`). Commands by name, events by
@@ -10,6 +12,7 @@
 type ShellBridge = {
   invoke(cmd: string, args?: Record<string, unknown>): Promise<unknown>
   listen(name: string, cb: (payload: unknown) => void): () => void
+  gameInput?(input: GameInput): void
 }
 const SHELL = (globalThis as unknown as { akagi?: ShellBridge }).akagi
 
@@ -17,6 +20,11 @@ const SHELL = (globalThis as unknown as { akagi?: ShellBridge }).akagi
 export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   if (!SHELL) throw new Error(`No application to ask: ${cmd}`)
   return await SHELL.invoke(cmd, args) as T
+}
+
+/** The user's hand on the game's picture, passed on as it happens; nothing without a shell. */
+export function gameInput(input: GameInput): void {
+  SHELL?.gameInput?.(input)
 }
 
 /** Returns the way to stop listening. */

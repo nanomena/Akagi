@@ -65,3 +65,6 @@ native_bot/out/
 
 # ZCode session artifacts
 .zcode/
+
+# The Spout sender, built locally (CI builds its own)
+desktop/native/spout/build/
