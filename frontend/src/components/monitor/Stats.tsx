@@ -23,11 +23,13 @@ const share = (part: number, whole: number) => (whole > 0 ? `${(100 * part / who
 /** Our record over the games on file, in three panels that keep their places
  *  whatever is in them: rank points and placement, the figures a riichi player
  *  looks for first, and the yaku our wins were made of. The last two scroll.
- *  `refresh` changes when the record may have: a game has started or ended. */
+ *  It opens on the room we play in now, the latest game's; another range
+ *  picked holds while the tab is open. `refresh` changes when the record may
+ *  have: a game has started or ended. */
 export function Statistics({ refresh }: { refresh: string }) {
   const [records, setRecords] = useState<GameRecord[] | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
-  const [room, setRoom] = useState<Room | 'all'>('all')
+  const [picked, setPicked] = useState<Room | 'all' | null>(null)
   useEffect(() => {
     let live = true
     const read = () => invoke<GameRecord[]>('get_history').then(
@@ -41,6 +43,9 @@ export function Statistics({ refresh }: { refresh: string }) {
   }, [refresh])
 
   const rooms = useMemo(() => ROOMS.filter(key => (records ?? []).some(r => roomOf(r) === key)), [records])
+  // The core lists the games oldest first.
+  const latest = records?.at(-1)
+  const room = picked ?? (latest ? roomOf(latest) : 'all')
   const shown = useMemo(() => (records ?? []).filter(r => room === 'all' || roomOf(r) === room), [records, room])
   const t = useMemo(() => totalsOf(shown), [shown])
   const figures = useMemo(() => figuresOf(t), [t])
@@ -50,7 +55,7 @@ export function Statistics({ refresh }: { refresh: string }) {
     <section className="mstat mstat-rank">
       <header className="msec-head">
         <h3>{tr('段位分与顺位')}</h3>
-        <select className="mselect" aria-label={tr('统计范围')} value={room} onChange={e => setRoom(e.target.value as Room | 'all')}>
+        <select className="mselect" aria-label={tr('统计范围')} value={room} onChange={e => setPicked(e.target.value as Room | 'all')}>
           <option value="all">{tr('全部场次')}</option>
           {rooms.map(key => <option key={key} value={key}>{ROOM_NAME[key]}</option>)}
         </select>
