@@ -216,8 +216,10 @@ Layers, in order:
    window means the client auto-discards.
 3. **Functional floors** (`functional_floor`) — `min_delay_ms` (Mahjong
    Soul must render buttons/tiles before a click can land; too-early
-   clicks are silently lost) and the dealing-animation wait. Applied
-   after the caps; a script cannot go below them.
+   clicks are silently lost) and the dealing-animation wait, for
+   whatever the dealer does first in a kyoku (discard, riichi, concealed
+   kan, a win off the deal, nine terminals, kita). Applied after the
+   caps; a script cannot go below them.
 
 The policy's output is the target **server-observed total** for the
 window. `majsoul::push_pre_delay` converts it to a sleep by deducting
@@ -314,6 +316,11 @@ Invariants:
   press lands at the instant it would have without it, and no cap,
   floor or budget moves. What does not fit is dropped — the look first,
   then the travel is shortened.
+- **Not before it can be seen.** The pointer stays still until what the
+  decision answers can have been seen: its frame and `humanize::SEE`.
+  At the dealer's opening the hand is still being dealt when the window
+  opens (`PlanResult::dealt`, `humanize::DEAL_MS`), and the whole way,
+  looks and all, is made in the time after.
 - **Moves never press.** Only the plan's own `Click` steps do, at the
   plan's own coordinates; the pointer's path decides nothing about the
   action. The stale-window check stays immediately before the press,
