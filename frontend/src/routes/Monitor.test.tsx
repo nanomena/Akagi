@@ -363,26 +363,50 @@ describe('the record', () => {
 })
 
 describe('the settings', () => {
-  beforeEach(() => { fixture.snapshot = state(); fixture.options = { always_on_top: false }; fixture.calls = []; fixture.handEvents = []; fixture.history = [] })
+  beforeEach(() => {
+    fixture.snapshot = state(); fixture.options = { always_on_top: false }; fixture.calls = []; fixture.handEvents = []; fixture.history = []
+    localStorage.removeItem('akagi.settings.group')
+  })
+  const group = (name: string) => fireEvent.click(screen.getByRole('button', { name }))
+  const line = (name: string) => screen.getByText(name).closest('.mfact')!.querySelector('dd')!.textContent
 
-  it('has the switches of the window with their words, and says what it runs', async () => {
+  it('says what it runs, a group at a time', async () => {
     fixture.snapshot!.server = { state: 'ready', bot: 'demo', label: 'Model A', facts: [{ name: 'Device', value: 'CPU' }], since_ms: 0, startup_ms: 900 }
     Object.assign(fixture.options, { version: '0.1.0' })
     render(<Monitor />)
     fireEvent.click(screen.getByRole('tab', { name: '设置' }))
-    const line = (name: string) => screen.getByText(name).closest('.mfact')!.querySelector('dd')!.textContent
+    // What autoplay does is the group that opens first.
+    expect(screen.getByRole('button', { name: '自动操作' }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.queryByText('Model A')).toBeNull()
+    group('模型与服务')
     expect(line('模型')).toBe('Model A')
     expect(line('Device')).toBe('CPU')
+    expect(screen.queryByRole('switch', { name: '快速确认' })).toBeNull()
+    group('应用')
     await waitFor(() => expect(line('版本')).toBe('0.1.0'))
+  })
 
-    // The same two switches the bar has: one setting, two places to change it.
-    const pin = screen.getByRole('switch', { name: '窗口置顶' })
-    expect(pin.getAttribute('aria-checked')).toBe('false')
-    fireEvent.click(pin)
-    await waitFor(() => expect(screen.getByRole('switch', { name: '窗口置顶' }).getAttribute('aria-checked')).toBe('true'))
-    expect(fixture.calls).toContainEqual(['set_monitor_pinned', { pinned: true }])
+  it('opens the group last looked at again', () => {
+    const { unmount } = render(<Monitor />)
+    fireEvent.click(screen.getByRole('tab', { name: '设置' }))
+    group('画面与窗口')
+    expect(localStorage.getItem('akagi.settings.group')).toBe('view')
+    fireEvent.click(screen.getByRole('tab', { name: '决策' }))
+    fireEvent.click(screen.getByRole('tab', { name: '设置' }))
+    expect(screen.getByRole('button', { name: '画面与窗口' }).getAttribute('aria-pressed')).toBe('true')
+    unmount()
+    render(<Monitor />)
+    fireEvent.click(screen.getByRole('tab', { name: '设置' }))
+    expect(screen.getByRole('switch', { name: '窗口置顶' })).toBeTruthy()
+  })
 
-    fireEvent.click(screen.getAllByRole('switch', { name: /自动操作/ }).at(-1)!)
+  it('has the switches of the window with their words', async () => {
+    render(<Monitor />)
+    fireEvent.click(screen.getByRole('tab', { name: '设置' }))
+    // Autoplay's switch waits for the first snapshot: it is the core's to say.
+    const autoplay = () => screen.getAllByRole('switch', { name: /自动操作/ }).at(-1) as HTMLButtonElement
+    await waitFor(() => expect(autoplay().disabled).toBe(false))
+    fireEvent.click(autoplay())
     expect(fixture.calls).toContainEqual(['set_monitor_autoplay', { enabled: false }])
 
     // The pointer's trail is the shell's to draw: the switch asks it, and shows what it saved.
@@ -405,6 +429,14 @@ describe('the settings', () => {
       await waitFor(() => expect(screen.getByRole('switch', { name }).getAttribute('aria-checked')).toBe('true'))
       expect(fixture.calls).toContainEqual([command, { enabled: true }])
     }
+
+    // The same two switches the bar has: one setting, two places to change it.
+    group('画面与窗口')
+    const pin = screen.getByRole('switch', { name: '窗口置顶' })
+    expect(pin.getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(pin)
+    await waitFor(() => expect(screen.getByRole('switch', { name: '窗口置顶' }).getAttribute('aria-checked')).toBe('true'))
+    expect(fixture.calls).toContainEqual(['set_monitor_pinned', { pinned: true }])
 
     // The stream: off, its copy button is there but not shown; on, the address is the line under it.
     const copy = screen.getByRole('button', { name: '复制直播地址', hidden: true })
@@ -470,6 +502,7 @@ describe('another language', () => {
   it('is chosen on the settings tab, changes every word at once, and is remembered', async () => {
     render(<Monitor />)
     fireEvent.click(screen.getByRole('tab', { name: '设置' }))
+    fireEvent.click(screen.getByRole('button', { name: '画面与窗口' }))
     fireEvent.change(screen.getByRole('combobox', { name: '界面语言' }), { target: { value: 'ja' } })
     // The tab stays where it was; its name and everything on it are in the new language.
     expect(screen.getByRole('tab', { name: '設定' }).getAttribute('aria-selected')).toBe('true')
