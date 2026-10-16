@@ -647,6 +647,11 @@ const commands = {
     options = { ...options, ...viewOptions() }
     return options
   },
+  /** How the game's frames are flowing, when it is drawn offscreen. */
+  async get_view_stats() {
+    if (!relay) return null
+    return { frames: relay.frames, passed: relay.passed, takers: Object.fromEntries(relay.counts), spout: spout ? { state: spout.state, detail: spout.detail } : null }
+  },
   async copy_stream_url() {
     if (!options.stream_url) throw new Error('The stream is not on.')
     clipboard.writeText(options.stream_url)

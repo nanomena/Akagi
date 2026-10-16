@@ -35,8 +35,11 @@ export class Relay {
   #log
   /** The size of the last frame that was not the one expected, so that it is said once. */
   #wrong = ''
+  /** Frames painted, and frames each taker was given or passed over for, since the start. */
   frames = 0
   passed = 0
+  /** @type {Map<string, { given: number, passed: number }>} */
+  counts = new Map()
 
   /**
    * @param {{ expected: { width: number, height: number }, onSize?: (size: { width: number, height: number }) => void, log?: (message: string) => void }} options
@@ -70,7 +73,13 @@ export class Relay {
     } else {
       this.#wrong = ''
     }
-    const takers = [...this.#takers].filter(taker => !taker.busy())
+    const takers = []
+    for (const taker of this.#takers) {
+      const count = this.counts.get(taker.name) ?? { given: 0, passed: 0 }
+      this.counts.set(taker.name, count)
+      if (taker.busy()) count.passed++
+      else { count.given++; takers.push(taker) }
+    }
     this.passed += this.#takers.size - takers.length
     if (takers.length === 0) return texture.release()
     let left = takers.length
