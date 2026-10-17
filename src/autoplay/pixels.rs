@@ -45,6 +45,9 @@ pub enum Sight {
     /// "Play again", left of the yellow confirm on the last of the game's
     /// own screens.
     Rematch,
+    /// What "play again" asks: match another game of the room? Its yellow
+    /// confirm left of a blue cancel, over a veiled table.
+    RematchAsk,
     /// No button: the result is still being drawn, or it has gone.
     Nothing,
     /// The screen could not be read.
@@ -68,9 +71,9 @@ pub fn result_sight(image: &Image, scale: f64, rect: CanvasRect) -> Sight {
 }
 
 /// What the game's own screens after its last result show in `image`, as
-/// [`result_sight`] takes it: "play again" where it shows (the last of them),
-/// else the yellow confirm of each, else a hand's blue confirm (the last
-/// result still up), else nothing yet.
+/// [`result_sight`] takes it: the question "play again" asks, else "play
+/// again" where it shows (the last of them), else the yellow confirm of each,
+/// else a hand's blue confirm (the last result still up), else nothing yet.
 pub fn end_sight(image: &Image, scale: f64, rect: CanvasRect) -> Sight {
     let face = |(left, top, right, bottom): (f64, f64, f64, f64)| {
         let (x0, y0) = rect.pixel(left, top);
@@ -78,7 +81,11 @@ pub fn end_sight(image: &Image, scale: f64, rect: CanvasRect) -> Sight {
         image.crop(x0 * scale, y0 * scale, (x1 - x0) * scale, (y1 - y0) * scale)
     };
     let confirm = face(coords::CONFIRM_FACE);
-    if is_confirm(&face(coords::REMATCH_FACE)) && is_game_confirm(&confirm) {
+    if is_game_confirm(&face(coords::REMATCH_ASK_CONFIRM_FACE))
+        && is_blue_face(&face(coords::REMATCH_ASK_CANCEL_FACE))
+    {
+        Sight::RematchAsk
+    } else if is_confirm(&face(coords::REMATCH_FACE)) && is_game_confirm(&confirm) {
         Sight::Rematch
     } else if is_game_confirm(&confirm) {
         Sight::Standings
@@ -110,6 +117,14 @@ pub fn is_confirm(pixels: &[[u8; 3]]) -> bool {
         r >= 170 && (110..=215).contains(&g) && b <= 150 && r - b >= 70
     });
     face >= 0.25 && words >= 0.03
+}
+
+/// Whether most of a box is the blue-violet face of the client's blue
+/// buttons, words or not: the cancel of "play again"'s question has pale ones.
+fn is_blue_face(pixels: &[[u8; 3]]) -> bool {
+    share(pixels, |r, g, b| {
+        b >= 100 && b - r >= 45 && b - g >= 35 && r >= 35
+    }) >= 0.5
 }
 
 /// Whether a box holds the yellow confirm of the game's standings or rank
@@ -581,6 +596,23 @@ mod tests {
             [221, 174, 121],
         );
         assert_eq!(end_sight(&result, 2.0, rect), Sight::Button);
+        // The question over a veiled table: its yellow confirm beside its blue cancel.
+        let mut ask = table.clone();
+        paint(&mut ask, coords::REMATCH_ASK_CONFIRM_FACE, yellow, red);
+        paint(
+            &mut ask,
+            coords::REMATCH_ASK_CANCEL_FACE,
+            [57, 86, 144],
+            [216, 192, 144],
+        );
+        assert_eq!(end_sight(&ask, 2.0, rect), Sight::RematchAsk);
+        let mut half = table.clone();
+        paint(&mut half, coords::REMATCH_ASK_CONFIRM_FACE, yellow, red);
+        assert_eq!(
+            end_sight(&half, 2.0, rect),
+            Sight::Nothing,
+            "a yellow box alone is not the question"
+        );
         // A hand's result never reads as "play again".
         assert_eq!(result_sight(&last, 2.0, rect), Sight::Standings);
     }
