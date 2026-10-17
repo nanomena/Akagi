@@ -615,7 +615,7 @@ mod tests {
                     (bursts, last) = (bursts + 1, at);
                     acts.burst_done(at, 0, &mut rng);
                 }
-                Act::AutoWinOn => unreachable!(),
+                Act::AutoWinOn | Act::EndLook | Act::EndPress(_) => unreachable!(),
             }
         }
         assert!(bursts >= 1);
