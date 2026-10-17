@@ -25,9 +25,11 @@
 //!   hand looks for them: the standings, the rank, then the room's rewards
 //!   with "play again" beside the yellow confirm. Each is read for a while
 //!   (`humanize::END_SEEN`) and pressed once, its yellow confirm, until
-//!   "play again" shows; that is pressed instead, and then only it, until
-//!   it has gone. A screen it does not know is never pressed, nor one that
-//!   cannot be read. The manager makes these only at the level of autoplay
+//!   "play again" shows; that is pressed instead. "Play again" asks whether
+//!   to match another game, a moment after; that question is answered
+//!   (`humanize::ASK_SEEN`), its confirm, and the room matches the next game.
+//!   After "play again" only it and its question are pressed. A screen it
+//!   does not know is never pressed, nor one that cannot be read. The manager makes these only at the level of autoplay
 //!   that plays game after game; below it the player's own.
 //! - **Auto-win after a riichi.** Once our riichi is accepted, the hand may
 //!   switch the client's own auto-win on, at any moment as likely as the next
@@ -39,7 +41,7 @@
 //! reads the toggle's colour to know where it stands (`autoplay::pixels`).
 
 use crate::autoplay::humanize::{
-    self, Hazard, AUTO_WIN_ON, CONFIRM_SEEN, CONFIRM_SEEN_MOST_MS, END_LOOK_EVERY_MS,
+    self, Hazard, ASK_SEEN, AUTO_WIN_ON, CONFIRM_SEEN, CONFIRM_SEEN_MOST_MS, END_LOOK_EVERY_MS,
     END_LOOK_FIRST_MS, END_PAUSE, END_SEEN, OUR_BUTTON_LINGER, OUR_WIN_LINGER,
     RESULT_LOOK_EVERY_MS, RESULT_LOOK_FIRST_MS, RESULT_PAUSE, RESULT_START,
 };
@@ -57,9 +59,12 @@ const LAST_MOST: Duration = Duration::from_secs(45);
 /// The longest the game's own screens are looked for after its end: the
 /// next game is matched well within it.
 const END_MOST: Duration = Duration::from_secs(180);
-/// The most presses on the game's own screens: three or four go by in a
+/// The most presses on the game's own screens: four or five go by in a
 /// game's end, and one that does not go is left after this.
 const END_PRESSES: u32 = 8;
+/// How long after "play again" its question is waited for: it comes with a
+/// little animation, and a look may fall before it.
+const ASK_WAIT: Duration = Duration::from_secs(5);
 
 /// What to do now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,7 +78,8 @@ pub enum Act {
     /// Look at the game's own screens after its end.
     EndLook,
     /// Press the button of the game's own screen in sight, once: its yellow
-    /// confirm ([`Sight::Standings`]) or "play again" ([`Sight::Rematch`]).
+    /// confirm ([`Sight::Standings`]), "play again" ([`Sight::Rematch`]), or
+    /// the confirm of the question that asks ([`Sight::RematchAsk`]).
     EndPress(Sight),
 }
 
@@ -130,9 +136,11 @@ struct Ending {
     press_at: Option<Instant>,
     /// Presses made on them so far.
     presses: u32,
-    /// "Play again" has been pressed: nothing else is, and once it has gone
-    /// the game's end is over.
-    again: bool,
+    /// When "play again" was pressed: after it, only it and its question
+    /// are, and once neither shows the game's end is over.
+    again: Option<Instant>,
+    /// The question has been answered.
+    asked: bool,
 }
 
 /// The acts in hand.
@@ -237,7 +245,8 @@ impl Acts {
             in_sight: None,
             press_at: None,
             presses: 0,
-            again: false,
+            again: None,
+            asked: false,
         });
     }
 
@@ -320,7 +329,7 @@ impl Acts {
         // ends the result's presses, and the game's own screens are next.
         let sight = match sight {
             Sight::Standings if !shown.last => Sight::Nothing,
-            Sight::Rematch => Sight::Nothing,
+            Sight::Rematch | Sight::RematchAsk => Sight::Nothing,
             sight => sight,
         };
         let button = (sight == Sight::Button).then_some(sight);
@@ -336,7 +345,7 @@ impl Acts {
         let every = now + Duration::from_millis(RESULT_LOOK_EVERY_MS);
         shown.next = match sight {
             Sight::Standings => None,
-            Sight::Nothing | Sight::Rematch => Some((every, Step::Look)),
+            Sight::Nothing | Sight::Rematch | Sight::RematchAsk => Some((every, Step::Look)),
             // A button in sight: watched while the reaction lasts, then
             // pressed; one still there after a burst is pressed now.
             Sight::Button => match shown.press_at {
@@ -356,24 +365,33 @@ impl Acts {
     /// A look at the game's own screens made at `now` found `sight`. One of
     /// them in sight is read for a while, then looked at once more, and
     /// pressed if it is still there; anything else is looked at again in a
-    /// while, and pressed never. After "play again" only it is.
+    /// while, and pressed never. After "play again" only it and its
+    /// question are, the question only then.
     pub fn end_looked<R: Rng + ?Sized>(&mut self, sight: Sight, now: Instant, rng: &mut R) {
         let Some(end) = &mut self.end else {
             return;
         };
         let button = match sight {
-            Sight::Rematch => Some(sight),
-            Sight::Standings if !end.again => Some(sight),
+            Sight::Rematch if !end.asked => Some(sight),
+            Sight::Standings if end.again.is_none() => Some(sight),
+            Sight::RematchAsk if end.again.is_some() => Some(sight),
             _ => None,
         };
-        if end.again && button.is_none() {
-            // "Play again" has gone: the room is matching the next game.
-            self.end = None;
-            return;
+        if let (Some(again), None) = (end.again, button) {
+            // Answered, or no question came: the room is matching the next game.
+            if end.asked || now >= again + ASK_WAIT {
+                self.end = None;
+                return;
+            }
         }
         if button != end.in_sight {
             end.in_sight = button;
-            end.press_at = button.map(|_| after(now, END_SEEN, rng));
+            let read = if button == Some(Sight::RematchAsk) {
+                ASK_SEEN
+            } else {
+                END_SEEN
+            };
+            end.press_at = button.map(|_| after(now, read, rng));
         }
         let every = now + Duration::from_millis(END_LOOK_EVERY_MS);
         end.next = Some(match (button, end.press_at) {
@@ -395,7 +413,10 @@ impl Acts {
             self.end = None;
             return;
         }
-        end.again |= sight == Sight::Rematch;
+        if sight == Sight::Rematch {
+            end.again = Some(now);
+        }
+        end.asked |= sight == Sight::RematchAsk;
         end.in_sight = None;
         end.press_at = None;
         end.next = Some((after(now, END_PAUSE, rng), EndStep::Look));
@@ -758,18 +779,32 @@ mod tests {
             since = pressed;
             acts.end_pressed(sight, pressed, &mut rng);
         }
-        // "Play again" has gone: nothing more.
+        // "Play again" asks, a moment later: answered after a shorter read.
         let (look, act) = step(&mut acts, 0, &mut rng).unwrap();
         assert_eq!(act, Act::EndLook);
         assert!(look >= since + Duration::from_millis(END_PAUSE.floor as u64));
         acts.end_looked(Sight::Nothing, look, &mut rng);
+        let (seen, act) = step(&mut acts, 0, &mut rng).unwrap();
+        assert_eq!(act, Act::EndLook, "the question is waited for");
+        acts.end_looked(Sight::RematchAsk, seen, &mut rng);
+        let answered = end_until_press(&mut acts, Sight::RematchAsk, &mut rng);
+        assert!(answered >= seen + Duration::from_millis(ASK_SEEN.floor as u64));
+        assert!(
+            answered
+                < seen + Duration::from_millis(ASK_SEEN.most as u64) + Duration::from_millis(1)
+        );
+        acts.end_pressed(Sight::RematchAsk, answered, &mut rng);
+        // The room is matching: nothing more.
+        let (look, _) = step(&mut acts, 0, &mut rng).unwrap();
+        acts.end_looked(Sight::Nothing, look, &mut rng);
         assert_eq!(acts.due(), None);
     }
 
-    /// After "play again" only it is pressed again (the press did not take);
-    /// a yellow confirm then is something else, and ends the presses.
+    /// After "play again" only it (the press did not take) and its question
+    /// are pressed: a yellow confirm then is something else, never pressed;
+    /// no question within a few seconds, and the end is over.
     #[test]
-    fn after_play_again_only_play_again_is_pressed() {
+    fn after_play_again_only_it_and_its_question_are_pressed() {
         let mut rng = StdRng::seed_from_u64(22);
         let t0 = Instant::now();
         let mut acts = Acts::default();
@@ -780,9 +815,28 @@ mod tests {
         acts.end_pressed(Sight::Rematch, pressed, &mut rng);
         let again = end_until_press(&mut acts, Sight::Rematch, &mut rng);
         acts.end_pressed(Sight::Rematch, again, &mut rng);
-        let (look, _) = step(&mut acts, 0, &mut rng).unwrap();
-        acts.end_looked(Sight::Standings, look, &mut rng);
-        assert_eq!(acts.due(), None);
+        let mut last = again;
+        while let Some((at, act)) = step(&mut acts, 0, &mut rng) {
+            assert_eq!(act, Act::EndLook, "nothing pressed");
+            last = at;
+            acts.end_looked(Sight::Standings, at, &mut rng);
+        }
+        assert!(last >= again + ASK_WAIT && last < again + ASK_WAIT + Duration::from_secs(4));
+    }
+
+    /// The question is answered only after "play again" was pressed here: a
+    /// question on screen before it is the player's.
+    #[test]
+    fn a_question_not_asked_here_is_not_answered() {
+        let mut rng = StdRng::seed_from_u64(25);
+        let t0 = Instant::now();
+        let mut acts = Acts::default();
+        acts.game_over(t0);
+        for _ in 0..20 {
+            let (at, act) = step(&mut acts, 0, &mut rng).unwrap();
+            assert_eq!(act, Act::EndLook);
+            acts.end_looked(Sight::RematchAsk, at, &mut rng);
+        }
     }
 
     /// A screen of the game's own that is gone by the look before the press
@@ -801,9 +855,14 @@ mod tests {
         acts.end_looked(Sight::Nothing, again, &mut rng);
         // Unknown, unreadable, or a hand's blue confirm: looked at, never pressed.
         let mut at = again;
-        for sight in [Sight::Button, Sight::Unread, Sight::Nothing]
-            .into_iter()
-            .cycle()
+        for sight in [
+            Sight::Button,
+            Sight::Unread,
+            Sight::RematchAsk,
+            Sight::Nothing,
+        ]
+        .into_iter()
+        .cycle()
         {
             let Some((next, act)) = step(&mut acts, 0, &mut rng) else {
                 break;

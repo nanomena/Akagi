@@ -409,6 +409,13 @@ pub const END_SEEN: Hazard = Hazard {
     mean: 1200.0,
     most: 8_000.0,
 };
+/// From the question "play again" asks showing to the press on its
+/// confirm: the player has just asked for it, and reads one line.
+pub const ASK_SEEN: Hazard = Hazard {
+    floor: 500.0,
+    mean: 500.0,
+    most: 3_000.0,
+};
 /// From a press on one of those screens to the look for the next: the next
 /// is drawn first.
 pub const END_PAUSE: Hazard = Hazard {

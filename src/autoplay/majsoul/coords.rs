@@ -71,6 +71,15 @@ pub const GAME_CONFIRM: (f64, f64) = (14.53, 8.25);
 pub const REMATCH: (f64, f64) = (12.17, 8.23);
 /// Its face, inside its rounded edge, as (left, top, right, bottom).
 pub const REMATCH_FACE: (f64, f64, f64, f64) = (11.30, 8.02, 13.05, 8.46);
+/// What "play again" asks next, in a box over a veiled table: match another
+/// game of the same room? A yellow confirm left of a blue cancel, under the
+/// question. Measured on a screenshot of the client's window (2026-10-17),
+/// with "play again" behind the veil as the rule: the confirm 5.18 to 7.73
+/// across, the cancel 8.16 to 10.73, both 6.28 to 6.89 down.
+pub const REMATCH_ASK_CONFIRM: (f64, f64) = (6.46, 6.59);
+/// The two buttons' faces, as (left, top, right, bottom).
+pub const REMATCH_ASK_CONFIRM_FACE: (f64, f64, f64, f64) = (5.45, 6.38, 7.45, 6.80);
+pub const REMATCH_ASK_CANCEL_FACE: (f64, f64, f64, f64) = (8.36, 6.38, 10.53, 6.80);
 
 /// The client's own toggles down the left of the table, top to bottom: auto
 /// sort, auto win, no calls, auto tsumogiri. Each is a glyph, green while on.

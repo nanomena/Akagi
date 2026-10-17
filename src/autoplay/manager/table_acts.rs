@@ -108,10 +108,15 @@ impl AutoplayManager {
     }
 
     /// One press on the game's own screen showing `sight`: its yellow
-    /// confirm, or "play again" beside it.
+    /// confirm, "play again" beside it, or the confirm of the question
+    /// "play again" asks.
     async fn press_end(&mut self, sight: Sight, hover_ms: u32, hold_ms: u32) {
         let (target, what) = match sight {
             Sight::Rematch => (coords::REMATCH, "play again"),
+            Sight::RematchAsk => (
+                coords::REMATCH_ASK_CONFIRM,
+                "the confirm of play again's question",
+            ),
             _ => (coords::GAME_CONFIRM, "the game's confirm"),
         };
         if let Some(rect) = self.canvas.resolve(&self.ctx).await {

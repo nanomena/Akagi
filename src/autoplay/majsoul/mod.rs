@@ -463,6 +463,13 @@ pub fn reach_of(at: (f64, f64)) -> crate::autoplay::pointer::aim::Reach {
             half_y: 0.18,
             from_top: false,
         }
+    } else if is(&[coords::REMATCH_ASK_CONFIRM]) {
+        // About 2.55 wide and 0.6 high.
+        Reach {
+            half_x: 0.7,
+            half_y: 0.18,
+            from_top: false,
+        }
     } else if is(&[
         coords::AUTO_SORT,
         coords::AUTO_WIN,
@@ -968,6 +975,10 @@ mod tests {
             coords::REMATCH.0 + again.half_x < 13.21
                 && coords::GAME_CONFIRM.0 - again.half_x > 13.49
         );
+        // The question's confirm: a press stays clear of the cancel beside it.
+        let ask = reach_of(coords::REMATCH_ASK_CONFIRM);
+        assert!(coords::REMATCH_ASK_CONFIRM.0 + ask.half_x < 8.16);
+        assert!(coords::REMATCH_ASK_CONFIRM.0 - ask.half_x > 5.18);
     }
     use crate::autoplay::context::CanvasRect;
     use crate::config::MajsoulAutoplayConfig;
