@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Check, Copy } from 'lucide-react'
-import { factsOf, linkOf, serverLine, type GameView, type Health, type MonitorConfig, type MonitorSnapshot } from '@/lib/monitor'
+import { AutoplayLevels } from '@/components/monitor/AutoplayLevel'
+import { factsOf, levelAbout, levelOf, linkOf, serverLine, type AutoplayLevel, type GameView, type Health, type MonitorConfig, type MonitorSnapshot } from '@/lib/monitor'
 import { LANGS, localized, setLang, tr, useLang, type Lang } from '@/lib/i18n'
 import { GROUPS, type Group } from '@/lib/settingsGroup'
 
@@ -11,7 +12,7 @@ type Props = {
   now: number
   /** `null` while the window's own options have not been read, or are being written. */
   onPin: ((pinned: boolean) => void) | null
-  onAutoplay: ((enabled: boolean) => void) | null
+  onLevel: ((level: AutoplayLevel) => void) | null
   onTrail: ((enabled: boolean) => void) | null
   onLean: ((enabled: boolean) => void) | null
   onStream: ((enabled: boolean) => void) | null
@@ -56,11 +57,12 @@ function CopyButton({ url, onCopy }: { url: string; onCopy: (() => Promise<void>
 const Line = ({ name, value, note }: { name: string; value: string; note?: string }) =>
   <div className="mfact" title={note}><dt>{name}</dt><dd>{value}</dd></div>
 
-/** What autoplay does: its own switch and the two table acts first, then the pointer's. */
-function AutoplayRows({ snapshot: s, options, onAutoplay, onConfirm, onAutoWin, onLean, onTrail }: Props) {
+/** What autoplay does: how far it goes and the two table acts first, then the pointer's. */
+function AutoplayRows({ snapshot: s, options, onLevel, onConfirm, onAutoWin, onLean, onTrail }: Props) {
   const sw = (name: string, on: boolean, onChange: ((on: boolean) => void) | null) => <Switch name={name} on={on} onChange={onChange} />
+  const level = levelOf(s, options)
   return <>
-    <Row name={tr('自动操作')} about={tr('关掉后只显示建议，不替你操作')} control={sw(tr('自动操作'), !!s?.autoplay_enabled, s ? onAutoplay : null)} />
+    <Row name={tr('自动操作')} about={levelAbout(level ?? 'off')} control={<AutoplayLevels level={level} onLevel={onLevel} />} />
     <Row name={tr('快速确认')} about={tr('和了或流局时，等确认按钮出现再点掉结算')} control={sw(tr('快速确认'), !!options.quick_confirm, onConfirm)} />
     <Row name={tr('立直自动和牌')} about={tr('立直后的某个时刻打开雀魂的自动和牌')} control={sw(tr('立直自动和牌'), !!options.riichi_auto_win, onAutoWin)} />
     <Row name={tr('预推理')} about={tr('别家行动时，光标停在下一手可能要打的牌上')} control={sw(tr('预推理'), !!options.pointer_lean, onLean)} />

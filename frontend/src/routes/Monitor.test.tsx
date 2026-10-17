@@ -5,7 +5,7 @@ import { setLang } from '@/lib/i18n'
 
 const fixture = vi.hoisted(() => ({
   snapshot: null as MonitorSnapshot | null,
-  options: { always_on_top: false } as { always_on_top: boolean; pointer_trail?: boolean; pointer_lean?: boolean; quick_confirm?: boolean; riichi_auto_win?: boolean; stream_output?: boolean; stream_url?: string },
+  options: { always_on_top: false } as { always_on_top: boolean; pointer_trail?: boolean; pointer_lean?: boolean; quick_confirm?: boolean; riichi_auto_win?: boolean; auto_continue?: boolean; stream_output?: boolean; stream_url?: string },
   calls: [] as Array<[string, unknown]>,
   /** What the core answers when an earlier hand's events are asked for. */
   handEvents: [] as MonitorEvent[],
@@ -22,13 +22,14 @@ vi.mock('@/lib/host', () => ({
     if (cmd === 'set_monitor_lean') fixture.options = { ...fixture.options, pointer_lean: (args as { enabled: boolean }).enabled }
     if (cmd === 'set_monitor_confirm') fixture.options = { ...fixture.options, quick_confirm: (args as { enabled: boolean }).enabled }
     if (cmd === 'set_monitor_auto_win') fixture.options = { ...fixture.options, riichi_auto_win: (args as { enabled: boolean }).enabled }
+    if (cmd === 'set_monitor_continue') fixture.options = { ...fixture.options, auto_continue: (args as { enabled: boolean }).enabled }
     if (cmd === 'set_monitor_stream') {
       const enabled = (args as { enabled: boolean }).enabled
       fixture.options = { ...fixture.options, stream_output: enabled, stream_url: enabled ? 'http://127.0.0.1:50123/0123456789abcdef01234567/' : undefined }
     }
     if (cmd === 'get_hand_events') return fixture.handEvents
     if (cmd === 'get_history') return fixture.history
-    return ['get_monitor_options', 'set_monitor_pinned', 'set_monitor_trail', 'set_monitor_lean', 'set_monitor_confirm', 'set_monitor_auto_win', 'set_monitor_stream'].includes(cmd) ? fixture.options : undefined
+    return ['get_monitor_options', 'set_monitor_pinned', 'set_monitor_trail', 'set_monitor_lean', 'set_monitor_confirm', 'set_monitor_auto_win', 'set_monitor_continue', 'set_monitor_stream'].includes(cmd) ? fixture.options : undefined
   }),
 }))
 // No canvas under jsdom, so mahgen cannot draw. A tile is then an <img> whose
@@ -162,16 +163,27 @@ describe('monitor user states', () => {
     expect(candidates()).toHaveLength(0)
   })
 
-  it('offers autoplay as a switch that says what is allowed, and flips it through the backend', async () => {
+  it('offers autoplay in three levels that say what each does, and sets them through the backend', async () => {
+    const { unmount } = render(<Monitor />)
+    const levels = screen.getByRole('radiogroup', { name: '自动操作' })
+    const level = (name: string) => within(levels).getByRole('radio', { name })
+    expect(level('打牌').getAttribute('aria-checked')).toBe('true')
+    expect(level('连战').getAttribute('title')).toMatch(/再来一场/)
+    await waitFor(() => expect((level('关') as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(level('关'))
+    await waitFor(() => expect(fixture.calls).toContainEqual(['set_monitor_autoplay', { enabled: false }]))
+    // Off leaves playing on as it was; the level shows what the backend reports, not what was just clicked.
+    expect(fixture.calls.some(([cmd]) => cmd === 'set_monitor_continue')).toBe(false)
+    expect(level('打牌').getAttribute('aria-checked')).toBe('true')
+    // Game after game: playing on first, then autoplay.
+    fireEvent.click(level('连战'))
+    await waitFor(() => expect(fixture.calls.slice(-2)).toEqual([['set_monitor_continue', { enabled: true }], ['set_monitor_autoplay', { enabled: true }]]))
+    await waitFor(() => expect(level('连战').getAttribute('aria-checked')).toBe('true'))
+    unmount()
+    // With autoplay off, the level is off whatever playing on says.
+    fixture.snapshot!.autoplay_enabled = false
     render(<Monitor />)
-    const auto = screen.getByRole('switch', { name: /自动操作/ })
-    expect(auto.getAttribute('aria-checked')).toBe('true')
-    expect(auto.getAttribute('title')).toMatch(/允许自动执行/)
-    await waitFor(() => expect((auto as HTMLButtonElement).disabled).toBe(false))
-    fireEvent.click(auto)
-    expect(fixture.calls).toContainEqual(['set_monitor_autoplay', { enabled: false }])
-    // The switch shows what the backend reports, not what was just clicked.
-    expect(auto.getAttribute('aria-checked')).toBe('true')
+    await waitFor(() => expect(within(screen.getByRole('radiogroup', { name: '自动操作' })).getByRole('radio', { name: '关' }).getAttribute('aria-checked')).toBe('true'))
   })
 
   it('opens the game in the window by itself, once, when nothing is being played', async () => {
@@ -435,11 +447,11 @@ describe('the settings', () => {
   it('has the switches of the window with their words', async () => {
     render(<Monitor />)
     fireEvent.click(screen.getByRole('tab', { name: '设置' }))
-    // Autoplay's switch waits for the first snapshot: it is the core's to say.
-    const autoplay = () => screen.getAllByRole('switch', { name: /自动操作/ }).at(-1) as HTMLButtonElement
-    await waitFor(() => expect(autoplay().disabled).toBe(false))
-    fireEvent.click(autoplay())
-    expect(fixture.calls).toContainEqual(['set_monitor_autoplay', { enabled: false }])
+    // Autoplay's level waits for the first snapshot: it is the core's to say. The bar has the same control.
+    const off = () => within(screen.getAllByRole('radiogroup', { name: '自动操作' }).at(-1)!).getByRole('radio', { name: '关' }) as HTMLButtonElement
+    await waitFor(() => expect(off().disabled).toBe(false))
+    fireEvent.click(off())
+    await waitFor(() => expect(fixture.calls).toContainEqual(['set_monitor_autoplay', { enabled: false }]))
 
     // The pointer's trail is the shell's to draw: the switch asks it, and shows what it saved.
     const trail = screen.getByRole('switch', { name: '光标轨迹' })
