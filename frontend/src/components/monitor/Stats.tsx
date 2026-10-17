@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { invoke } from '@/lib/host'
 import { ROOMS, ROOM_NAME, figuresOf, roomOf, totalsOf, yakuName, type GameRecord, type Room } from '@/lib/history'
+import { rungOf, type AccountLevels } from '@/lib/ladder'
 import { signed } from '@/lib/monitor'
 import { tr } from '@/lib/i18n'
 
@@ -19,14 +20,32 @@ function Spark({ points }: { points: number[] }) {
 }
 
 const share = (part: number, whole: number) => (whole > 0 ? `${(100 * part / whole).toFixed(1)}%` : '—')
+const points = (n: number) => new Intl.NumberFormat('en-US').format(n)
+
+/** Where we stand on the ladder of the table size we play, as the platform
+ *  last said it (at login, and after every game): the rank, its points, and a
+ *  bar to the next star. Three places of fixed width, so nothing moves as the
+ *  points change; the bar's place is kept where there is no next star. */
+function Ladder({ account, players }: { account: AccountLevels | null; players: number }) {
+  const level = (players === 3 ? account?.level3 : account?.level) ?? null
+  const rung = level ? rungOf(level) : null
+  const when = account ? new Date(account.at).toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' }) : ''
+  const ceiling = rung?.ceiling ?? null
+  return <span className="mstat-ladder" title={rung ? tr('雀魂在 {0} 报告的段位，每场结束后更新', when) : tr('登录雀魂后显示当前段位')}>
+    <strong>{rung?.name ?? '—'}</strong>
+    <span>{rung ? (ceiling != null ? `${points(rung.score)} / ${points(ceiling)}` : points(rung.score)) : ''}</span>
+    <i data-empty={ceiling == null || undefined} style={{ '--share': rung && ceiling ? Math.max(0, Math.min(1, rung.score / ceiling)) : 0 } as CSSProperties} />
+  </span>
+}
 
 /** Our record over the games on file, in three panels that keep their places
- *  whatever is in them: rank points and placement, the figures a riichi player
- *  looks for first, and the yaku our wins were made of. The last two scroll.
- *  It opens on the room we play in now, the latest game's; another range
- *  picked holds while the tab is open. `refresh` changes when the record may
- *  have: a game has started or ended. */
-export function Statistics({ refresh }: { refresh: string }) {
+ *  whatever is in them: where we stand now, rank points and placement; the
+ *  figures a riichi player looks for first; and the yaku our wins were made
+ *  of. The last two scroll. It opens on the room we play in now, the latest
+ *  game's; another range picked holds while the tab is open. `refresh`
+ *  changes when the record may have: a game has started or ended. Where we
+ *  stand is the platform's word (`account`), the same whatever range is picked. */
+export function Statistics({ refresh, account }: { refresh: string; account: AccountLevels | null }) {
   const [records, setRecords] = useState<GameRecord[] | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
   const [picked, setPicked] = useState<Room | 'all' | null>(null)
@@ -52,9 +71,9 @@ export function Statistics({ refresh }: { refresh: string }) {
   const waiting = failed ? tr('读不到对局记录：{0}', failed) : records == null ? tr('正在读取对局记录') : null
 
   return <div className="md-page mstats">
-    <section className="mstat mstat-rank">
+    <section className="mstat mstat-rank" aria-label={tr('段位分与顺位')}>
       <header className="msec-head">
-        <h3>{tr('段位分与顺位')}</h3>
+        <Ladder account={account} players={latest?.num_players ?? 4} />
         <select className="mselect" aria-label={tr('统计范围')} value={room} onChange={e => setPicked(e.target.value as Room | 'all')}>
           <option value="all">{tr('全部场次')}</option>
           {rooms.map(key => <option key={key} value={key}>{ROOM_NAME[key]}</option>)}
