@@ -380,6 +380,29 @@ describe('the record', () => {
     expect(scope().value).toBe('gold')
   })
 
+  it('names the rank the platform last said, with its points toward the next star', async () => {
+    fixture.snapshot!.account = { level: { id: 10303, score: 1274 }, level3: { id: 20101, score: 0 }, at: '2026-10-17T22:28:35Z' }
+    render(<Monitor />)
+    fireEvent.click(screen.getByRole('tab', { name: '统计' }))
+    expect(await screen.findByText('2 场的段位分变化')).toBeTruthy()
+    const ladder = screen.getByText('雀杰三').closest('.mstat-ladder') as HTMLElement
+    expect(ladder.textContent).toBe('雀杰三1,274 / 2,000')
+    expect(ladder.querySelector('i')!.style.getPropertyValue('--share')).toBe('0.637')
+    expect(ladder.getAttribute('title')).toMatch(/每场结束后更新/)
+    // The same whatever range is picked: it is where we stand, not what the range adds up to.
+    fireEvent.change(screen.getByRole('combobox', { name: '统计范围' }), { target: { value: 'all' } })
+    expect(screen.getByText('雀杰三')).toBeTruthy()
+  })
+
+  it('says nothing of a rank until the platform has', async () => {
+    render(<Monitor />)
+    fireEvent.click(screen.getByRole('tab', { name: '统计' }))
+    expect(await screen.findByText('2 场的段位分变化')).toBeTruthy()
+    const ladder = document.querySelector('.mstat-ladder') as HTMLElement
+    expect(ladder.textContent).toBe('—')
+    expect(ladder.querySelector('i')!.hasAttribute('data-empty')).toBe(true)
+  })
+
   it('keeps its three panels in place with nothing on record', async () => {
     fixture.history = []
     render(<Monitor />)
@@ -512,6 +535,7 @@ describe('another language', () => {
       { round: 1, bakaze: 'E', kyoku: 1, honba: 0, result: draw, events: 12 },
       { round: 2, bakaze: 'E', kyoku: 1, honba: 1, result: null, events: 2 },
     ]
+    fixture.snapshot.account = { level: { id: 10303, score: 1274 }, level3: null, at: '2026-10-17T22:28:35Z' }
     fixture.snapshot.events = [
       { seq: 90, ts_ms: 0, event: { type: 'reach', actor: 2 } },
       { seq: 91, ts_ms: 0, event: { type: 'dahai', actor: 2, pai: '5pr', tsumogiri: false } },

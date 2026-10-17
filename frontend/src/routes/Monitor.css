@@ -629,6 +629,14 @@
 .mstats > .mstat-yakus { grid-column: 7 / 9; padding: 10px 12px; }
 .mstat > .mslot-empty { align-self: center; }
 .mstat-rank { grid-template-rows: 22px 42px minmax(0, 1fr) 16px; }
+/* Where we stand: the rank, its points, a bar to the next star, each in a place of its own. */
+.msec-head > .mstat-ladder { flex: 1; }
+.mstat-ladder { display: grid; grid-template-columns: 64px 96px minmax(0, 1fr); align-items: center; column-gap: 10px; min-width: 0; height: 22px; white-space: nowrap; }
+.mstat-ladder > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mstat-ladder strong { font: 500 14px/22px var(--m-display); }
+.mstat-ladder span { font-size: 12px; color: var(--m-ink2); font-variant-numeric: tabular-nums; }
+.mstat-ladder i { height: 6px; border-radius: 3px; background: linear-gradient(to right, var(--m-live) calc(var(--share) * 100%), var(--m-well) 0); }
+.mstat-ladder i[data-empty] { visibility: hidden; }
 .mselect { flex: none; width: 118px; height: 22px; padding: 0 4px; border: 1px solid var(--m-line); border-radius: 6px; background: var(--m-panel); font: inherit; font-size: 12px; color: var(--m-ink2); }
 .mstat-points { display: grid; grid-template: 26px 16px / minmax(0, 1fr) 120px; column-gap: 10px; align-items: center; min-width: 0; }
 .mstat-points strong { font: 500 22px/1 var(--m-display); font-variant-numeric: tabular-nums; white-space: nowrap; }

@@ -2,6 +2,7 @@ import { relativeKind, type RelativeKind } from '@/lib/format'
 import { pickShow, visibleItems } from '@/lib/botShow'
 import type { BotResponse, BotStatus, CaptureStatus, GameStateSnapshot, MahgenView, MeldSnapshot, MjaiEvent, ShowItem } from '@/types'
 import { localized, tr } from '@/lib/i18n'
+import type { AccountLevels } from '@/lib/ladder'
 
 /** The window's own options, and which build it is (`version` comes from the shell).
  *  `stream_url` is the address the shell serves the game at, while it does. */
@@ -68,6 +69,8 @@ export type MonitorSnapshot = {
   capture: CaptureStatus; bot: BotStatus; service: string; service_error: string | null; server: ServerStatus
   sync_error: string | null
   brand: string; facts: Fact[]; autoplay_enabled: boolean
+  /** The player's own ranks as the platform last said them; absent until it has. */
+  account?: AccountLevels | null
   decision: MonitorDecision | null; previous_decision: MonitorDecision | null
   result: RoundResult | null; previous_result: RoundResult | null
   /** The hands of this game in the order dealt, the one in play last. */
